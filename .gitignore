@@ -1,0 +1,12 @@
+node_modules/
+*.log
+
+# 真实数据样本(体积大且含真实用户数据,永不入库)
+*.zip
+!fixtures/*.zip
+samples/
+
+# 运行产物
+out/
+tmp/
+.trellis/.runtime/
