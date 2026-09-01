@@ -2,45 +2,43 @@
 
 > 每阶段一个 git 提交,可独立回滚;验证命令必须通过才进下一阶段。
 
-## Phase A:骨架 + 流式 IO
+## Phase A:骨架 + 流式 IO ✅(2026-09-02,提交 34f44f5)
 
-- [ ] A1 `package.json`(type:module,engines node>=18,依赖 yauzl/yazl + 测试框架 vitest),gitignore(样本 zip、node_modules)
-- [ ] A2 `src/core/read.js` + `write.js`:yauzl 流式读迭代器 / yazl 流式写;单测:小包读写往返字节恒等
-- [ ] A3 `src/core/detect.js`:四布局判定(含 PT 原生归档的"不支持"分支);单测覆盖每个分支
-- [ ] A4 `fixtures/gen.js` 生成四个平台迷你包(prd R2 内容集),产物入库
-- 验证:`npm test`;对两个真实 zip 跑 detect 打印布局判定
+- [x] A1 `package.json`(type:module,engines node>=18,依赖 yauzl/yazl + 测试框架 vitest),gitignore(样本 zip、node_modules)
+- [x] A2 `src/core/read.js` + `write.js`:yauzl 流式读迭代器 / yazl 流式写;单测:小包读写往返字节恒等
+- [x] A3 `src/core/detect.js`:四布局判定(含 PT 原生归档的"不支持"分支);单测覆盖每个分支
+- [x] A4 `fixtures/gen.js` 生成四个平台迷你包(prd R2 内容集),产物入库
+- 验证:`npm test` ✓;对两个真实 zip detect:l 442ms / tt 50ms ✓
 
-## Phase B:映射与转换
+## Phase B:映射与转换 ✅(2026-09-02,提交 a38a226)
 
-- [ ] B1 `layout.js` 目录映射表 + `transform.js`:(from,to) 变换组装(前缀、manifest 合成、extension-sources 合成、丢弃规则、--keep-all)
-- [ ] B2 目标 L:manifest/摊平/后缀匹配镜像测试(镜像 users-private.js:305-335 规则)
-- [ ] B3 目标 TT:`data/default-user/` 前缀 + TT 私有目录处置
-- [ ] B4 目标 PT:TT 布局 + extension-sources 合成(homePage 兜底、https 校验、manifest 缺 display_name/js/css 的警告对齐)
-- [ ] B5 目标 ST:摊平 + `_convert/INSTALL.md`
-- [ ] B6 `report.js`:模块计数/丢弃清单/警告,human+json
-- 验证:`npm test` 全绿;迷你包全 12 方向(st/l/tt/pt 各源 × 各目标,PT 原生归档源除外)往返断言
+- [x] B1 `transform.js`:源路由 + 四目标适配(前缀、manifest 合成、extension-sources 合成、丢弃规则、--keep-all)
+- [x] B2-B5 各目标单测 + B6 `report.js`(模块计数/丢弃清单/警告,human+json)
+- 验证:26 测试全绿 ✓(fix:检测遍历与主循环分两次开 zip——yauzl 中央目录游标不可倒回)
 
-## Phase C:真实包集成 + CLI
+## Phase C:真实包集成 + CLI ✅(2026-09-02,提交 7e1df02)
 
-- [ ] C1 `cli.js` 参数与退出码;`--dry-run` 只产出报告不写文件
-- [ ] C2 真实包矩阵:两 zip 全方向 dry-run + 实转;AC1/AC2 计数核对;AC7 内存峰值测量(`--max-old-space-size` 观察 process.memoryUsage)
-- [ ] C3 AC6 secrets 断言:所有产物含 secrets.json 且字节一致
-- 验证:`node cli.js samples/... --to pt --dry-run` 报告人工过目;内存 < 512 MiB
+- [x] C1 `cli.js`:detect 子命令、--to/-o/--keep-all/--dry-run/--json、退出码
+- [x] C2 真实包 8 方向 dry-run + 实转全过;AC7 内存:初版 884MiB 超标,根因是 yazl addBuffer
+      异步 deflateRaw 请求积压,改 addReadStreamLazy 惰性流直通后 **74-250MiB** ✓
+- [x] C3 AC6:8 产物 secrets 字节与各自源包一致(verify-secrets.mjs),条目数与报告吻合 ✓
+- 附加:D1 PT/L 路由镜像测试(mirror.test.js,AC5 结构部分 + AC3)✓
 
-## Phase D:PT/TT 合规复核
+## Phase D:PT/TT 合规复核(部分完成)
 
-- [ ] D1 镜像 PT tauri-tavern 路由断言(import.ts:280-330)入 test(AC5 结构部分)
-- [ ] D2 产物在 PT Dev 实例手动导入一次(用户操作),确认角色/聊天/扩展可见 → AC5 完成项
+- [x] D1 镜像测试入 test/mirror.test.js
+- [ ] D2 产物在 PT 中手动导入(用户操作):`out/real-l-to-pt.zip` → 确认角色/聊天/扩展可见 → AC5 完成项
 - [ ] D3 (可选)cargo test -p tt-adapter-archive 对照布局判定
-- 验证:用户确认 PT 导入结果;其余自动测试绿
 
-## Phase E:插件
+## Phase E:插件(未开始,E1 调研已完成 → research/plugin-feasibility.md)
 
-- [ ] E1 核实 ST/L 备份端点的前端可达性与 secrets 补齐路径(design §7 风险)
-- [ ] E2 ST 扩展骨架(manifest+index+esbuild bundle core),Dev 实例加载冒烟
-- [ ] E3 导出方向接线(L→ST/TT/PT、ST→L/TT/PT),产物与 CLI diff 为空(AC9)
+- [ ] E0 核心编排循环改为注入 IO 适配器(Node yauzl/yazl 适配器 + 浏览器 zip.js 适配器,同契约)
+- [ ] E1 ✅ 已核实:L `POST /api/users/backup` 支持 selection 含 secrets(users-private.js:1061),
+      ST 端点无 selection 且默认排除 secrets(users.js:1148)→ L 插件先行,ST 后置
+- [ ] E2 L 插件骨架(ST 扩展结构,esbuild bundle core+zip.js),Dev 实例加载冒烟
+- [ ] E3 导出方向接线(L→ST/TT/PT),产物与 CLI diff 为空(AC9)
 - [ ] E4 README:安装、Termux 用法、ST 手动导入说明、secrets 安全提示
-- 验证:AC8(Termux 结构检查 + 桌面 Node>=18 冒烟)、AC9
+- 验证:AC8(Termux 结构检查 + Node>=18 冒烟)、AC9
 
 ## 收尾(Trellis Phase 3)
 
