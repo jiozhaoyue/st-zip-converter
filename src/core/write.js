@@ -70,4 +70,13 @@ export class ZipWriter {
     });
     return this.#outPath;
   }
+
+  /** 转换失败时调用:丢弃半成品文件,不留损坏 zip。 */
+  async abort() {
+    try {
+      this.#zip.end();
+    } catch { /* 尽力而为 */ }
+    this.#fileStream.destroy();
+    await fs.promises.rm(this.#outPath, { force: true }).catch(() => {});
+  }
 }

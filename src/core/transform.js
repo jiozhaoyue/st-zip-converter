@@ -1,0 +1,325 @@
+import { ZipReader } from './read.js';
+import { ZipWriter } from './write.js';
+import { Report } from './report.js';
+import { detectFromReader, LAYOUTS } from './detect.js';
+
+/**
+ * 转换管线:源布局规范化为 hub(ST 摊平)→ 逐条目按目标适配写出。
+ * 映射规则的证据与依据见任务 research/platform-facts.md 与 design.md §2/§4。
+ *
+ * 内存模型:逐条目读入 Buffer 再写出(峰值 ≈ 最大单文件),不整包驻留。
+ * 顺序:保持源条目顺序(同输入同输出),合成条目(目标 manifest、extension-sources)
+ * 统一追加在尾部、按名字排序。
+ */
+
+export const TARGETS = Object.freeze({
+  ST: 'st',
+  L: 'l',
+  TT: 'tt',
+  PT: 'pt',
+});
+
+const TT_USER_PREFIX = 'data/default-user/';
+const TT_THIRD_PARTY_PREFIX = 'data/extensions/third-party/';
+const TT_SOURCES_PREFIX = 'data/_tauritavern/extension-sources/';
+const TT_PRIVATE_PREFIXES = ['data/_cache/', 'data/_css/', 'data/_errors/'];
+const TT_PRIVATE_FILES = ['data/content.log', 'data/content.log.1'];
+const DERIVED_DIRS = ['thumbnails/', 'backups/', 'vectors/'];
+const ENGINE_DUMP_ENTRIES = ['_engine_dump.bin', '_engine_meta.json'];
+const THIRD_PARTY_PREFIX = 'extensions/third-party/';
+const DATA_PREFIX = 'data/';
+
+const FIXED_TIMESTAMP = '2020-01-01T00:00:00.000Z';
+
+const INSTALL_MD = `# 手动导入说明(ST 目标)
+
+SillyTavern 没有整包导入功能。把本压缩包解压后,将其中所有文件与目录
+(除 _convert/ 外)覆盖到 SillyTavern 的用户数据目录:
+
+- 默认单用户安装:  <SillyTavern>/data/default-user/
+- 多用户:           <SillyTavern>/data/<你的用户句柄>/
+
+覆盖前请先备份原目录。secrets.json 已包含在本包内(会覆盖现有密钥)。
+`;
+
+const L_SELECTION = Object.freeze({
+  settings: true,
+  secrets: true,
+  characters: true,
+  chats: true,
+  lorebooks: true,
+  presets: true,
+  assets: true,
+  extensions: true,
+  globalExtensions: true,
+  vectors: true,
+});
+
+/**
+ * 把 zip 源包转换为目标平台包。
+ * @param {string} sourcePath 源 zip 路径
+ * @param {string} targetPath 产物 zip 路径
+ * @param {object} options
+ * @param {string} options.target st|l|tt|pt
+ * @param {boolean} [options.keepAll] 保留派生缓存与 TT 私有目录
+ * @returns {Promise<Report>}
+ */
+export async function convert(sourcePath, targetPath, { target, keepAll = false } = {}) {
+  if (!target || !Object.values(TARGETS).includes(target)) {
+    throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
+  }
+
+  // 检测用一次遍历,yauzl 的中央目录游标不能倒回,主循环须重新打开。
+  const detector = await ZipReader.open(sourcePath);
+  let detection;
+  try {
+    detection = await detectFromReader(detector);
+  } finally {
+    await detector.close();
+  }
+  const report = new Report(detection.layout, target);
+  if (detection.layout === LAYOUTS.PT_NATIVE) {
+    throw new Error('PT 原生归档(sha256 清单)暂不支持,请先从 PT 导出 TT 迁移包');
+  }
+  if (detection.layout === LAYOUTS.UNKNOWN) {
+    throw new Error('无法识别源包布局(无 manifest.json / data/ 根 / 摊平用户目录标记)');
+  }
+
+  const reader = await ZipReader.open(sourcePath);
+  const writer = await ZipWriter.create(targetPath);
+  const context = {
+    manifest: null,
+    extensionSources: new Map(), // folderName -> {scope, fileName, record}
+    extensionManifests: new Map(), // folderName -> parsed manifest object
+    sawEngineDump: false,
+  };
+
+  try {
+    for await (const entry of reader.entries()) {
+      if (entry.isDirectory) {
+        entry.skip();
+        continue;
+      }
+      let routed = routeSource(entry.fileName, detection.layout);
+
+      if (routed.kind === 'manifest') {
+        context.manifest = parseJsonSafe(await entry.read());
+        if (target !== TARGETS.L) {
+          report.dropped(routed.hubPath, '源 manifest 为元数据,由转换器按目标重新合成');
+        }
+        continue;
+      }
+      if (routed.kind === 'extension-source') {
+        const record = parseJsonSafe(await entry.read());
+        context.extensionSources.set(routed.source.name, { ...routed.source, record });
+        entry.skip();
+        continue;
+      }
+      if (routed.kind === 'engine-dump') {
+        context.sawEngineDump = true;
+        if (target === TARGETS.L) {
+          await writer.add(entry.fileName, await entry.read());
+          report.copied(routed.hubPath, entry.uncompressedSize);
+        } else {
+          entry.skip();
+          report.dropped(routed.hubPath, 'L 引擎旁路数据,仅 L 目标有意义');
+          report.warn(
+            '源包含 _engine_dump.bin/_engine_meta.json(数据库引擎状态),已按设计丢弃;'
+            + '跨存储模式迁移请用 L 自带的 cross-mode restore 流程。',
+          );
+        }
+        continue;
+      }
+      if (routed.kind === 'tt-private') {
+        if (keepAll) {
+          const outPath = (target === TARGETS.TT || target === TARGETS.PT)
+            ? entry.fileName
+            : routed.hubPath;
+          await writer.add(outPath, await entry.read());
+          report.copied(routed.hubPath, entry.uncompressedSize);
+        } else {
+          entry.skip();
+          report.dropped(routed.hubPath, 'TT 私有/缓存,目标平台不消费(--keep-all 可保留)');
+        }
+        continue;
+      }
+      if (routed.kind === 'user' && DERIVED_DIRS.some((dir) => routed.hubPath.startsWith(dir))) {
+        routed = { kind: 'derived', hubPath: routed.hubPath };
+      }
+      if (routed.kind === 'derived') {
+        if (keepAll) {
+          await writer.add(targetEntryPath(routed.hubPath, target), await entry.read());
+          report.copied(routed.hubPath, entry.uncompressedSize);
+        } else {
+          entry.skip();
+          report.dropped(routed.hubPath, '派生缓存,平台按需重建(--keep-all 可保留)');
+        }
+        continue;
+      }
+      if (routed.kind === 'drop') {
+        entry.skip();
+        report.dropped(routed.hubPath, routed.reason);
+        continue;
+      }
+
+      const data = await entry.read();
+      if (routed.kind === 'extension-pkg') {
+        noteExtensionPackage(context, routed.hubPath, data);
+      }
+      const outPath = targetEntryPath(routed.hubPath, target);
+      await writer.add(outPath, data);
+      report.copied(routed.hubPath, data.length);
+    }
+
+    await emitSynthesized(writer, report, context, target);
+    await writer.close();
+    return report;
+  } catch (error) {
+    await writer.abort();
+    throw error;
+  } finally {
+    await reader.close();
+  }
+}
+
+/** 源条目路由:决定 hub 路径与处理类别。hub 路径 = ST 摊平用户目录视角。 */
+function routeSource(sourcePath, layout) {
+  if (layout === LAYOUTS.TT) {
+    if (sourcePath.startsWith(TT_USER_PREFIX)) {
+      return { kind: 'user', hubPath: sourcePath.slice(TT_USER_PREFIX.length) };
+    }
+    if (sourcePath.startsWith(TT_THIRD_PARTY_PREFIX)) {
+      const rest = sourcePath.slice(TT_THIRD_PARTY_PREFIX.length);
+      return { kind: 'extension-pkg', hubPath: `${THIRD_PARTY_PREFIX}${rest}` };
+    }
+    if (sourcePath.startsWith(TT_SOURCES_PREFIX)) {
+      const rest = sourcePath.slice(TT_SOURCES_PREFIX.length);
+      const separator = rest.indexOf('/');
+      const scope = separator > 0 ? rest.slice(0, separator) : 'global';
+      const fileName = separator > 0 ? rest.slice(separator + 1) : rest;
+      if (fileName.endsWith('.json')) {
+        return {
+          kind: 'extension-source',
+          hubPath: `_tauritavern/extension-sources/${scope}/${fileName}`,
+          source: { scope, name: fileName.slice(0, -'.json'.length), fileName },
+        };
+      }
+      return { kind: 'drop', hubPath: `_tauritavern/extension-sources/${rest}`, reason: 'TT 来源记录:非 JSON 条目' };
+    }
+    if (TT_PRIVATE_PREFIXES.some((prefix) => sourcePath.startsWith(prefix))
+      || TT_PRIVATE_FILES.includes(sourcePath)) {
+      return { kind: 'tt-private', hubPath: sourcePath.slice(DATA_PREFIX.length) };
+    }
+    return { kind: 'drop', hubPath: sourcePath.slice(DATA_PREFIX.length), reason: 'TT data 根下未归类内容' };
+  }
+
+  // st / l:摊平布局
+  if (sourcePath === 'manifest.json') {
+    return { kind: 'manifest', hubPath: 'manifest.json' };
+  }
+  if (ENGINE_DUMP_ENTRIES.includes(sourcePath)) {
+    return { kind: 'engine-dump', hubPath: sourcePath };
+  }
+  if (sourcePath.startsWith(THIRD_PARTY_PREFIX)) {
+    return { kind: 'extension-pkg', hubPath: sourcePath };
+  }
+  return { kind: 'user', hubPath: sourcePath };
+}
+
+/** hub 路径 → 目标平台上的最终条目路径。 */
+function targetEntryPath(hubPath, target) {
+  if (target === TARGETS.TT || target === TARGETS.PT) {
+    if (hubPath.startsWith(THIRD_PARTY_PREFIX)) {
+      return `data/extensions/third-party/${hubPath.slice(THIRD_PARTY_PREFIX.length)}`;
+    }
+    return `data/default-user/${hubPath}`;
+  }
+  return hubPath;
+}
+
+function noteExtensionPackage(context, hubPath, data) {
+  const rest = hubPath.slice(THIRD_PARTY_PREFIX.length);
+  const separator = rest.indexOf('/');
+  if (separator <= 0) return;
+  const folderName = rest.slice(0, separator);
+  const relative = rest.slice(separator + 1);
+  if (relative === 'manifest.json' && !context.extensionManifests.has(folderName)) {
+    const parsed = parseJsonSafe(data);
+    if (parsed) context.extensionManifests.set(folderName, parsed);
+  }
+}
+
+/**
+ * 尾部合成条目:目标 manifest(L)、extension-sources(pt/tt)、ST 安装说明。
+ */
+async function emitSynthesized(writer, report, context, target) {
+  if (target === TARGETS.L) {
+    const manifest = {
+      schemaVersion: 1,
+      createdAt: FIXED_TIMESTAMP,
+      handle: context.manifest?.handle ?? 'default-user',
+      selection: { ...L_SELECTION },
+    };
+    await writer.add('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
+    report.synthesized('manifest.json');
+  }
+
+  if (target === TARGETS.PT || target === TARGETS.TT) {
+    for (const [path, value] of buildExtensionSources(context, report)) {
+      await writer.add(path, Buffer.from(JSON.stringify(value, null, 2), 'utf8'));
+      report.synthesized(path);
+    }
+  }
+
+  if (target === TARGETS.ST) {
+    await writer.add('_convert/INSTALL.md', Buffer.from(INSTALL_MD, 'utf8'));
+    report.synthesized('_convert/INSTALL.md');
+    await writer.add('_convert/meta.json', Buffer.from(JSON.stringify({
+      converter: 'tavern-convert',
+      generatedAt: FIXED_TIMESTAMP,
+      note: '本目录不会被任何平台消费,仅供人工核对。',
+    }, null, 2), 'utf8'));
+    report.synthesized('_convert/meta.json');
+  }
+}
+
+/**
+ * PT/TT 目标的 extension-sources 产出:
+ * - 源里已有记录 → 原样保留(保 reference/installed_commit,更新链不断)
+ * - 没有记录 → 从扩展 manifest 的 homePage 合成(reference/installed_commit 置空,
+ *   PT 的 readExtensionSource 允许;非 https 的 homePage 视为无来源并警告,与 PT 对齐)
+ */
+function buildExtensionSources(context, report) {
+  const output = new Map();
+
+  for (const { scope, fileName, record } of context.extensionSources.values()) {
+    if (record) output.set(`data/_tauritavern/extension-sources/${scope}/${fileName}`, record);
+  }
+
+  for (const [folderName, manifest] of context.extensionManifests) {
+    if (context.extensionSources.has(folderName)) continue;
+    const homePage = typeof manifest.homePage === 'string' ? manifest.homePage.trim() : '';
+    if (/^https:\/\//iu.test(homePage)) {
+      output.set(`data/_tauritavern/extension-sources/global/${folderName}.json`, {
+        remote_url: homePage,
+        reference: '',
+        installed_commit: '',
+      });
+    } else {
+      report.warn(
+        `扩展 "${folderName}" 无来源记录且 manifest.homePage 非 https(${homePage || '空'}),`
+        + '按 PT 规则它将在导入时被跳过,请在 PT 扩展面板重装。',
+      );
+    }
+  }
+
+  return new Map([...output.entries()].sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function parseJsonSafe(buffer) {
+  try {
+    return JSON.parse(buffer.toString('utf8'));
+  } catch {
+    return null;
+  }
+}
