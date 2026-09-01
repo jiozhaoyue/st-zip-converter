@@ -1,5 +1,5 @@
 import { ZipReader } from './read.js';
-import { ZipWriter } from './write.js';
+import { ZipWriter, NullZipWriter } from './write.js';
 import { Report } from './report.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
 
@@ -62,9 +62,10 @@ const L_SELECTION = Object.freeze({
  * @param {object} options
  * @param {string} options.target st|l|tt|pt
  * @param {boolean} [options.keepAll] 保留派生缓存与 TT 私有目录
+ * @param {boolean} [options.dryRun] 只产出报告不写文件(数据条目跳过读取)
  * @returns {Promise<Report>}
  */
-export async function convert(sourcePath, targetPath, { target, keepAll = false } = {}) {
+export async function convert(sourcePath, targetPath, { target, keepAll = false, dryRun = false } = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
     throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
   }
@@ -86,12 +87,18 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false 
   }
 
   const reader = await ZipReader.open(sourcePath);
-  const writer = await ZipWriter.create(targetPath);
+  const writer = dryRun ? new NullZipWriter() : await ZipWriter.create(targetPath);
   const context = {
     manifest: null,
     extensionSources: new Map(), // folderName -> {scope, fileName, record}
     extensionManifests: new Map(), // folderName -> parsed manifest object
     sawEngineDump: false,
+  };
+
+  // 数据条目一律惰性流直通(addLazy:泵到该条目才打开源流,配合 yazl 顺序泵
+  // 满足 yauzl 单读流约束);dry-run 不打开任何数据流,报告按声明大小计数。
+  const lazyOpen = (entryApi) => (cb) => {
+    entryApi.openStream().then((stream) => cb(null, stream), (err) => cb(err));
   };
 
   try {
@@ -102,6 +109,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false 
       }
       let routed = routeSource(entry.fileName, detection.layout);
 
+      // 元数据条目:体积小、内容被解析使用,走缓冲
       if (routed.kind === 'manifest') {
         context.manifest = parseJsonSafe(await entry.read());
         if (target !== TARGETS.L) {
@@ -112,13 +120,13 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false 
       if (routed.kind === 'extension-source') {
         const record = parseJsonSafe(await entry.read());
         context.extensionSources.set(routed.source.name, { ...routed.source, record });
-        entry.skip();
         continue;
       }
+
       if (routed.kind === 'engine-dump') {
         context.sawEngineDump = true;
         if (target === TARGETS.L) {
-          await writer.add(entry.fileName, await entry.read());
+          if (!dryRun) writer.addLazy(entry.fileName, lazyOpen(entry));
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
@@ -135,7 +143,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false 
           const outPath = (target === TARGETS.TT || target === TARGETS.PT)
             ? entry.fileName
             : routed.hubPath;
-          await writer.add(outPath, await entry.read());
+          if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
@@ -148,7 +156,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false 
       }
       if (routed.kind === 'derived') {
         if (keepAll) {
-          await writer.add(targetEntryPath(routed.hubPath, target), await entry.read());
+          if (!dryRun) writer.addLazy(targetEntryPath(routed.hubPath, target), lazyOpen(entry));
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
@@ -162,13 +170,20 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false 
         continue;
       }
 
-      const data = await entry.read();
-      if (routed.kind === 'extension-pkg') {
-        noteExtensionPackage(context, routed.hubPath, data);
-      }
+      // user / extension-pkg:流式直通,只有扩展 manifest 需要读内容(小文件)
       const outPath = targetEntryPath(routed.hubPath, target);
-      await writer.add(outPath, data);
-      report.copied(routed.hubPath, data.length);
+      if (routed.kind === 'extension-pkg') {
+        const relative = extensionRelativePath(routed.hubPath);
+        if (relative === 'manifest.json') {
+          const data = await entry.read();
+          noteExtensionPackage(context, routed.hubPath, data);
+          writer.add(outPath, data);
+          report.copied(routed.hubPath, entry.uncompressedSize);
+          continue;
+        }
+      }
+      if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+      report.copied(routed.hubPath, entry.uncompressedSize);
     }
 
     await emitSynthesized(writer, report, context, target);
@@ -237,6 +252,11 @@ function targetEntryPath(hubPath, target) {
   return hubPath;
 }
 
+function extensionRelativePath(hubPath) {
+  const rest = hubPath.slice(THIRD_PARTY_PREFIX.length);
+  return rest.slice(rest.indexOf('/') + 1);
+}
+
 function noteExtensionPackage(context, hubPath, data) {
   const rest = hubPath.slice(THIRD_PARTY_PREFIX.length);
   const separator = rest.indexOf('/');
@@ -266,7 +286,7 @@ async function emitSynthesized(writer, report, context, target) {
 
   if (target === TARGETS.PT || target === TARGETS.TT) {
     for (const [path, value] of buildExtensionSources(context, report)) {
-      await writer.add(path, Buffer.from(JSON.stringify(value, null, 2), 'utf8'));
+        await writer.add(path, Buffer.from(JSON.stringify(value, null, 2), 'utf8'));
       report.synthesized(path);
     }
   }

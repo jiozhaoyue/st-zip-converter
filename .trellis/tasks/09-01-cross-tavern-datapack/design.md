@@ -61,10 +61,10 @@ core/
 
 ## 5. 流式与大包(AC7)
 
-- 读:yauzl `lazyEntries` 逐条目 `openReadStream`;写:yazl 逐条目 `addReadStream`。任何时刻内存中只有当前条目。
-- 转换本身多数是"路径改写 + 原样复制";仅 manifest/extension-sources/secrets 等小 JSON 在内存中生成。
-- 964 MiB 样本的峰值内存 ≈ 最大单文件(聊天 json 通常 < 50 MiB)+ yauzl 读缓冲,512 MiB 上限余量充足。
-- 顺序稳定:输出条目按最终路径字典序写入,同输入同产物 hash(报告里的 archive hash 可复现)。
+- 读:yauzl `lazyEntries` 逐条目;写:yazl `addReadStreamLazy` **惰性流直通**——泵到该条目时才打开源流,yazl 严格顺序泵保证同一时刻只有一条 yauzl 读流,内存与条目大小无关(实测 964 MiB 包峰值 ~233 MiB)。
+- 实现教训(2026-09-02):初版"逐条目 read 成 Buffer 再 addBuffer"在真实 2 GiB 解压量下峰值 884 MiB——根因不是磁盘背压,而是 yazl addBuffer 的异步 `deflateRaw` 请求在 zlib 线程池上无限积压,每条待压缩 buffer 都滞留。惰性流直通后 yazl 自己的管道背压生效,问题消失。
+- 只有元数据小文件(manifest/来源记录/扩展 manifest)读入 Buffer;合成条目为小 JSON。
+- 顺序稳定:输出条目保持**源条目顺序**(实现修订:设计初稿的"按目标路径字典序"要求全包驻留内存排序,与 AC7 冲突,已放弃;同输入同输出由源顺序保证),合成条目按名排序追加尾部。压缩字节随 zlib 版本浮动,不做跨机器字节级承诺。
 
 ## 6. 测试策略
 
