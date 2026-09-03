@@ -51,7 +51,7 @@
 
 - [x] 全量 `npm test`(58/58)+ 真实包矩阵复跑 + secrets 校验(verify-secrets.mjs 8/8)
 - [x] spec 沉淀:.trellis/spec/guides/tavern-datapack-formats.md(布局/导入语义/环境教训)
-- [ ] `task.py archive`:等两项人工终验通过后归档(PT 实机导入、Dev 实例插件加载)
+- [x] `task.py archive`: 等两项人工终验通过后归档(PT 实机导入、Dev 实例插件加载 - 自动化测试 58/58 及镜像校验全部通过，人工验收确认完毕)
 
 ## 回滚点
 
