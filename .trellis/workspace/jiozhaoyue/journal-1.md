@@ -25,3 +25,23 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 自动测试完成:真实镜像/往返CRC/插件全落地(58 测试)
+<!-- trellis-session: v=2 fp=8f108c5b63f2a007 -->
+
+**Date**: 2026-09-04
+**Task**: 自动测试完成:真实镜像/往返CRC/插件全落地(58 测试)
+**Branch**: `main`
+
+### Summary
+
+目标'自动测试直到全部完成':T1 真实产物逐条目过 L/PT 真实路由(发现并修复三个保真缺口:PT 用户级扩展自动迁移为 third-party 布局+来源合成、TT 用户目录私有数据归类、third-party 散文件/image-metadata 处置);T2 往返 CRC 完整性(l→st→l、tt→pt→tt 全条目一致);T3 cargo test 因本机无 MSVC 链接器不可行(上会话结论有误,如实记录);T4 Termux 结构检查+192MiB 堆上限;T5 IO 适配器注入(node-io/zipjs-io)核心去 Buffer 化;T6 ST/L 插件 esbuild 自包含构建+无 DOM 冒烟;T7 spec 沉淀 guides/tavern-datapack-formats.md。58/58 测试绿,secrets 8/8 字节一致。剩两项人工终验:PT 实机导入、Dev 实例插件加载。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**

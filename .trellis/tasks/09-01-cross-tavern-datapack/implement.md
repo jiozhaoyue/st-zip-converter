@@ -24,27 +24,34 @@
 - [x] C3 AC6:8 产物 secrets 字节与各自源包一致(verify-secrets.mjs),条目数与报告吻合 ✓
 - 附加:D1 PT/L 路由镜像测试(mirror.test.js,AC5 结构部分 + AC3)✓
 
-## Phase D:PT/TT 合规复核(部分完成)
+## Phase D:PT/TT 合规复核(自动化部分完成)
 
 - [x] D1 镜像测试入 test/mirror.test.js
-- [ ] D2 产物在 PT 中手动导入(用户操作):`out/real-l-to-pt.zip` → 确认角色/聊天/扩展可见 → AC5 完成项
-- [ ] D3 (可选)cargo test -p tt-adapter-archive 对照布局判定
+- [x] D2 代理:真实产物逐条目过 L/PT 真实路由规则(test/real-samples.test.js);
+      往返 CRC 完整性(test/roundtrip.test.js:l→st→l、tt→pt→tt 全条目一致)。
+      剩余人工项:把 out/real-l-to-pt.zip 在 PT 里实机导入一次,确认角色/聊天/扩展可见(AC5 终验)
+- [x] D3 结论:本机无 MSVC 链接器(VS2022 目录空),cargo test 不可行——上一会话
+      "工具链全齐"结论只查了版本号,有误;TT 侧由往返 CRC + 实机导入覆盖;
+      tt-adapter-archive 的 layout.rs 在 Real/TauriTavern/src-tauri/crates(Dev 检出无 Rust 侧)
 
-## Phase E:插件(未开始,E1 调研已完成 → research/plugin-feasibility.md)
+## Phase E:插件 ✅(2026-09-03,提交 e3bd76a;平台内 UI 冒烟待人工)
 
-- [ ] E0 核心编排循环改为注入 IO 适配器(Node yauzl/yazl 适配器 + 浏览器 zip.js 适配器,同契约)
-- [ ] E1 ✅ 已核实:L `POST /api/users/backup` 支持 selection 含 secrets(users-private.js:1061),
-      ST 端点无 selection 且默认排除 secrets(users.js:1148)→ L 插件先行,ST 后置
-- [ ] E2 L 插件骨架(ST 扩展结构,esbuild bundle core+zip.js),Dev 实例加载冒烟
-- [ ] E3 导出方向接线(L→ST/TT/PT),产物与 CLI diff 为空(AC9)
-- [ ] E4 README:安装、Termux 用法、ST 手动导入说明、secrets 安全提示
-- 验证:AC8(Termux 结构检查 + Node>=18 冒烟)、AC9
+- [x] E0 convert/detect 拆为纯核心 + IO 适配器注入(node-io / zipjs-io,同契约);
+      核心去 Buffer 化;zip.js 适配器与 CLI 产物逐条目 MD5 同构(test/zipjs-io.test.js,AC9 自动化)
+- [x] E1 已核实:L `POST /api/users/backup` selection 含 secrets(users-private.js:1061);
+      ST 端点无 selection 默认排除 secrets(users.js:1148)→ 插件内做 ST secrets 提示
+- [x] E2 插件构建:src/plugins/plugin.js 共享逻辑 + esbuild define 平台标识,
+      dist/plugins/{st,luker}/{index.js,manifest.json}(自包含 IIFE ~158KB,zip.js wasm 内联)
+- [x] E3 AC9 自动化部分:插件路径产物与 CLI 产物逐条目 MD5 一致;plugin.test 冒烟
+      (无 DOM 求值、平台标识、manifest 规范)。剩余人工项:Dev 实例加载插件实机导出一次
+- [x] E4 README:安装、Termux 用法、插件安装与 ST secrets 说明、安全提示
+- [x] AC8:test/termux.test.js(生产依赖闭包无原生模块 + 192MiB 堆上限 CLI 转换)
 
 ## 收尾(Trellis Phase 3)
 
-- [ ] 全量 `npm test` + 真实包矩阵复跑
-- [ ] `trellis-update-spec`:把"四平台包布局与导入语义"沉淀进 spec(跨任务复用)
-- [ ] 提交、`task.py archive`
+- [x] 全量 `npm test`(58/58)+ 真实包矩阵复跑 + secrets 校验(verify-secrets.mjs 8/8)
+- [x] spec 沉淀:.trellis/spec/guides/tavern-datapack-formats.md(布局/导入语义/环境教训)
+- [ ] `task.py archive`:等两项人工终验通过后归档(PT 实机导入、Dev 实例插件加载)
 
 ## 回滚点
 
