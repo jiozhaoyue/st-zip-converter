@@ -68,8 +68,22 @@ node cli.js xxx.zip --to st --keep-all
 - 峰值内存 74-250 MiB(手机可用量级)
 - `npm test`:32 个单测(含 PT/L 导入路由镜像断言)
 
-## 路线
+## 平台内插件(ST / L)
 
-- [x] CLI 全矩阵(`--to st|l|tt|pt`)
-- [ ] L 平台内插件(导出为其余平台格式;调研见任务 research/plugin-feasibility.md)
-- [ ] ST 插件(受平台端点限制,secrets 需 CLI 补齐)
+与 CLI 同一份转换核心(产物同构性有自动测试保证),打包为自包含 IIFE:
+
+```bash
+npm run build:plugins     # 产物: dist/plugins/{st,luker}/{index.js, manifest.json}
+```
+
+安装:把 `dist/plugins/luker/`(或 `dist/plugins/st/`)整个目录放进平台的
+`data/<handle>/extensions/third-party/` 下(或在扩展面板"从目录安装"),重启平台。
+
+功能:扩展菜单出现"跨平台导出",一键把当前账号数据导出为 ST / Luker / TauriTavern /
+PureTavern 四种格式并下载。
+
+- Luker 端备份 selection 全选,secrets 一并携带。
+- SillyTavern 端备份端点不含 secrets(API 密钥),插件会提示用 CLI 处理完整包。
+- 端点路径:`/api/users/backup`(L selection 语义见 `research/plugin-feasibility.md`)。
+
+## 已验证(2026-09-02/03,真实数据包)

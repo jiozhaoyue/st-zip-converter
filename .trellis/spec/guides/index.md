@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Tavern Datapack Formats](./tavern-datapack-formats.md) | 四平台包布局/导入语义/互转约定与环境教训 | 任何涉及 ST/L/TT/PT 数据搬移的任务 |
 
 ---
 
