@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { ZipReader } from '../src/core/read.js';
 import { ZipWriter } from '../src/core/write.js';
+import { nodeIo } from '../src/io/node-io.js';
 import { convert, TARGETS } from '../src/core/transform.js';
 import { stEntries, lEntries, ttEntries } from '../fixtures/gen.js';
 
@@ -46,7 +47,7 @@ async function convertFixture(entries, target) {
   const source = await zipFrom(entries);
   const dir = await tmpDir();
   const outPath = path.join(dir, `out-${target}.zip`);
-  await convert(source, outPath, { target });
+  await convert(source, outPath, { target, io: nodeIo });
   return readZipMap(outPath);
 }
 

@@ -1,5 +1,3 @@
-import { ZipReader } from './read.js';
-
 export const LAYOUTS = Object.freeze({
   ST: 'st',            // zip 根摊平 ST 用户目录,无 manifest
   L: 'l',              // 同 ST 摊平 + manifest.json{schemaVersion,handle,selection}
@@ -15,15 +13,6 @@ export const LAYOUTS = Object.freeze({
  * 3) 根 characters/ 或 settings.json → st
  * 4) 其余 unknown
  */
-export async function detectLayout(filePath) {
-  const reader = await ZipReader.open(filePath);
-  try {
-    return await detectFromReader(reader);
-  } finally {
-    await reader.close();
-  }
-}
-
 export async function detectFromReader(reader) {
   let hasDataRoot = false;
   let hasCharactersRoot = false;
@@ -69,9 +58,11 @@ export async function detectFromReader(reader) {
   return { layout: LAYOUTS.UNKNOWN, evidence: 'no recognizable layout marker' };
 }
 
-function parseJson(buffer) {
+const JSON_DECODER = new TextDecoder();
+
+function parseJson(data) {
   try {
-    return JSON.parse(buffer.toString('utf8'));
+    return JSON.parse(JSON_DECODER.decode(data));
   } catch {
     return null;
   }

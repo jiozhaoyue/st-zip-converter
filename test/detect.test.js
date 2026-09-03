@@ -3,7 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { ZipWriter } from '../src/core/write.js';
-import { detectLayout, LAYOUTS } from '../src/core/detect.js';
+import { detectLayout, LAYOUTS } from '../src/io/node-io.js';
 import { generateAll, stEntries, lEntries, ttEntries } from '../fixtures/gen.js';
 
 const tmpDirs = [];

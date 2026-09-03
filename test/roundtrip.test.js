@@ -6,6 +6,7 @@ import { mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { ZipReader } from '../src/core/read.js';
+import { nodeIo } from '../src/io/node-io.js';
 import { convert, TARGETS } from '../src/core/transform.js';
 
 const L_SOURCE = 'default-user-2026-08-25-172056.zip';
@@ -35,8 +36,8 @@ describe.skipIf(!existsSync(L_SOURCE))('真实往返 l→st→l', () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rt-l-'));
     const hub = path.join(dir, 'hub-st.zip');
     const back = path.join(dir, 'back-l.zip');
-    await convert(L_SOURCE, hub, { target: TARGETS.ST });
-    await convert(hub, back, { target: TARGETS.L });
+    await convert(L_SOURCE, hub, { target: TARGETS.ST, io: nodeIo });
+    await convert(hub, back, { target: TARGETS.L, io: nodeIo });
 
     const [source, result] = await Promise.all([crcMap(L_SOURCE), crcMap(back)]);
     const problems = [];
@@ -66,8 +67,8 @@ describe.skipIf(!existsSync(TT_SOURCE))('真实往返 tt→pt→tt', () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rt-tt-'));
     const pt = path.join(dir, 'mid-pt.zip');
     const back = path.join(dir, 'back-tt.zip');
-    await convert(TT_SOURCE, pt, { target: TARGETS.PT });
-    await convert(pt, back, { target: TARGETS.TT });
+    await convert(TT_SOURCE, pt, { target: TARGETS.PT, io: nodeIo });
+    await convert(pt, back, { target: TARGETS.TT, io: nodeIo });
 
     const [source, result] = await Promise.all([crcMap(TT_SOURCE), crcMap(back)]);
     const problems = [];

@@ -78,8 +78,8 @@ export class ZipWriter {
    */
   add(name, source, { compress = true } = {}) {
     const options = { mtime: FIXED_MTIME, compress };
-    if (Buffer.isBuffer(source)) {
-      this.#zip.addBuffer(source, name, options);
+    if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
+      this.#zip.addBuffer(Buffer.isBuffer(source) ? source : Buffer.from(source), name, options);
       return;
     }
     if (typeof source !== 'function') {

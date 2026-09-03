@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { ZipReader } from '../src/core/read.js';
 import { ZipWriter } from '../src/core/write.js';
+import { nodeIo } from '../src/io/node-io.js';
 import { convert, TARGETS } from '../src/core/transform.js';
 import { stEntries, lEntries, ttEntries } from '../fixtures/gen.js';
 
@@ -40,7 +41,7 @@ async function runConvert(entries, target, options = {}) {
   const dir = await tmpDir();
   const source = await zipFrom(entries);
   const outPath = path.join(dir, `out-${target}.zip`);
-  const report = await convert(source, outPath, { target, ...options });
+  const report = await convert(source, outPath, { target, ...options, io: nodeIo });
   return { report, outPath, files: await readZipMap(outPath) };
 }
 
@@ -295,7 +296,7 @@ describe('keep-all', () => {
 describe('错误处理', () => {
   it('无效目标:抛错', async () => {
     const source = await zipFrom(stEntries());
-    await expect(convert(source, path.join(await tmpDir(), 'x.zip'), { target: 'nope' }))
+    await expect(convert(source, path.join(await tmpDir(), 'x.zip'), { target: 'nope', io: nodeIo }))
       .rejects.toThrow(/target/);
   });
 });

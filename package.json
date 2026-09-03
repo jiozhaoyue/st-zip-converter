@@ -11,14 +11,17 @@
     "tavern-convert": "cli.js"
   },
   "dependencies": {
+    "@zip.js/zip.js": "^2.9.0",
     "yauzl": "^3.2.0",
     "yazl": "^3.3.1"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "vitest": "^3.2.4"
   },
   "scripts": {
     "test": "vitest run",
-    "gen-fixtures": "node fixtures/gen.js"
+    "gen-fixtures": "node fixtures/gen.js",
+    "build:plugins": "node src/plugins/build.mjs"
   }
 }

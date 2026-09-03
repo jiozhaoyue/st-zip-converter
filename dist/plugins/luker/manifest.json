@@ -1,0 +1,11 @@
+{
+  "display_name": "Luker 跨平台导出",
+  "loading_order": 99,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "",
+  "author": "jiozhaoyue",
+  "version": "0.1.0",
+  "homePage": "https://github.com/jiozhaoyue/luker-tt-datatran"
+}

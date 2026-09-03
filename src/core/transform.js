@@ -1,5 +1,4 @@
-import { ZipReader } from './read.js';
-import { ZipWriter, NullZipWriter } from './write.js';
+import { NullZipWriter } from './null-writer.js';
 import { Report } from './report.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
 
@@ -10,6 +9,9 @@ import { detectFromReader, LAYOUTS } from './detect.js';
  * 内存模型:逐条目读入 Buffer 再写出(峰值 ≈ 最大单文件),不整包驻留。
  * 顺序:保持源条目顺序(同输入同输出),合成条目(目标 manifest、extension-sources)
  * 统一追加在尾部、按名字排序。
+ *
+ * IO 注入:zip 的读写经 options.io 适配器(Node 用 src/io/node-io.js,浏览器插件用
+ * src/io/zipjs-io.js),本模块不感知文件系统与运行时;两个适配器产物必须同构(AC9)。
  */
 
 export const TARGETS = Object.freeze({
@@ -69,13 +71,16 @@ const L_SELECTION = Object.freeze({
  * @param {boolean} [options.dryRun] 只产出报告不写文件(数据条目跳过读取)
  * @returns {Promise<Report>}
  */
-export async function convert(sourcePath, targetPath, { target, keepAll = false, dryRun = false } = {}) {
+export async function convert(sourcePath, targetPath, { target, keepAll = false, dryRun = false, io } = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
     throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
   }
+  if (!io || typeof io.openReader !== 'function' || typeof io.createWriter !== 'function') {
+    throw new Error('convert: 必须提供 io 适配器(openReader/createWriter),见 src/io/node-io.js');
+  }
 
   // 检测用一次遍历,yauzl 的中央目录游标不能倒回,主循环须重新打开。
-  const detector = await ZipReader.open(sourcePath);
+  const detector = await io.openReader(sourcePath);
   let detection;
   try {
     detection = await detectFromReader(detector);
@@ -90,8 +95,8 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
     throw new Error('无法识别源包布局(无 manifest.json / data/ 根 / 摊平用户目录标记)');
   }
 
-  const reader = await ZipReader.open(sourcePath);
-  const writer = dryRun ? new NullZipWriter() : await ZipWriter.create(targetPath);
+  const reader = await io.openReader(sourcePath);
+  const writer = dryRun ? new NullZipWriter() : await io.createWriter(targetPath);
   const context = {
     manifest: null,
     extensionSources: new Map(), // folderName -> {scope, fileName, record}
@@ -111,7 +116,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
   // 需要知道源里已有哪些 third-party 目录名,同名时保留第三方副本。
   const thirdPartyFolders = new Set();
   if (target === TARGETS.PT) {
-    const scanner = await ZipReader.open(sourcePath);
+    const scanner = await io.openReader(sourcePath);
     try {
       for await (const entry of scanner.entries()) {
         const name = thirdPartyFolderOf(entry.fileName, detection.layout);
@@ -381,7 +386,7 @@ async function emitSynthesized(writer, report, context, target) {
       handle: context.manifest?.handle ?? 'default-user',
       selection: { ...L_SELECTION },
     };
-    await writer.add('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
+    await writer.add('manifest.json', encodeJson(manifest));
     report.synthesized('manifest.json');
   }
 
@@ -401,19 +406,19 @@ async function emitSynthesized(writer, report, context, target) {
 
   if (target === TARGETS.PT || target === TARGETS.TT) {
     for (const [path, value] of buildExtensionSources(context, report)) {
-        await writer.add(path, Buffer.from(JSON.stringify(value, null, 2), 'utf8'));
+        await writer.add(path, encodeJson(value));
       report.synthesized(path);
     }
   }
 
   if (target === TARGETS.ST) {
-    await writer.add('_convert/INSTALL.md', Buffer.from(INSTALL_MD, 'utf8'));
+    await writer.add('_convert/INSTALL.md', encodeText(INSTALL_MD));
     report.synthesized('_convert/INSTALL.md');
-    await writer.add('_convert/meta.json', Buffer.from(JSON.stringify({
+    await writer.add('_convert/meta.json', encodeJson({
       converter: 'tavern-convert',
       generatedAt: FIXED_TIMESTAMP,
       note: '本目录不会被任何平台消费,仅供人工核对。',
-    }, null, 2), 'utf8'));
+    }));
     report.synthesized('_convert/meta.json');
   }
 }
@@ -451,10 +456,24 @@ function buildExtensionSources(context, report) {
   return new Map([...output.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
 
-function parseJsonSafe(buffer) {
+const JSON_DECODER = new TextDecoder();
+
+/** Buffer/Uint8Array 通用的 JSON 解析(浏览器插件路径没有 Buffer)。 */
+export function parseJsonSafe(data) {
   try {
-    return JSON.parse(buffer.toString('utf8'));
+    return JSON.parse(JSON_DECODER.decode(data));
   } catch {
     return null;
   }
+}
+
+const JSON_ENCODER = new TextEncoder();
+
+/** 合成 JSON 条目统一走 TextEncoder,核心模块不依赖 node:buffer。 */
+export function encodeJson(value) {
+  return JSON_ENCODER.encode(JSON.stringify(value, null, 2));
+}
+
+export function encodeText(text) {
+  return JSON_ENCODER.encode(text);
 }

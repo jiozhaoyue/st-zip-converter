@@ -2,7 +2,7 @@
 import { parseArgs } from 'node:util';
 import path from 'node:path';
 import { convert, TARGETS } from './src/core/transform.js';
-import { detectLayout } from './src/core/detect.js';
+import { nodeIo, detectLayout } from './src/io/node-io.js';
 
 const USAGE = `tavern-convert — 酒馆系(SillyTavern/Luker/PureTavern/TauriTavern)数据包互转
 
@@ -70,6 +70,7 @@ async function main() {
     target: values.to,
     keepAll: values['keep-all'],
     dryRun: values['dry-run'],
+    io: nodeIo,
   });
   const elapsedMs = Date.now() - startedAt;
   const peakRssBytes = process.resourceUsage().maxRSS * 1024;
