@@ -28,6 +28,10 @@ const DERIVED_DIRS = ['thumbnails/', 'backups/', 'vectors/'];
 const ENGINE_DUMP_ENTRIES = ['_engine_dump.bin', '_engine_meta.json'];
 const THIRD_PARTY_PREFIX = 'extensions/third-party/';
 const DATA_PREFIX = 'data/';
+const USER_EXTENSIONS_PREFIX = 'extensions/';
+/** TT 写进用户目录的私有/派生内容(hub 路径视角)。 */
+const TT_APP_PRIVATE_USER = ['tauritavern-settings.json', 'user/lan-sync/'];
+const TT_DERIVED_USER = ['content.log', 'user/cache/'];
 
 const FIXED_TIMESTAMP = '2020-01-01T00:00:00.000Z';
 
@@ -93,6 +97,8 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
     extensionSources: new Map(), // folderName -> {scope, fileName, record}
     extensionManifests: new Map(), // folderName -> parsed manifest object
     sawEngineDump: false,
+    userExtensionsMigrated: 0, // PT 目标:迁移为 third-party 布局的用户级扩展条目数
+    userExtensionCollisions: new Set(), // 与 third-party 同名而被丢弃的扩展名
   };
 
   // 数据条目一律惰性流直通(addLazy:泵到该条目才打开源流,配合 yazl 顺序泵
@@ -100,6 +106,22 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
   const lazyOpen = (entryApi) => (cb) => {
     entryApi.openStream().then((stream) => cb(null, stream), (err) => cb(err));
   };
+
+  // 预扫中央目录(不开文件流,开销可忽略):PT 目标迁移用户级扩展前,
+  // 需要知道源里已有哪些 third-party 目录名,同名时保留第三方副本。
+  const thirdPartyFolders = new Set();
+  if (target === TARGETS.PT) {
+    const scanner = await ZipReader.open(sourcePath);
+    try {
+      for await (const entry of scanner.entries()) {
+        const name = thirdPartyFolderOf(entry.fileName, detection.layout);
+        if (name) thirdPartyFolders.add(name);
+        entry.skip();
+      }
+    } finally {
+      await scanner.close();
+    }
+  }
 
   try {
     for await (const entry of reader.entries()) {
@@ -151,6 +173,18 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
         }
         continue;
       }
+      if (routed.kind === 'tt-app-private') {
+        // TT 应用级私有设置:TT 目标原位保留,其余目标丢弃(keep-all 保留在 hub 根)
+        if (target === TARGETS.TT || keepAll) {
+          const outPath = target === TARGETS.TT ? entry.fileName : routed.hubPath;
+          if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+          report.copied(routed.hubPath, entry.uncompressedSize);
+        } else {
+          entry.skip();
+          report.dropped(routed.hubPath, 'TT 应用私有设置,仅 TT 目标有意义(--keep-all 可保留)');
+        }
+        continue;
+      }
       if (routed.kind === 'user' && DERIVED_DIRS.some((dir) => routed.hubPath.startsWith(dir))) {
         routed = { kind: 'derived', hubPath: routed.hubPath };
       }
@@ -170,11 +204,55 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
         continue;
       }
 
+      // L 目标:image-metadata.json 不在 L 任何备份类目里(users.js getUserBackupTargets),
+      // L 恢复时必然跳过;ST/TT/PT 目标保留(ST 背景分组索引用它)。
+      if (target === TARGETS.L && routed.hubPath === 'image-metadata.json') {
+        entry.skip();
+        report.dropped(routed.hubPath, 'L 备份类目不含 image-metadata.json,恢复时也不会落地');
+        continue;
+      }
+
+      // PT 目标:用户级扩展迁移为 third-party 布局(PT 目录表没有 extensions/,
+      // 原样放 default-user/extensions 会被 PT 整体丢弃);与 third-party 同名时保留第三方副本。
+      if (routed.kind === 'user' && target === TARGETS.PT
+        && routed.hubPath.startsWith(USER_EXTENSIONS_PREFIX)
+        && !routed.hubPath.startsWith(THIRD_PARTY_PREFIX)) {
+        const rest = routed.hubPath.slice(USER_EXTENSIONS_PREFIX.length);
+        const slash = rest.indexOf('/');
+        if (slash > 0) {
+          const name = rest.slice(0, slash);
+          if (thirdPartyFolders.has(name)) {
+            context.userExtensionCollisions.add(name);
+            entry.skip();
+            report.dropped(routed.hubPath, '与 third-party 扩展 "' + name + '" 同名,保留第三方副本');
+            continue;
+          }
+          const migratedHub = THIRD_PARTY_PREFIX + rest;
+          const outPath = 'data/extensions/third-party/' + rest;
+          if (rest === name + '/manifest.json') {
+            const data = await entry.read();
+            noteExtensionPackage(context, migratedHub, data);
+            writer.add(outPath, data);
+          } else {
+            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+          }
+          context.userExtensionsMigrated += 1;
+          report.copied(routed.hubPath, entry.uncompressedSize);
+          continue;
+        }
+      }
+
       // user / extension-pkg:流式直通,只有扩展 manifest 需要读内容(小文件)
       const outPath = targetEntryPath(routed.hubPath, target);
       if (routed.kind === 'extension-pkg') {
-        const relative = extensionRelativePath(routed.hubPath);
-        if (relative === 'manifest.json') {
+        const fromTpRoot = routed.hubPath.slice(THIRD_PARTY_PREFIX.length);
+        if ((target === TARGETS.TT || target === TARGETS.PT) && !fromTpRoot.includes('/')) {
+          // third-party 根下的散文件(如 .gitkeep):TT/PT 只消费 目录名/文件 形态
+          entry.skip();
+          report.dropped(routed.hubPath, 'third-party 根下的散文件,目标平台不消费');
+          continue;
+        }
+        if (extensionRelativePath(routed.hubPath) === 'manifest.json') {
           const data = await entry.read();
           noteExtensionPackage(context, routed.hubPath, data);
           writer.add(outPath, data);
@@ -201,7 +279,14 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
 function routeSource(sourcePath, layout) {
   if (layout === LAYOUTS.TT) {
     if (sourcePath.startsWith(TT_USER_PREFIX)) {
-      return { kind: 'user', hubPath: sourcePath.slice(TT_USER_PREFIX.length) };
+      const hubPath = sourcePath.slice(TT_USER_PREFIX.length);
+      if (TT_APP_PRIVATE_USER.some((p) => hubPath === p || hubPath.startsWith(p))) {
+        return { kind: 'tt-app-private', hubPath };
+      }
+      if (TT_DERIVED_USER.some((p) => hubPath === p || hubPath.startsWith(p))) {
+        return { kind: 'tt-private', hubPath };
+      }
+      return { kind: 'user', hubPath };
     }
     if (sourcePath.startsWith(TT_THIRD_PARTY_PREFIX)) {
       const rest = sourcePath.slice(TT_THIRD_PARTY_PREFIX.length);
@@ -220,6 +305,10 @@ function routeSource(sourcePath, layout) {
         };
       }
       return { kind: 'drop', hubPath: `_tauritavern/extension-sources/${rest}`, reason: 'TT 来源记录:非 JSON 条目' };
+    }
+    if (sourcePath.startsWith('data/_tauritavern/')) {
+      // extension-sources 已在上面返回;其余是 TT 应用私有数据(window-state/mcp/skills/extension-store)
+      return { kind: 'tt-app-private', hubPath: sourcePath.slice(DATA_PREFIX.length) };
     }
     if (TT_PRIVATE_PREFIXES.some((prefix) => sourcePath.startsWith(prefix))
       || TT_PRIVATE_FILES.includes(sourcePath)) {
@@ -252,6 +341,18 @@ function targetEntryPath(hubPath, target) {
   return hubPath;
 }
 
+/** 预扫用:路径若属于 third-party 扩展包,返回目录名(st/l 与 TT 两种布局都认)。 */
+function thirdPartyFolderOf(sourcePath, layout) {
+  const prefixes = layout === LAYOUTS.TT ? [TT_THIRD_PARTY_PREFIX] : [THIRD_PARTY_PREFIX];
+  for (const prefix of prefixes) {
+    if (!sourcePath.startsWith(prefix)) continue;
+    const rest = sourcePath.slice(prefix.length);
+    const slash = rest.indexOf('/');
+    if (slash > 0) return rest.slice(0, slash);
+  }
+  return null;
+}
+
 function extensionRelativePath(hubPath) {
   const rest = hubPath.slice(THIRD_PARTY_PREFIX.length);
   return rest.slice(rest.indexOf('/') + 1);
@@ -282,6 +383,20 @@ async function emitSynthesized(writer, report, context, target) {
     };
     await writer.add('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
     report.synthesized('manifest.json');
+  }
+
+  if (target === TARGETS.PT && context.userExtensionsMigrated > 0) {
+    report.warn(
+      `已将 ${context.userExtensionsMigrated} 个用户级 extensions/** 条目迁移为 third-party 布局`
+      + '(PT 目录表没有 extensions/,原样放置会被 PT 丢弃);'
+      + '来源记录取自各扩展 manifest 的 homePage。',
+    );
+  }
+  if (target === TARGETS.PT && context.userExtensionCollisions.size > 0) {
+    report.warn(
+      `以下用户级扩展与 third-party 同名,已保留第三方副本: `
+      + [...context.userExtensionCollisions].sort().join(', '),
+    );
   }
 
   if (target === TARGETS.PT || target === TARGETS.TT) {

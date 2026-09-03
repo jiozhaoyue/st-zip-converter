@@ -125,12 +125,17 @@ describe('PT 目标:tauri-tavern 导入器路由镜像', () => {
 
 // ---- L 侧镜像(users-private.js resolveAllowedRestorePath 后缀匹配语义) ----
 
-const L_ALLOWED_FILES = new Set(['settings.json', 'secrets.json', 'stats.json']);
+const L_ALLOWED_FILES = new Set(['settings.json', 'secrets.json']);
 const L_ALLOWED_DIRS = [
-  'characters', 'chats', 'worlds', 'User Avatars', 'groups', 'group chats',
-  'OpenAI Settings', 'NovelAI Settings', 'KoboldAI Settings', 'TextGen Settings',
+  'backups', // settings 类目包含 backups(users.js:1370)
+  'characters', 'User Avatars', 'backgrounds',
+  'chats', 'groups', 'group chats',
+  'worlds',
+  'NovelAI Settings', 'KoboldAI Settings', 'OpenAI Settings', 'TextGen Settings',
   'instruct', 'context', 'sysprompt', 'reasoning', 'themes', 'movingUI', 'QuickReplies',
-  'assets', 'backgrounds', 'user',
+  'assets', 'backgrounds', 'user/files', 'user/images', 'user/workflows',
+  'extensions',
+  'vectors',
 ];
 // L 对 globalExtensions 目录的别名(users-private.js buildRestoreDirectoryAliases)
 const L_EXTENSION_ALIASES = [

@@ -185,6 +185,97 @@ describe('convert → 源 TT 布局 → st/l 的私有元数据', () => {
   });
 });
 
+describe('PT 用户级扩展迁移(T1 发现的保真缺口)', () => {
+  const userExt = (homePage) => ([
+    ['extensions/my-user-ext/manifest.json', Buffer.from(JSON.stringify({
+      display_name: 'User Ext', js: 'index.js', homePage,
+    }), 'utf8')],
+    ['extensions/my-user-ext/index.js', Buffer.from('// user ext', 'utf8')],
+  ]);
+  const thirdPartyDupe = ([
+    ['extensions/third-party/dupe/manifest.json', Buffer.from(JSON.stringify({
+      display_name: 'TP Dupe', js: 'index.js', homePage: 'https://github.com/example/dupe',
+    }), 'utf8')],
+    ['extensions/third-party/dupe/index.js', Buffer.from('// tp dupe', 'utf8')],
+  ]);
+  const userDupe = ([
+    ['extensions/dupe/manifest.json', Buffer.from(JSON.stringify({
+      display_name: 'User Dupe', js: 'index.js', homePage: 'https://github.com/example/user-dupe',
+    }), 'utf8')],
+    ['extensions/dupe/index.js', Buffer.from('// user dupe', 'utf8')],
+  ]);
+
+  it('st→pt:用户级扩展迁移为 third-party 布局并合成来源记录', async () => {
+    const { files, report } = await runConvert([...stEntries(), ...userExt('https://github.com/example/user-ext')], TARGETS.PT);
+    expect(files.has('data/extensions/third-party/my-user-ext/manifest.json')).toBe(true);
+    expect(files.has('data/extensions/third-party/my-user-ext/index.js')).toBe(true);
+    expect(files.has('data/default-user/extensions/my-user-ext/index.js')).toBe(false);
+    const source = JSON.parse(files.get('data/_tauritavern/extension-sources/global/my-user-ext.json').toString('utf8'));
+    expect(source.remote_url).toBe('https://github.com/example/user-ext');
+    expect(report.toJSON().warnings.join('\n')).toMatch(/已将 2 个用户级/u);
+  });
+
+  it('st→pt:与 third-party 同名的用户级扩展被丢弃并保留第三方副本', async () => {
+    const { files, report } = await runConvert([...stEntries(), ...thirdPartyDupe, ...userDupe], TARGETS.PT);
+    expect(files.has('data/extensions/third-party/dupe/index.js')).toBe(true);
+    const manifest = JSON.parse(files.get('data/extensions/third-party/dupe/manifest.json').toString('utf8'));
+    expect(manifest.display_name).toBe('TP Dupe');
+    expect(files.has('data/default-user/extensions/dupe/index.js')).toBe(false);
+    expect(report.toJSON().warnings.join('\n')).toContain('dupe');
+  });
+
+  it('st→tt:用户级扩展保持原位(TT 目录表有 extensions)', async () => {
+    const { files } = await runConvert([...stEntries(), ...userExt('https://github.com/example/user-ext')], TARGETS.TT);
+    expect(files.has('data/default-user/extensions/my-user-ext/manifest.json')).toBe(true);
+    expect(files.has('data/extensions/third-party/my-user-ext/manifest.json')).toBe(false);
+  });
+});
+
+describe('TT 用户目录内的私有变体(T1 发现)', () => {
+  const ttWithUserPrivates = () => [
+    ...ttEntries(),
+    ['data/default-user/tauritavern-settings.json', Buffer.from('{"lanSync":true}', 'utf8')],
+    ['data/default-user/user/lan-sync/automation.json', Buffer.from('{}', 'utf8')],
+    ['data/default-user/user/cache/index_v1.json', Buffer.from('{}', 'utf8')],
+    ['data/default-user/content.log', Buffer.from('log', 'utf8')],
+  ];
+
+  it('tt→l:应用私有设置与派生缓存默认丢弃', async () => {
+    const { files, report } = await runConvert(ttWithUserPrivates(), TARGETS.L);
+    expect(files.has('tauritavern-settings.json')).toBe(false);
+    expect(files.has('user/lan-sync/automation.json')).toBe(false);
+    expect(files.has('user/cache/index_v1.json')).toBe(false);
+    expect(files.has('content.log')).toBe(false);
+    const dropped = report.toJSON().dropped.map((d) => d.path);
+    expect(dropped).toContain('tauritavern-settings.json');
+    expect(dropped).toContain('user/cache/index_v1.json');
+  });
+
+  it('tt→tt:应用私有设置原位保留(TT 需要它),派生缓存丢弃', async () => {
+    const { files } = await runConvert(ttWithUserPrivates(), TARGETS.TT);
+    expect(files.has('data/default-user/tauritavern-settings.json')).toBe(true);
+    expect(files.has('data/default-user/user/lan-sync/automation.json')).toBe(true);
+    expect(files.has('data/default-user/user/cache/index_v1.json')).toBe(false);
+  });
+
+  it('tt→st --keep-all:全部保留在 hub 根', async () => {
+    const { files } = await runConvert(ttWithUserPrivates(), TARGETS.ST, { keepAll: true });
+    expect(files.has('tauritavern-settings.json')).toBe(true);
+    expect(files.has('user/lan-sync/automation.json')).toBe(true);
+    expect(files.has('user/cache/index_v1.json')).toBe(true);
+    expect(files.has('content.log')).toBe(true);
+  });
+
+  it('st→l:third-party 根下散文件对 tt/pt 丢弃、对 l 保留', async () => {
+    const withGitkeep = [...stEntries(), ['extensions/third-party/.gitkeep', Buffer.from('', 'utf8')]];
+    const toL = await runConvert(withGitkeep, TARGETS.L);
+    expect(toL.files.has('extensions/third-party/.gitkeep')).toBe(true);
+    const toPt = await runConvert(withGitkeep, TARGETS.PT);
+    expect(toPt.files.has('data/extensions/third-party/.gitkeep')).toBe(false);
+    expect(toPt.report.toJSON().dropped.some((d) => d.path.endsWith('.gitkeep'))).toBe(true);
+  });
+});
+
 describe('keep-all', () => {
   it('tt→st --keep-all:派生缓存与 TT 私有目录保留(去 data/ 前缀)', async () => {
     const { files } = await runConvert(ttEntries(), TARGETS.ST, { keepAll: true });
