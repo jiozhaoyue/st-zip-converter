@@ -87,3 +87,41 @@
 ### Next Steps
 
 - 根据后续需求规划下一阶段特性或发布打包任务
+
+
+## Session 4: 三位一体架构收敛与旧版 CLI / 单文件插件彻底移除
+<!-- trellis-session: v=2 fp=a77c715e2dac2d6f -->
+
+**Date**: 2026-09-04
+**Task**: 三位一体架构收敛与旧版 CLI / 单文件插件彻底移除
+**Branch**: `main`
+
+### Summary
+
+彻底清理 cli.js、node-io.js、旧 build.mjs 及 yauzl/yazl 依赖，收敛至通用纯前端 zipIo 引擎，51 项测试全绿并通过 Vite 构建，本地服务就绪并归档任务。
+
+### Main Changes
+
+- 卸载 yauzl、yazl、esbuild 依赖，删除 cli.js、src/core/read.js、src/core/write.js、src/io/、src/plugins/
+- 增强 src/core/zip-io.js：增加异步任务队列保证顺序写入、增加路径去重保护防碰撞
+- 迁移全部单测至通用 zipIo，修复 Uint8Array 与 Buffer 转换兼容，51 项测试全部通过
+- 更新 .trellis/spec/ 中 backend/frontend 目录结构规范，同步三位一体工程规范
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c73fce5` | refactor: eliminate legacy CLI and monolithic plugins in favor of pure web Trinity architecture |
+
+### Testing
+
+- [OK] npm test (51 passed, 2 skipped)
+- [OK] npm run build (Vite 452ms clean build)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 根据用户需求持续迭代功能或接入实际 SillyTavern 环境做现场联调
