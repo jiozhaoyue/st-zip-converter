@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/tavern-datapack-formats.md", "reason": "四平台数据包布局、PT扩展来源合成规则与secrets保护策略"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "前端组件设计、DOM隔离与交互规范"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "宿主环境嗅探、生命周期与备份API调用"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Blob生命周期、流式IO与内存释放规范"}
