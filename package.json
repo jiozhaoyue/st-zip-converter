@@ -1,5 +1,5 @@
 {
-  "name": "tavern-convert",
+  "name": "st-zip-converter",
   "version": "0.1.0",
   "description": "SillyTavern / Luker / PureTavern / TauriTavern 数据包互转工具",
   "type": "module",
