@@ -1,6 +1,7 @@
 import { NullZipWriter } from './null-writer.js';
 import { Report } from './report.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
+import { zipIo } from './zip-io.js';
 
 /**
  * 转换管线:源布局规范化为 hub(ST 摊平)→ 逐条目按目标适配写出。
@@ -71,15 +72,15 @@ const L_SELECTION = Object.freeze({
  * @param {boolean} [options.dryRun] 只产出报告不写文件(数据条目跳过读取)
  * @returns {Promise<Report>}
  */
-export async function convert(sourcePath, targetPath, { target, keepAll = false, dryRun = false, io } = {}) {
+export async function convert(sourcePath, targetPath, { target, keepAll = false, dryRun = false, io = zipIo, onProgress } = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
     throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
   }
   if (!io || typeof io.openReader !== 'function' || typeof io.createWriter !== 'function') {
-    throw new Error('convert: 必须提供 io 适配器(openReader/createWriter),见 src/io/node-io.js');
+    throw new Error('convert: 必须提供有效的 io 适配器 (openReader/createWriter)');
   }
 
-  // 检测用一次遍历,yauzl 的中央目录游标不能倒回,主循环须重新打开。
+  // 检测用一次遍历,yauzl/zip.js 的游标不能倒回,主循环须重新打开。
   const detector = await io.openReader(sourcePath);
   let detection;
   try {
@@ -97,6 +98,9 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
 
   const reader = await io.openReader(sourcePath);
   const writer = dryRun ? new NullZipWriter() : await io.createWriter(targetPath);
+  const totalEntries = reader.totalEntries ?? 0;
+  let processedEntries = 0;
+
   const context = {
     manifest: null,
     extensionSources: new Map(), // folderName -> {scope, fileName, record}
@@ -130,6 +134,10 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
 
   try {
     for await (const entry of reader.entries()) {
+      processedEntries++;
+      if (typeof onProgress === 'function') {
+        onProgress(processedEntries, totalEntries, entry.fileName);
+      }
       if (entry.isDirectory) {
         entry.skip();
         continue;

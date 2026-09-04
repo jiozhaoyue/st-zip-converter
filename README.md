@@ -1,89 +1,86 @@
-# tavern-convert
+# st-zip-converter
 
-酒馆系(SillyTavern / Luker / PureTavern / TauriTavern)导出数据包互转工具。
+> 🚀 **酒馆系（SillyTavern / Luker / PureTavern / TauriTavern）Zip 数据包互转工具**
+>
+> 具备**三位一体**标准前端架构：既是标准的 SillyTavern / Luker 扩展插件，又是零依赖本地独立 Web 应用，同时原生支持 GitHub Pages 静态在线部署。
 
-一份转换核心,两种入口:
+---
 
-- **CLI**(Node ≥18,桌面 / Termux 均可)
-- **ST/L 平台内插件**(规划中,见下"路线")
+## 特性亮点
 
-## 原理(30 秒版)
+- ⚡ **三位一体架构**：一份代码满足三大场景（酒馆内置扩展插件、本地轻量 Web 应用、GitHub Pages 在线转换）。
+- 🎨 **零 Base64 内联**：代码结构干净透明，采用标准的 HTML5 + CSS + ESM 现代前端组织，杜绝数万行的难看内联大文件。
+- 🔒 **纯客户端计算与隐私保护**：所有解压、路由重构与重新打包全部在浏览器本地内存完成，零数据上传服务器；`secrets.json`（API 密钥）严格位级保真。
+- 📦 **四大家酒馆全互转**：支持 SillyTavern（摊平）、Luker（清单）、TauriTavern（data/根）与 PureTavern（第三方扩展重装映射）双向无缝转换。
+- 💡 **极速流式 IO**：基于 `@zip.js/zip.js` 管道与背压控制，转换 1GB+ 庞大数据包仅需平稳内存储备。
 
-四个平台的包本质上是同一种数据的两种摆放:ST/L 是摊平的用户目录,TT 是多套一层
-`data/default-user/` 前缀,PT 不认摊平但认 TT 布局。本工具以 ST 摊平布局为中枢做
-路径层改写,不改动角色卡/聊天/世界书内容,secrets 始终携带。细节见
-`.trellis/tasks/09-01-cross-tavern-datapack/research/platform-facts.md`。
+---
 
-## 安装
+## 使用方式 (三大场景)
 
-```bash
-npm install        # 依赖 yauzl/yazl,纯 JS,无原生编译
-```
+### 场景 1: 作为 SillyTavern / Luker 扩展插件安装（推荐）
 
-Termux(安卓):
-
-```bash
-pkg install nodejs-lts
-# 然后 npm install 同上
-```
-
-## 用法
+直接克隆本仓库至酒馆的第三方扩展目录：
 
 ```bash
-# 转换(L 导出包 → PT 可导入的 TT 布局包)
-node cli.js default-user-xxxx.zip --to pt
-
-# 只看识别结果
-node cli.js detect tauritavern-data-xxxx.zip
-
-# 只出报告不写文件
-node cli.js xxx.zip --to tt --dry-run
-
-# 机器可读报告(JSON,含峰值内存)
-node cli.js xxx.zip --to l --json
-
-# 保留派生缓存与 TT 私有目录(默认丢弃并在报告列明)
-node cli.js xxx.zip --to st --keep-all
+cd <SillyTavern安装目录>/public/scripts/extensions/third-party/
+git clone https://github.com/jiozhaoyue/st-zip-converter.git
 ```
 
-`--to` 目标:
+重启或在酒馆扩展管理中刷新扩展列表：
+1. 扩展菜单中将自动出现 **「📦 酒馆数据包互转器」**。
+2. 支持一键导出：点击 `[→ ST]`、`[→ Luker]`、`[→ TT]`、`[→ PT]` 快捷按钮，直接抓取当前酒馆备份并转换下载。
+3. 支持外部导入：拖入任意酒馆导出的 Zip 数据包，自动识别源格式并一键转为适合当前酒馆的格式。
 
-| 目标 | 产物 | 平台侧如何导入 |
-|---|---|---|
-| `st` | 摊平用户目录包(+ `_convert/INSTALL.md` 说明) | ST 无整包导入,解压覆盖到 `data/<handle>/`(先备份) |
-| `l` | 摊平 + `manifest.json` | L 内"恢复备份"选择该 zip,类目全选 |
-| `tt` | `data/default-user/` 布局 | TT 导入(三种布局策略自动识别) |
-| `pt` | TT 布局 + 合成的 `extension-sources` 来源记录 | PT 数据导入(选 TT 迁移包) |
+---
 
-## 安全说明
+### 场景 2: 本地轻量开发服务器运行
 
-- 本工具**不剥离 secrets.json**(用户明确要求);产物含 API 密钥,请勿外传。
-- 从 PT 目标包导入后,扩展来源记录会让 PT 走"正常安装"通道;没有来源且 manifest
-  无 https homePage 的扩展,PT 会跳过并在导入报告里提示重装(PT 的设计行为)。
-
-## 已验证(2026-09-02,真实数据包)
-
-- 964 MiB L 包与 162 MiB TT 包,8 个方向实转全过
-- secrets 字节一致;条目数与转换报告吻合
-- 峰值内存 74-250 MiB(手机可用量级)
-- `npm test`:32 个单测(含 PT/L 导入路由镜像断言)
-
-## 平台内插件(ST / L)
-
-与 CLI 同一份转换核心(产物同构性有自动测试保证),打包为自包含 IIFE:
+克隆本仓库到本地，启动极速开发者服务器：
 
 ```bash
-npm run build:plugins     # 产物: dist/plugins/{st,luker}/{index.js, manifest.json}
+git clone https://github.com/jiozhaoyue/st-zip-converter.git
+cd st-zip-converter
+
+npm install
+npm start
 ```
 
-安装:把 `dist/plugins/luker/`(或 `dist/plugins/st/`)整个目录放进平台的
-`data/<handle>/extensions/third-party/` 下(或在扩展面板"从目录安装"),重启平台。
+本地服务将在 `http://localhost:5173` 启动，在浏览器中即可使用完整的拖拽上传、自动识别、格式互转与下载功能。
 
-功能:扩展菜单出现"跨平台导出",一键把当前账号数据导出为 ST / Luker / TauriTavern /
-PureTavern 四种格式并下载。
+---
 
-- Luker 端备份 selection 全选,secrets 一并携带。
-- SillyTavern 端备份端点不含 secrets(API 密钥),插件会提示用 CLI 处理完整包。
-- 端点路径:`/api/users/backup`(L selection 语义见 `research/plugin-feasibility.md`)。
+### 场景 3: GitHub Pages 在线直接使用
 
-## 已验证(2026-09-02/03,真实数据包)
+无需在本地安装任何 Node.js 环境或软件，直接访问 GitHub Pages 在线转换：
+👉 **`https://jiozhaoyue.github.io/st-zip-converter/`**
+
+---
+
+## GitHub Pages 一键部署教程
+
+如果您 Fork 了本仓库或在自己的 GitHub 账号下托管，只需 3 步即可开通您自己的专属在线转换站：
+
+1. **进入仓库设置**：打开仓库主页，点击 **Settings** -> 左侧导航栏 **Pages**。
+2. **选择部署来源 (Build and deployment)**：
+   - 将 **Source** 切换为 **`GitHub Actions`**。
+3. **推送代码自动上线**：
+   - 本仓库已内置 `.github/workflows/deploy.yml`。每次推送到 `main` 分支，GitHub Actions 就会自动构建静态产物并部署上线。
+   - 部署完成后，在 Pages 页面即可获得您的专属访问 URL。
+
+---
+
+## 四大酒馆平台数据映射规则
+
+| 目标平台 | 布局形态 | 平台导入方式与注意事项 |
+|:---:|:---:|---|
+| **SillyTavern (ST)** | 摊平用户目录根 | 解压后覆盖到 `data/<handle>/` 目录。*注：官方备份端点不含 secrets，插件端已做相应安全说明。* |
+| **Luker (L)** | 摊平目录 + `manifest.json` | 在 Luker 界面中点击「恢复备份」上传该 Zip，支持全选资产类目；支持一键恢复。 |
+| **TauriTavern (TT)** | `data/default-user/` 结构 | TT 数据管理中导入，自动识别三种目录结构。 |
+| **PureTavern (PT)** | TT 布局 + 合成 `extension-sources` | PT 导入选 TT 迁移包；用户级扩展已按 PT 规范自动迁移至 `third-party` 目录并合成来源。 |
+
+---
+
+## 许可证
+
+MIT License © 2026 [jiozhaoyue](https://github.com/jiozhaoyue)
