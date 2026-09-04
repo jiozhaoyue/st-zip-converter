@@ -14,11 +14,11 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
+| [Directory Structure](./directory-structure.md) | Module organization, stream IO, and CLI architecture | Ready |
+| [Datapack Storage Guidelines](./database-guidelines.md) | Platform zip layouts, streaming IO, memory budget, secrets preservation | Ready |
+| [Error Handling](./error-handling.md) | Exit codes, report warnings, and stream teardown | Ready |
+| [Quality Guidelines](./quality-guidelines.md) | Test matrix, verification commands, memory limits, and forbidden patterns | Ready |
+| [Logging Guidelines](./logging-guidelines.md) | Structured reports, stdout/stderr separation, and key redaction | Ready |
 
 ---
 

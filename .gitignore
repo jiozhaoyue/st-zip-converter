@@ -10,3 +10,4 @@ samples/
 out/
 tmp/
 .trellis/.runtime/
+.history/

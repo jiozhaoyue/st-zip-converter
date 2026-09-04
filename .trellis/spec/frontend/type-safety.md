@@ -1,51 +1,69 @@
-# Type Safety
+# Type Safety & Validation Guidelines (Plugins)
 
-> Type safety patterns in this project.
+> JSDoc annotations, runtime platform validation, and immutable constants.
 
 ---
 
 ## Overview
 
-<!--
-Document your project's type safety conventions here.
-
-Questions to answer:
-- What type system do you use?
-- How are types organized?
-- What validation library do you use?
-- How do you handle type inference?
--->
-
-(To be filled by the team)
+The plugin layer is written in modern JavaScript (ESM) without TypeScript transpilation to ensure zero compilation drift and immediate browser compatibility. Type safety is enforced via:
+1. **JSDoc Type Annotations**: Clear function signatures and parameter/return typing.
+2. **Runtime Domain Guards**: Strict enum checks on target platforms.
+3. **Deep Immutability**: `Object.freeze` on configuration objects and schemas.
 
 ---
 
-## Type Organization
+## JSDoc Type Contracts
 
-<!-- Where types are defined, shared types vs local types -->
+Exported and interop functions must include complete JSDoc headers:
 
-(To be filled by the team)
-
----
-
-## Validation
-
-<!-- Runtime validation patterns (Zod, Yup, io-ts, etc.) -->
-
-(To be filled by the team)
-
----
-
-## Common Patterns
-
-<!-- Type utilities, generics, type guards -->
-
-(To be filled by the team)
+```javascript
+/**
+ * 把平台备份 blob 转成目标平台包。
+ * @param {Blob} sourceBlob - 平台导出的源数据包 Blob
+ * @param {'st' | 'l' | 'tt' | 'pt'} target - 目标平台标识
+ * @returns {Promise<{ blob: Blob, warnings: string[] }>} 转换后的包与警告清单
+ */
+export async function convertBackup(sourceBlob, target) {
+  if (!Object.values(TARGETS).includes(target)) {
+    throw new Error(`未知目标平台: ${target}`);
+  }
+  // ...
+}
+```
 
 ---
 
-## Forbidden Patterns
+## Runtime Type Guarding & Immutability
 
-<!-- any, type assertions, etc. -->
+### 1. Frozen Target & Selection Enums
+Prevent accidental modification of critical API selection configurations:
+```javascript
+export const TARGETS = Object.freeze({
+  ST: 'st',
+  L: 'l',
+  TT: 'tt',
+  PT: 'pt',
+});
 
-(To be filled by the team)
+const FULL_SELECTION = Object.freeze({
+  settings: true,
+  secrets: true,
+  characters: true,
+  chats: true,
+  lorebooks: true,
+  presets: true,
+  assets: true,
+  extensions: true,
+  globalExtensions: true,
+  vectors: true,
+});
+```
+
+### 2. Manifest Schema Validation
+Both SillyTavern and Luker extensions require a `manifest.json`. `test/plugin.test.js` enforces schema requirements during automated testing:
+- `name`: Non-empty string (kebab-case).
+- `display_name`: Human-readable title.
+- `version`: Semver string matching project version.
+- `description`: Non-empty string.
+- `author`: Project author handle.

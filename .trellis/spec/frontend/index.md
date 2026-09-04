@@ -14,12 +14,12 @@ This directory contains guidelines for frontend development. Fill in each file w
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
-| [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
+| [Directory Structure](./directory-structure.md) | In-app plugin architecture, esbuild targets, and bundle distribution | Ready |
+| [Component Guidelines](./component-guidelines.md) | Vanilla DOM injection, namespace isolation, and download UX | Ready |
+| [Hook Guidelines](./hook-guidelines.md) | Host lifecycle integration, CSRF tokens, and backup API hooks | Ready |
+| [State Management](./state-management.md) | Ephemeral UI state, in-memory blob lifecycle, and URL revocation | Ready |
+| [Quality Guidelines](./quality-guidelines.md) | Bundle budget (<200KiB), engine parity, and headless smoke testing | Ready |
+| [Type Safety](./type-safety.md) | JSDoc contracts, runtime target guards, and manifest schema validation | Ready |
 
 ---
 
