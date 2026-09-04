@@ -62,4 +62,27 @@ describe('纯 Web 转换引擎 (zipIo + transform)', () => {
       expect(names).toContain('manifest.json');
     }
   });
+
+  it('runConversionTask 能够在降级环境下无缝调度完成任务并触发进度', async () => {
+    const { runConversionTask } = await import('../src/core/worker-client.js');
+    const sourceBlob = await createFixtureBlob(lEntries());
+    const progressList = [];
+
+    const { report, resultBlob } = await runConversionTask({
+      source: sourceBlob,
+      target: TARGETS.ST,
+      options: {
+        selection: { secrets: false },
+      },
+      onProgress: (cur, total, name) => {
+        progressList.push({ cur, total, name });
+      },
+    });
+
+    expect(resultBlob).toBeInstanceOf(Blob);
+    expect(resultBlob.size).toBeGreaterThan(0);
+    expect(progressList.length).toBeGreaterThan(0);
+    expect(report.target).toBe(TARGETS.ST);
+    expect(report.totals.filtered).toBeGreaterThanOrEqual(1);
+  });
 });

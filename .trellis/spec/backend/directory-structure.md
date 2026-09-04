@@ -26,13 +26,17 @@ st-zip-converter/
 ├── src/
 │   ├── core/               # Platform-agnostic conversion & transform engine
 │   │   ├── detect.js       # Format layout detection (ST, L, TT, PT)
+│   │   ├── inspect.js      # Zero-copy central directory preflight & category aggregation
 │   │   ├── null-writer.js  # Null writer for dry-run inspection without disk writes
 │   │   ├── report.js       # Transformation report and structured statistics
-│   │   ├── transform.js    # Core conversion pipeline (hub normalization + target adapter)
-│   │   └── zip-io.js       # Universal standard zip IO adapter (@zip.js/zip.js)
+│   │   ├── transform.js    # Core conversion pipeline (hub normalization + target adapter + selection filter)
+│   │   ├── zip-io.js       # Universal standard zip IO adapter (@zip.js/zip.js)
+│   │   ├── converter-worker.js # Dedicated Web Worker background compression thread
+│   │   └── worker-client.js# Client worker manager with transparent Node fallback
 │   └── ui/                 # UI components and host bridge
 │       ├── host-bridge.js  # Host sniffing (SillyTavern extension vs standalone web)
 │       ├── file-drop.js    # Drag-and-drop file upload & format detection card
+│       ├── category-filter.js # Category checkboxes & desensitization preset controls
 │       └── view.js         # Progress bar, report display accordion, and download trigger
 ├── fixtures/               # Generated test fixture packages for all 4 layouts
 │   └── gen.js              # Fixture generator script

@@ -2,6 +2,7 @@ import { NullZipWriter } from './null-writer.js';
 import { Report } from './report.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
 import { zipIo } from './zip-io.js';
+import { categoryOfHubPath } from './inspect.js';
 
 /**
  * 转换管线:源布局规范化为 hub(ST 摊平)→ 逐条目按目标适配写出。
@@ -72,7 +73,7 @@ const L_SELECTION = Object.freeze({
  * @param {boolean} [options.dryRun] 只产出报告不写文件(数据条目跳过读取)
  * @returns {Promise<Report>}
  */
-export async function convert(sourcePath, targetPath, { target, keepAll = false, dryRun = false, io = zipIo, onProgress } = {}) {
+export async function convert(sourcePath, targetPath, { target, keepAll = false, dryRun = false, io = zipIo, onProgress, selection } = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
     throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
   }
@@ -143,6 +144,16 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
         continue;
       }
       let routed = routeSource(entry.fileName, detection.layout);
+
+      // 按用户类目选择过滤（脱敏排除）
+      if (selection && typeof selection === 'object') {
+        const cat = categoryOfHubPath(routed.hubPath);
+        if (cat && selection[cat] === false) {
+          entry.skip();
+          report.filtered(routed.hubPath, cat);
+          continue;
+        }
+      }
 
       // 元数据条目:体积小、内容被解析使用,走缓冲
       if (routed.kind === 'manifest') {
@@ -277,7 +288,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
       report.copied(routed.hubPath, entry.uncompressedSize);
     }
 
-    await emitSynthesized(writer, report, context, target);
+    await emitSynthesized(writer, report, context, target, selection);
     await writer.close();
     return report;
   } catch (error) {
@@ -386,13 +397,26 @@ function noteExtensionPackage(context, hubPath, data) {
 /**
  * 尾部合成条目:目标 manifest(L)、extension-sources(pt/tt)、ST 安装说明。
  */
-async function emitSynthesized(writer, report, context, target) {
+async function emitSynthesized(writer, report, context, target, selection) {
   if (target === TARGETS.L) {
+    const baseSelection = { ...L_SELECTION };
+    if (selection && typeof selection === 'object') {
+      if (selection.characters === false) baseSelection.characters = false;
+      if (selection.chats === false) baseSelection.chats = false;
+      if (selection.worlds === false) baseSelection.lorebooks = false;
+      if (selection.settings === false) baseSelection.settings = false;
+      if (selection.secrets === false) baseSelection.secrets = false;
+      if (selection.avatars === false) baseSelection.assets = false;
+      if (selection.extensions === false) {
+        baseSelection.extensions = false;
+        baseSelection.globalExtensions = false;
+      }
+    }
     const manifest = {
       schemaVersion: 1,
       createdAt: FIXED_TIMESTAMP,
       handle: context.manifest?.handle ?? 'default-user',
-      selection: { ...L_SELECTION },
+      selection: baseSelection,
     };
     await writer.add('manifest.json', encodeJson(manifest));
     report.synthesized('manifest.json');
@@ -412,9 +436,9 @@ async function emitSynthesized(writer, report, context, target) {
     );
   }
 
-  if (target === TARGETS.PT || target === TARGETS.TT) {
+  if ((target === TARGETS.PT || target === TARGETS.TT) && (!selection || selection.extensions !== false)) {
     for (const [path, value] of buildExtensionSources(context, report)) {
-        await writer.add(path, encodeJson(value));
+      await writer.add(path, encodeJson(value));
       report.synthesized(path);
     }
   }

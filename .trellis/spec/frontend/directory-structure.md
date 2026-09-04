@@ -29,19 +29,24 @@ st-zip-converter/
 ├── src/
 │   ├── core/               # Pure Web conversion engine
 │   │   ├── detect.js       # Layout detection (ST, L, TT, PT)
+│   │   ├── inspect.js      # Zero-copy central directory preflight & category aggregation
 │   │   ├── null-writer.js  # Null writer for dry-run inspection
 │   │   ├── report.js       # Structured conversion reports
-│   │   ├── transform.js    # Core hub transform & routing rules
-│   │   └── zip-io.js       # Stream IO adapter (@zip.js/zip.js)
+│   │   ├── transform.js    # Core hub transform, routing rules & selection filtering
+│   │   ├── zip-io.js       # Stream IO adapter (@zip.js/zip.js)
+│   │   ├── converter-worker.js # Dedicated Web Worker background compression thread
+│   │   └── worker-client.js# Multi-threaded worker dispatcher with transparent Node fallback
 │   └── ui/                 # UI components and host bridge
 │       ├── host-bridge.js  # Host detection (SillyTavern vs standalone) & backup API
 │       ├── file-drop.js    # Drag-and-drop area & format inspection card
+│       ├── category-filter.js # Category checkboxes & desensitization preset controls
 │       └── view.js         # Progress bar, report display accordion, and download trigger
 ├── fixtures/               # Deterministic fixture generation
 │   └── gen.js
 ├── test/                   # Vitest unit & integration tests
+│   ├── filter.test.js      # Central directory preflight and category desensitization tests
 │   ├── plugin.test.js      # Extension structure and manifest validation
-│   └── web-converter.test.js # Pure web Blob-to-Blob conversion verification
+│   └── web-converter.test.js # Pure web Blob-to-Blob and worker conversion verification
 └── dist/                   # Production Vite build output (for GitHub Pages / distribution)
 ```
 
@@ -58,7 +63,11 @@ st-zip-converter/
 - Drag-and-drop file target and dynamic layout detection card.
 - Sniffs file magic bytes and central directory to display format indicator.
 
-### 3. `src/ui/view.js`
+### 3. `src/ui/category-filter.js`
+- Renders dynamic category selection cards based on `inspectArchive` results.
+- Provides one-click presets: "全部", "仅角色卡", "角色+世界书", and "安全脱敏" (removes `secrets.json` and `chats/`).
+
+### 4. `src/ui/view.js`
 - Progress bar and live status updates during conversion.
-- Accordion for converted files, dropped files, warnings, and error messages.
+- Accordion for converted files, dropped files, desensitized/filtered files, warnings, and error messages.
 - Dispatches in-browser download via `URL.createObjectURL(blob)`.

@@ -22,6 +22,10 @@ export function createViewController() {
   const discardsSummary = document.getElementById('discards-summary');
   const discardsLog = document.getElementById('discards-log');
 
+  const filteredAccordion = document.getElementById('filtered-accordion');
+  const filteredSummary = document.getElementById('filtered-summary');
+  const filteredLog = document.getElementById('filtered-log');
+
   const warningsAccordion = document.getElementById('warnings-accordion');
   const warningsSummary = document.getElementById('warnings-summary');
   const warningsLog = document.getElementById('warnings-log');
@@ -42,23 +46,52 @@ export function createViewController() {
     reportPanel.classList.add('active');
     const modules = reportJson.modules ?? {};
 
-    countChars.textContent = modules.characters ?? 0;
-    countChats.textContent = modules.chats ?? 0;
-    countLorebooks.textContent = modules.lorebooks ?? 0;
-    countPresets.textContent = modules.presets ?? 0;
-    countAssets.textContent = modules.assets ?? 0;
-    countExtensions.textContent = modules.extensions ?? 0;
-    countSettings.textContent = modules.settings ?? 0;
-    countSecrets.textContent = (modules.secrets ?? 0) > 0 ? `${modules.secrets} (安全保留)` : '0';
+    const getCount = (mod) => {
+      if (!mod) return 0;
+      return typeof mod === 'number' ? mod : (mod.copied ?? 0);
+    };
+
+    countChars.textContent = getCount(modules.characters);
+    countChats.textContent = getCount(modules.chats);
+    countLorebooks.textContent = getCount(modules.lorebooks);
+    countPresets.textContent = getCount(modules.presets);
+    countAssets.textContent = getCount(modules.assets);
+    countExtensions.textContent = getCount(modules.extensions);
+    countSettings.textContent = getCount(modules.settings);
+
+    const secretsCopied = getCount(modules.secrets);
+    const secretsFiltered = modules.secrets?.filtered ?? 0;
+    if (secretsFiltered > 0) {
+      countSecrets.textContent = '已脱敏排除';
+      countSecrets.style.color = 'var(--accent-luker)';
+    } else if (secretsCopied > 0) {
+      countSecrets.textContent = `${secretsCopied} (安全保留)`;
+      countSecrets.style.color = 'var(--success)';
+    } else {
+      countSecrets.textContent = '0';
+      countSecrets.style.color = 'var(--text-sub)';
+    }
 
     // 丢弃项
-    const discards = reportJson.discards ?? [];
-    if (discards.length > 0) {
+    const dropped = reportJson.dropped ?? reportJson.discards ?? [];
+    if (dropped.length > 0) {
       discardsAccordion.style.display = 'block';
-      discardsSummary.textContent = `丢弃项清单 (${discards.length} 条 - 派生缓存或不兼容)`;
-      discardsLog.textContent = discards.map((d) => `· ${d.path} (${d.reason})`).join('\n');
+      discardsSummary.textContent = `丢弃项清单 (${dropped.length} 条 - 派生缓存或不兼容)`;
+      discardsLog.textContent = dropped.map((d) => `· ${d.path} (${d.reason})`).join('\n');
     } else {
       discardsAccordion.style.display = 'none';
+    }
+
+    // 脱敏排除项
+    const filtered = reportJson.filtered ?? [];
+    if (filteredAccordion) {
+      if (filtered.length > 0) {
+        filteredAccordion.style.display = 'block';
+        filteredSummary.textContent = `脱敏与排除清单 (${filtered.length} 条 - 按类目主动过滤)`;
+        filteredLog.textContent = filtered.map((f) => `· [${f.category}] ${f.path}`).join('\n');
+      } else {
+        filteredAccordion.style.display = 'none';
+      }
     }
 
     // 警告项

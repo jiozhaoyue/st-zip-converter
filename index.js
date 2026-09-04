@@ -5,9 +5,14 @@
  * 2. SillyTavern / Luker 第三方扩展插件模式
  */
 
-import * as zip from '@zip.js/zip.js';
-import { convert, TARGETS } from './src/core/transform.js';
-import { zipIo } from './src/core/zip-io.js';
+import { runConversionTask } from './src/core/worker-client.js';
+import { inspectArchive } from './src/core/inspect.js';
+import {
+  setupCategoryFilter,
+  renderCategoryStats,
+  getSelectionState,
+  resetCategoryFilter,
+} from './src/ui/category-filter.js';
 import { detectHost, fetchHostBackup, restoreToLuker, registerMenuButton } from './src/ui/host-bridge.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
@@ -19,6 +24,9 @@ function formatTimestamp() {
 function main() {
   const host = detectHost();
   const view = createViewController();
+
+  // 初始化类目过滤器组件
+  setupCategoryFilter();
 
   // 1. 宿主环境识别与 Badge 标识
   const envBadge = document.getElementById('env-badge');
@@ -72,26 +80,25 @@ function main() {
         view.setProgress(5, `正在从 ${host.platform.toUpperCase()} 拉取当前备份包...`);
 
         const sourceBlob = await fetchHostBackup(host.platform);
-        view.setProgress(30, `备份数据拉取完毕 (${(sourceBlob.size / 1048576).toFixed(1)} MB)，正在转换...`);
+        view.setProgress(20, `备份数据拉取完毕 (${(sourceBlob.size / 1048576).toFixed(1)} MB)，正在多线程转换...`);
 
-        const blobWriter = new zip.BlobWriter('application/zip');
-        const report = await convert(sourceBlob, blobWriter, {
+        const { report, resultBlob } = await runConversionTask({
+          source: sourceBlob,
           target,
-          keepAll: keepAllCheck ? keepAllCheck.checked : false,
-          io: zipIo,
+          options: {
+            keepAll: keepAllCheck ? keepAllCheck.checked : false,
+          },
           onProgress: (cur, total, name) => {
-            const pct = total > 0 ? 30 + Math.round((cur / total) * 60) : 60;
+            const pct = total > 0 ? 20 + Math.round((cur / total) * 75) : 50;
             view.setProgress(pct, `正在写入 [${cur}/${total}]: ${name}`);
           },
         });
 
-        view.setProgress(95, '正在打包生成压缩文件...');
-        const resultBlob = await blobWriter.getData();
         view.setProgress(100, `转换完成！已导出为 ${targetLabel}`);
 
         const filename = `${host.platform}-to-${target}-${formatTimestamp()}.zip`;
         view.triggerDownload(resultBlob, filename);
-        view.renderReport(report.toJSON());
+        view.renderReport(report);
       } catch (err) {
         view.setProgress(100, `导出失败: ${err.message}`);
         console.error(err);
@@ -110,15 +117,24 @@ function main() {
     fileInputEl: document.getElementById('file-input'),
     mainTextEl: document.getElementById('drop-main-text'),
     subTextEl: document.getElementById('drop-sub-text'),
-    onFileReady: (file, detection) => {
+    onFileReady: async (file, detection) => {
       currentFile = file;
       btnConvert.disabled = false;
       // 智能预选：如果源是 ST，默认目标设为 L 或 TT
       if (detection.layout === 'st' && targetSelect) targetSelect.value = 'l';
       if (detection.layout === 'tt' && targetSelect) targetSelect.value = 'pt';
+
+      // 毫秒级中央目录预检并展开类目与脱敏选择器
+      try {
+        const inspectResult = await inspectArchive(file);
+        renderCategoryStats(inspectResult);
+      } catch (err) {
+        console.warn('中央目录预检失败:', err);
+      }
     },
     onError: (err) => {
       btnConvert.disabled = true;
+      resetCategoryFilter();
       console.error(err);
     },
   });
@@ -128,31 +144,33 @@ function main() {
     if (!currentFile) return;
     const target = targetSelect.value;
     const keepAll = keepAllCheck.checked;
+    const selection = getSelectionState();
 
     try {
       btnConvert.disabled = true;
       if (btnRestoreLuker) btnRestoreLuker.disabled = true;
-      view.setProgress(5, '正在读取并解析数据包...');
+      view.setProgress(5, '正在启动异步 Web Worker 线程处理数据包...');
 
-      const blobWriter = new zip.BlobWriter('application/zip');
-      const report = await convert(currentFile, blobWriter, {
+      const { report, resultBlob } = await runConversionTask({
+        source: currentFile,
         target,
-        keepAll,
-        io: zipIo,
+        options: {
+          keepAll,
+          selection,
+        },
         onProgress: (cur, total, name) => {
-          const pct = total > 0 ? 10 + Math.round((cur / total) * 80) : 50;
-          view.setProgress(pct, `正在转换 [${cur}/${total}]: ${name}`);
+          const pct = total > 0 ? 10 + Math.round((cur / total) * 85) : 50;
+          view.setProgress(pct, `多线程处理中 [${cur}/${total}]: ${name}`);
         },
       });
 
-      view.setProgress(95, '正在压缩生成产物...');
-      lastConvertedBlob = await blobWriter.getData();
+      lastConvertedBlob = resultBlob;
       view.setProgress(100, '转换完成！已触发浏览器下载');
 
       const baseName = currentFile.name.replace(/\.zip$/i, '');
       const outName = `${baseName}-to-${target}-${formatTimestamp()}.zip`;
       view.triggerDownload(lastConvertedBlob, outName);
-      view.renderReport(report.toJSON());
+      view.renderReport(report);
 
       if (host.platform === 'luker' && btnRestoreLuker && target === 'l') {
         btnRestoreLuker.disabled = false;

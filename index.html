@@ -50,6 +50,22 @@
         <p class="sub-text" id="drop-sub-text">支持任意四平台（ST / Luker / TT / PT）导出的备份压缩包</p>
       </div>
 
+      <!-- Section 2.5: 数据包内容与脱敏提取类目筛选 -->
+      <div class="category-panel" id="category-panel" style="display: none;">
+        <div class="category-header">
+          <span class="category-title">🔍 数据包内容与脱敏提取:</span>
+          <div class="preset-buttons">
+            <button type="button" class="btn-preset" data-preset="all">全部</button>
+            <button type="button" class="btn-preset" data-preset="chars">仅角色卡</button>
+            <button type="button" class="btn-preset" data-preset="chars-worlds">角色+世界书</button>
+            <button type="button" class="btn-preset" data-preset="safe">安全脱敏 (无Key/聊天)</button>
+          </div>
+        </div>
+        <div class="category-grid" id="category-checkboxes">
+          <!-- 动态注入各类目 Checkbox 与计数 -->
+        </div>
+      </div>
+
       <div class="controls-row">
         <div class="target-select-group">
           <label for="target-select">目标平台:</label>
@@ -101,6 +117,11 @@
       <details class="log-accordion" id="discards-accordion" style="display: none;">
         <summary id="discards-summary">丢弃项清单 (0 条)</summary>
         <pre id="discards-log"></pre>
+      </details>
+
+      <details class="log-accordion" id="filtered-accordion" style="display: none;">
+        <summary id="filtered-summary" style="color: var(--accent);">脱敏与排除清单 (0 条)</summary>
+        <pre id="filtered-log"></pre>
       </details>
 
       <details class="log-accordion" id="warnings-accordion" style="display: none;">

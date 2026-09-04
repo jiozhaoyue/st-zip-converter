@@ -61,6 +61,7 @@ export class Report {
   #target;
   #modules = new Map();
   #dropped = [];
+  #filtered = [];
   #warnings = [];
   #synthesized = [];
 
@@ -80,7 +81,7 @@ export class Report {
   #module(name) {
     let bucket = this.#modules.get(name);
     if (!bucket) {
-      bucket = { copied: 0, dropped: 0, synthesized: 0, bytes: 0 };
+      bucket = { copied: 0, dropped: 0, synthesized: 0, filtered: 0, bytes: 0 };
       this.#modules.set(name, bucket);
     }
     return bucket;
@@ -96,6 +97,12 @@ export class Report {
     const bucket = this.#module(classifyModule(hubPath));
     bucket.dropped += 1;
     this.#dropped.push({ path: hubPath, reason });
+  }
+
+  filtered(hubPath, category) {
+    const bucket = this.#module(classifyModule(hubPath));
+    bucket.filtered = (bucket.filtered || 0) + 1;
+    this.#filtered.push({ path: hubPath, category });
   }
 
   synthesized(hubPath) {
@@ -114,11 +121,13 @@ export class Report {
       target: this.#target,
       modules: Object.fromEntries([...this.#modules.entries()].sort(([a], [b]) => a.localeCompare(b))),
       dropped: this.#dropped,
+      filtered: this.#filtered,
       synthesized: this.#synthesized,
       warnings: this.#warnings,
       totals: {
         copied: [...this.#modules.values()].reduce((sum, m) => sum + m.copied, 0),
         dropped: this.#dropped.length,
+        filtered: this.#filtered.length,
         synthesized: this.#synthesized.length,
         warnings: this.#warnings.length,
       },
