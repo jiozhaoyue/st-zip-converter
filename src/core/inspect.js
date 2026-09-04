@@ -4,21 +4,31 @@ import { detectFromReader, LAYOUTS } from './detect.js';
 export const CATEGORIES = Object.freeze({
   CHARACTERS: 'characters',
   CHATS: 'chats',
-  WORLDS: 'worlds',
+  LOREBOOKS: 'lorebooks',
+  PRESETS: 'presets',
   SETTINGS: 'settings',
   SECRETS: 'secrets',
-  AVATARS: 'avatars',
+  ASSETS: 'assets',
   EXTENSIONS: 'extensions',
+  GLOBAL_EXTENSIONS: 'globalExtensions',
+  VECTORS: 'vectors',
+
+  // 向后兼容别名
+  WORLDS: 'lorebooks',
+  AVATARS: 'assets',
 });
 
 export const CATEGORY_LABELS = Object.freeze({
-  [CATEGORIES.CHARACTERS]: '角色卡',
-  [CATEGORIES.CHATS]: '聊天记录',
-  [CATEGORIES.WORLDS]: '世界书',
-  [CATEGORIES.SETTINGS]: '配置预设',
-  [CATEGORIES.SECRETS]: 'API 密钥',
-  [CATEGORIES.AVATARS]: '用户头像',
-  [CATEGORIES.EXTENSIONS]: '第三方扩展',
+  [CATEGORIES.CHARACTERS]: '角色卡 (Characters)',
+  [CATEGORIES.CHATS]: '聊天记录 (Chats)',
+  [CATEGORIES.LOREBOOKS]: '世界书 (World Info)',
+  [CATEGORIES.PRESETS]: '预设配置 (Presets & Prompts)',
+  [CATEGORIES.SETTINGS]: '系统设置 (Settings)',
+  [CATEGORIES.SECRETS]: 'API 密钥 (Secrets)',
+  [CATEGORIES.ASSETS]: '素材与头像 (Assets & Avatars)',
+  [CATEGORIES.EXTENSIONS]: '用户扩展 (User Extensions)',
+  [CATEGORIES.GLOBAL_EXTENSIONS]: '第三方扩展 (3rd-party Extensions)',
+  [CATEGORIES.VECTORS]: '向量数据库 (Vectors)',
 });
 
 const TT_USER_PREFIX = 'data/default-user/';
@@ -26,7 +36,7 @@ const TT_THIRD_PARTY_PREFIX = 'data/extensions/third-party/';
 const TT_SOURCES_PREFIX = 'data/_tauritavern/extension-sources/';
 
 /**
- * 判断指定 hub 路径所属的业务类目
+ * 判断指定 hub 路径所属的业务类目 (对齐 ST / Luker 10 大标准备份项)
  * @param {string} hubPath
  * @returns {string|null}
  */
@@ -34,22 +44,63 @@ export function categoryOfHubPath(hubPath) {
   if (hubPath === 'secrets.json') return CATEGORIES.SECRETS;
   if (
     hubPath === 'settings.json'
-    || hubPath.startsWith('OpenAI Settings/')
-    || hubPath.startsWith('presets/')
     || hubPath === 'tauritavern-settings.json'
+    || hubPath.startsWith('backups/')
+    || hubPath === 'backups'
   ) {
     return CATEGORIES.SETTINGS;
   }
   if (hubPath.startsWith('characters/') || hubPath === 'characters') return CATEGORIES.CHARACTERS;
-  if (hubPath.startsWith('chats/') || hubPath === 'chats') return CATEGORIES.CHATS;
-  if (hubPath.startsWith('worlds/') || hubPath === 'worlds') return CATEGORIES.WORLDS;
-  if (hubPath.startsWith('User Avatars/') || hubPath === 'User Avatars') return CATEGORIES.AVATARS;
+  if (
+    hubPath.startsWith('chats/')
+    || hubPath === 'chats'
+    || hubPath.startsWith('groups/')
+    || hubPath === 'groups'
+    || hubPath.startsWith('group chats/')
+    || hubPath === 'group chats'
+  ) {
+    return CATEGORIES.CHATS;
+  }
+  if (hubPath.startsWith('worlds/') || hubPath === 'worlds') return CATEGORIES.LOREBOOKS;
+  if (
+    hubPath.startsWith('OpenAI Settings/')
+    || hubPath.startsWith('NovelAI Settings/')
+    || hubPath.startsWith('presets/')
+    || hubPath.startsWith('instruct/')
+    || hubPath.startsWith('context/')
+    || hubPath.startsWith('sysprompt/')
+    || hubPath.startsWith('reasoning/')
+    || hubPath.startsWith('themes/')
+    || hubPath.startsWith('movingUI/')
+    || hubPath.startsWith('QuickReplies/')
+    || hubPath.startsWith('textgen_presets/')
+  ) {
+    return CATEGORIES.PRESETS;
+  }
+  if (
+    hubPath.startsWith('User Avatars/')
+    || hubPath === 'User Avatars'
+    || hubPath.startsWith('backgrounds/')
+    || hubPath === 'backgrounds'
+    || hubPath.startsWith('assets/')
+    || hubPath === 'assets'
+    || hubPath.startsWith('user/')
+    || hubPath === 'user'
+  ) {
+    return CATEGORIES.ASSETS;
+  }
   if (
     hubPath.startsWith('extensions/third-party/')
-    || hubPath.startsWith('extensions/')
     || hubPath.startsWith('_tauritavern/extension-sources/')
+    || hubPath.startsWith('public/scripts/extensions/third-party/')
   ) {
+    return CATEGORIES.GLOBAL_EXTENSIONS;
+  }
+  if (hubPath.startsWith('extensions/') || hubPath === 'extensions') {
     return CATEGORIES.EXTENSIONS;
+  }
+  if (hubPath.startsWith('vectors/') || hubPath === 'vectors') {
+    return CATEGORIES.VECTORS;
   }
   return null;
 }
@@ -66,7 +117,7 @@ export function categoryOfEntry(entryName, layout) {
       return categoryOfHubPath(entryName.slice(TT_USER_PREFIX.length));
     }
     if (entryName.startsWith(TT_THIRD_PARTY_PREFIX) || entryName.startsWith(TT_SOURCES_PREFIX)) {
-      return CATEGORIES.EXTENSIONS;
+      return CATEGORIES.GLOBAL_EXTENSIONS;
     }
     return null;
   }
@@ -98,7 +149,19 @@ export async function inspectArchive(source, { io = zipIo } = {}) {
   // 重新打开遍历条目统计（开销极低，仅读中央目录）
   const scanner = await io.openReader(source);
   const categories = {};
-  for (const cat of Object.values(CATEGORIES)) {
+  const orderedKeys = [
+    CATEGORIES.CHARACTERS,
+    CATEGORIES.CHATS,
+    CATEGORIES.LOREBOOKS,
+    CATEGORIES.PRESETS,
+    CATEGORIES.SETTINGS,
+    CATEGORIES.SECRETS,
+    CATEGORIES.ASSETS,
+    CATEGORIES.EXTENSIONS,
+    CATEGORIES.GLOBAL_EXTENSIONS,
+    CATEGORIES.VECTORS,
+  ];
+  for (const cat of orderedKeys) {
     categories[cat] = {
       count: 0,
       sizeBytes: 0,

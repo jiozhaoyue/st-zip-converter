@@ -50,19 +50,27 @@
         <p class="sub-text" id="drop-sub-text">支持任意四平台（ST / Luker / TT / PT）导出的备份压缩包</p>
       </div>
 
-      <!-- Section 2.5: 数据包内容与脱敏提取类目筛选 -->
+      <!-- Section 2.5: 数据包内容与细粒度类目选择 (对齐 ST / Luker) -->
       <div class="category-panel" id="category-panel" style="display: none;">
         <div class="category-header">
-          <span class="category-title">🔍 数据包内容与脱敏提取:</span>
-          <div class="preset-buttons">
-            <button type="button" class="btn-preset" data-preset="all">全部</button>
-            <button type="button" class="btn-preset" data-preset="chars">仅角色卡</button>
-            <button type="button" class="btn-preset" data-preset="chars-worlds">角色+世界书</button>
-            <button type="button" class="btn-preset" data-preset="safe">安全脱敏 (无Key/聊天)</button>
+          <div class="category-title-group">
+            <span class="category-title">📋 类目选择 (对齐 ST / Luker 原生规范)</span>
+            <span class="category-sub-summary" id="category-summary-badge"></span>
+          </div>
+          <div class="category-actions">
+            <div class="btn-group-main">
+              <button type="button" class="btn-tool" id="btn-select-all" title="勾选所有有效类目">全选</button>
+              <button type="button" class="btn-tool" id="btn-deselect-all" title="取消所有勾选">全不选</button>
+              <button type="button" class="btn-tool" id="btn-invert-select" title="反转当前可用类目的勾选">反选</button>
+            </div>
+            <div class="btn-group-quick">
+              <button type="button" class="btn-tool btn-quick" data-preset="chars" title="仅勾选角色卡与素材">仅角色卡</button>
+              <button type="button" class="btn-tool btn-quick" data-preset="safe" title="脱敏导出：排除密钥与聊天记录">安全脱敏</button>
+            </div>
           </div>
         </div>
         <div class="category-grid" id="category-checkboxes">
-          <!-- 动态注入各类目 Checkbox 与计数 -->
+          <!-- 动态注入全部 10 项细粒度 Checkbox 与体积计数 -->
         </div>
       </div>
 

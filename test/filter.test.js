@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as zip from '@zip.js/zip.js';
 import { zipIo } from '../src/core/zip-io.js';
 import { convert, TARGETS } from '../src/core/transform.js';
-import { inspectArchive, CATEGORIES } from '../src/core/inspect.js';
+import { inspectArchive, CATEGORIES, CATEGORY_LABELS } from '../src/core/inspect.js';
 import { lEntries, stEntries, ttEntries } from '../fixtures/gen.js';
 
 async function createFixtureBlob(entries) {
@@ -25,8 +25,8 @@ async function listEntryNames(blob) {
   return names;
 }
 
-describe('零拷贝中央目录预检与类目聚合 (inspectArchive)', () => {
-  it('正确统计 Luker 固件包中的各类目分布与体积', async () => {
+describe('零拷贝中央目录预检与 10 大标准类目聚合 (inspectArchive)', () => {
+  it('正确统计固件包中的 10 大类目分布与体积 (对齐 ST / Luker 规范)', async () => {
     const blob = await createFixtureBlob(lEntries());
     const info = await inspectArchive(blob);
 
@@ -35,11 +35,28 @@ describe('零拷贝中央目录预检与类目聚合 (inspectArchive)', () => {
     expect(info.totalBytes).toBeGreaterThan(0);
 
     const { categories } = info;
+    // 验证所有 10 项标准类目均被初始化
+    expect(categories[CATEGORIES.CHARACTERS]).toBeDefined();
+    expect(categories[CATEGORIES.CHATS]).toBeDefined();
+    expect(categories[CATEGORIES.LOREBOOKS]).toBeDefined();
+    expect(categories[CATEGORIES.PRESETS]).toBeDefined();
+    expect(categories[CATEGORIES.SETTINGS]).toBeDefined();
+    expect(categories[CATEGORIES.SECRETS]).toBeDefined();
+    expect(categories[CATEGORIES.ASSETS]).toBeDefined();
+    expect(categories[CATEGORIES.EXTENSIONS]).toBeDefined();
+    expect(categories[CATEGORIES.GLOBAL_EXTENSIONS]).toBeDefined();
+    expect(categories[CATEGORIES.VECTORS]).toBeDefined();
+
+    // 验证具体计数
     expect(categories[CATEGORIES.CHARACTERS].count).toBe(1);
     expect(categories[CATEGORIES.CHATS].count).toBe(1);
-    expect(categories[CATEGORIES.WORLDS].count).toBe(1);
+    expect(categories[CATEGORIES.LOREBOOKS].count).toBe(1);
+    expect(categories[CATEGORIES.PRESETS].count).toBe(1); // OpenAI Settings
+    expect(categories[CATEGORIES.SETTINGS].count).toBe(2); // settings.json + backups/auto-2026.json
     expect(categories[CATEGORIES.SECRETS].count).toBe(1);
-    expect(categories[CATEGORIES.EXTENSIONS].count).toBe(2); // manifest.json + index.js
+    expect(categories[CATEGORIES.ASSETS].count).toBe(1); // User Avatars
+    expect(categories[CATEGORIES.GLOBAL_EXTENSIONS].count).toBe(2); // extensions/third-party
+    expect(categories[CATEGORIES.VECTORS].count).toBe(0); // 空类目
   });
 
   it('正确统计 TT 固件包中的 data/default-user 类目分布', async () => {
@@ -50,7 +67,7 @@ describe('零拷贝中央目录预检与类目聚合 (inspectArchive)', () => {
     const { categories } = info;
     expect(categories[CATEGORIES.CHARACTERS].count).toBe(1);
     expect(categories[CATEGORIES.SECRETS].count).toBe(1);
-    expect(categories[CATEGORIES.EXTENSIONS].count).toBeGreaterThanOrEqual(2);
+    expect(categories[CATEGORIES.GLOBAL_EXTENSIONS].count).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -90,7 +107,7 @@ describe('类目选择过滤与安全脱敏导出 (convert with selection)', () 
     expect(manifestData.selection.characters).toBe(true);
   });
 
-  it('仅角色卡与世界书: 排除聊天记录、扩展与密钥', async () => {
+  it('精细勾选: 仅导出角色卡与素材，排除第三方扩展、聊天、预设与密钥', async () => {
     const sourceBlob = await createFixtureBlob(lEntries());
     const targetWriter = new zip.BlobWriter('application/zip');
 
@@ -99,10 +116,14 @@ describe('类目选择过滤与安全脱敏导出 (convert with selection)', () 
       io: zipIo,
       selection: {
         characters: true,
-        worlds: true,
+        assets: true,
+        lorebooks: false,
         chats: false,
         secrets: false,
+        presets: false,
+        settings: false,
         extensions: false,
+        globalExtensions: false,
       },
     });
 
@@ -111,11 +132,13 @@ describe('类目选择过滤与安全脱敏导出 (convert with selection)', () 
 
     // 应该保留
     expect(names.some((n) => n.includes('Fixture Character.png'))).toBe(true);
-    expect(names.some((n) => n.includes('fixture-world.json'))).toBe(true);
+    expect(names.some((n) => n.includes('fixture-avatar.png'))).toBe(true);
 
     // 应该被排除
     expect(names.some((n) => n.includes('chats/'))).toBe(false);
     expect(names.some((n) => n.includes('secrets.json'))).toBe(false);
+    expect(names.some((n) => n.includes('fixture-world.json'))).toBe(false);
+    expect(names.some((n) => n.includes('OpenAI Settings/'))).toBe(false);
     expect(names.some((n) => n.includes('extensions/'))).toBe(false);
     expect(names.some((n) => n.includes('_tauritavern/extension-sources/'))).toBe(false);
   });

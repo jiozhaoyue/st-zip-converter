@@ -401,16 +401,14 @@ async function emitSynthesized(writer, report, context, target, selection) {
   if (target === TARGETS.L) {
     const baseSelection = { ...L_SELECTION };
     if (selection && typeof selection === 'object') {
-      if (selection.characters === false) baseSelection.characters = false;
-      if (selection.chats === false) baseSelection.chats = false;
-      if (selection.worlds === false) baseSelection.lorebooks = false;
-      if (selection.settings === false) baseSelection.settings = false;
-      if (selection.secrets === false) baseSelection.secrets = false;
-      if (selection.avatars === false) baseSelection.assets = false;
-      if (selection.extensions === false) {
-        baseSelection.extensions = false;
-        baseSelection.globalExtensions = false;
+      for (const [key, val] of Object.entries(selection)) {
+        if (key in baseSelection) {
+          baseSelection[key] = Boolean(val);
+        }
       }
+      // 兼容旧版/别名:
+      if (selection.worlds === false) baseSelection.lorebooks = false;
+      if (selection.avatars === false) baseSelection.assets = false;
     }
     const manifest = {
       schemaVersion: 1,
