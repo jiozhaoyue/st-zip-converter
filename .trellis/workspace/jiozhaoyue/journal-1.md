@@ -125,3 +125,42 @@
 ### Next Steps
 
 - 根据用户需求持续迭代功能或接入实际 SillyTavern 环境做现场联调
+
+
+## Session 5: Web Worker 多线程加速与独立模式类目选择性导出/安全脱敏落地
+<!-- trellis-session: v=2 fp=ca17d12f30dbb4fa -->
+
+**Date**: 2026-09-04
+**Task**: Web Worker 多线程加速与独立模式类目选择性导出/安全脱敏落地
+**Branch**: `main`
+
+### Summary
+
+实现零拷贝中央目录预检与资产聚合（inspectArchive），支持按角色卡/聊天记录/世界书/密钥/扩展等细粒度类目选择性导出；新增安全脱敏预设一键移除 secrets.json 与私密聊天；引入 Dedicated Web Worker 异步压缩解压流水线（worker-client + converter-worker），保证 1GB+ 大包转换时 UI 60fps 丝滑流畅并提供 Node 环境透明降级；56 项测试全绿，Vite 构建 674ms 完成。
+
+### Main Changes
+
+- 新增 src/core/inspect.js：零拷贝中央目录预检，统计各类目文件数量与解压字节
+- 增强 src/core/transform.js 与 report.js：支持 options.selection 过滤与 report.filtered 记录
+- 新增 src/core/converter-worker.js 与 worker-client.js：实现 Dedicated Web Worker 异步转换及 Node/Vitest 降级回退
+- 新增 src/ui/category-filter.js 与 index.html/style.css 升级：动态渲染类目勾选卡片并提供安全脱敏等一键预设
+- 配置 vite.config.js worker.format 为 es，修复 Worker 代码分割与打包
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f1af968` | feat: 实现 Web Worker 多线程压缩解压与类目选择性导出/安全脱敏功能 |
+
+### Testing
+
+- [OK] npm test (56 passed, 2 skipped)
+- [OK] npm run build (Vite 674ms clean build with dedicated worker bundle)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 用户在浏览器中打开 http://localhost:5173 进行新特性的直观体验与大包验证
