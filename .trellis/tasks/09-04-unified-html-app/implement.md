@@ -4,11 +4,11 @@
 
 ---
 
-## Phase A: 工程骨架与 Vite 开发服务搭建
-- [ ] A1 保留旧版代码作为实现对照参考；引入 Vite（`vite`）配置轻量开发服务器。
-- [ ] A2 更新 `package.json`，配置 `npm start`（vite）、`build`、依赖与仓库元数据。
-- [ ] A3 建立标准 `manifest.json`（SillyTavern 标准第三方扩展清单）。
-- [ ] A4 搭建根目录语义化 `index.html` 与响应式现代主题 `style.css`（支持暗色/明色适配与移动端自适应）。
+## Phase A: 工程骨架与 Vite 开发服务搭建 ✅
+- [x] A1 保留旧版代码作为实现对照参考；引入 Vite（`vite`）配置轻量开发服务器。
+- [x] A2 更新 `package.json`，配置 `npm start`（vite）、`build`、依赖与仓库元数据。
+- [x] A3 建立标准 `manifest.json`（SillyTavern 标准第三方扩展清单）。
+- [x] A4 搭建根目录语义化 `index.html` 与响应式现代主题 `style.css`（支持暗色/明色适配与移动端自适应）。
 
 ## Phase B: 纯前端转换引擎收敛 (`src/core/`)
 - [ ] B1 建立 `src/core/zip-io.js`，基于 `@zip.js/zip.js` 统一封装纯浏览器 Blob 流式读写适配器。

@@ -17,9 +17,14 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
+    "vite": "^7.3.6",
     "vitest": "^3.2.4"
   },
   "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "vitest run",
     "gen-fixtures": "node fixtures/gen.js",
     "build:plugins": "node src/plugins/build.mjs"

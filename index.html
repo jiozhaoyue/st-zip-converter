@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>st-zip-converter - 酒馆数据包互转器</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="app-container" id="app">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="title-group">
+        <h1>st-zip-converter</h1>
+        <p>跨酒馆（SillyTavern / Luker / PureTavern / TauriTavern）数据包互转工具</p>
+      </div>
+      <div class="badge" id="env-badge">独立 Web 模式</div>
+    </header>
+
+    <!-- Section 1: 宿主快捷导出区 (仅在酒馆/Luker插件环境中激活) -->
+    <section class="card" id="host-export-card" style="display: none;">
+      <h2 class="card-title">🚀 导出当前酒馆数据包</h2>
+      <div class="export-grid">
+        <button class="btn-export btn-st" data-target="st">
+          <span>→ SillyTavern</span>
+          <span class="desc">摊平布局 / 基础结构</span>
+        </button>
+        <button class="btn-export btn-luker" data-target="l">
+          <span>→ Luker</span>
+          <span class="desc">含 manifest.json / 全选</span>
+        </button>
+        <button class="btn-export btn-tt" data-target="tt">
+          <span>→ TauriTavern</span>
+          <span class="desc">data/ 根 / 系统分离</span>
+        </button>
+        <button class="btn-export btn-pt" data-target="pt">
+          <span>→ PureTavern</span>
+          <span class="desc">自动迁移扩展来源 / TT布局</span>
+        </button>
+      </div>
+      <p class="notice-tip" id="host-tip">点击即刻从当前酒馆一键导出并转换为目标平台包。</p>
+    </section>
+
+    <!-- Section 2: 外部数据包互转区 (全环境通用) -->
+    <section class="card" id="external-convert-card">
+      <h2 class="card-title">📦 转换任意酒馆 Zip 数据包</h2>
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="file-input" accept=".zip" style="display: none;">
+        <p class="main-text" id="drop-main-text">将酒馆 Zip 数据包拖放到此处，或点击浏览选择</p>
+        <p class="sub-text" id="drop-sub-text">支持任意四平台（ST / Luker / TT / PT）导出的备份压缩包</p>
+      </div>
+
+      <div class="controls-row">
+        <div class="target-select-group">
+          <label for="target-select">目标平台:</label>
+          <select id="target-select" class="select-input">
+            <option value="st">SillyTavern (ST 摊平)</option>
+            <option value="l">Luker (带清单)</option>
+            <option value="tt">TauriTavern (TT 布局)</option>
+            <option value="pt" selected>PureTavern (PT 兼容)</option>
+          </select>
+        </div>
+
+        <label class="checkbox-group">
+          <input type="checkbox" id="keep-all-check">
+          <span>保留缓存与私有数据 (--keep-all)</span>
+        </label>
+
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-primary" id="btn-convert" disabled>开始转换并下载</button>
+          <button class="btn-primary" id="btn-restore-luker" style="display: none; background: var(--accent-luker);" disabled>直接恢复到当前用户</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3: 实时进度与状态 -->
+    <div class="progress-container" id="progress-container">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progress-bar-fill"></div>
+      </div>
+      <div class="progress-text">
+        <span id="status-label">准备就绪</span>
+        <span id="progress-percent">0%</span>
+      </div>
+    </div>
+
+    <!-- Section 4: 转换报告卡片 -->
+    <section class="card report-panel" id="report-panel">
+      <h2 class="card-title">📊 转换报告与资产统计</h2>
+      <div class="module-grid" id="module-grid">
+        <div class="module-item"><span class="count" id="count-chars">0</span><span class="label">角色卡</span></div>
+        <div class="module-item"><span class="count" id="count-chats">0</span><span class="label">聊天记录</span></div>
+        <div class="module-item"><span class="count" id="count-lorebooks">0</span><span class="label">世界书</span></div>
+        <div class="module-item"><span class="count" id="count-presets">0</span><span class="label">预设配置</span></div>
+        <div class="module-item"><span class="count" id="count-assets">0</span><span class="label">资产与头像</span></div>
+        <div class="module-item"><span class="count" id="count-extensions">0</span><span class="label">扩展</span></div>
+        <div class="module-item"><span class="count" id="count-settings">0</span><span class="label">系统设置</span></div>
+        <div class="module-item"><span class="count" id="count-secrets" style="color: var(--success);">0</span><span class="label">密钥(已保护)</span></div>
+      </div>
+
+      <details class="log-accordion" id="discards-accordion" style="display: none;">
+        <summary id="discards-summary">丢弃项清单 (0 条)</summary>
+        <pre id="discards-log"></pre>
+      </details>
+
+      <details class="log-accordion" id="warnings-accordion" style="display: none;">
+        <summary id="warnings-summary">警告与适配提示 (0 条)</summary>
+        <pre id="warnings-log"></pre>
+      </details>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>st-zip-converter · 遵循 SillyTavern 扩展规范 · <a href="https://github.com/jiozhaoyue/st-zip-converter" target="_blank" rel="noopener">GitHub 仓库</a></p>
+    </footer>
+  </div>
+
+  <script type="module" src="./index.js"></script>
+</body>
+</html>
