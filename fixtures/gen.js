@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { ZipWriter } from '../src/core/write.js';
+import { zipIo } from '../src/core/zip-io.js';
 
 /**
  * 生成四个平台的迷你合成包,覆盖 R2 内容集:
@@ -108,8 +108,8 @@ export function lEntries() {
 export function ttEntries() {
   const prefix = (name) => `data/default-user/${name}`;
   return [
-    // 用户目录整体套 data/default-user 前缀
-    ...flatUserEntries().map(([name, data]) => [prefix(name), data]),
+    // 用户目录整体套 data/default-user 前缀 (TT 的扩展放在 data/extensions/third-party)
+    ...flatUserEntries().filter(([name]) => !name.startsWith('extensions/')).map(([name, data]) => [prefix(name), data]),
     // TT 私有:扩展包文件在 data 根的 extensions/third-party,来源记录在 _tauritavern
     ['data/extensions/third-party/test-extension/manifest.json', json(MANIFEST)],
     ['data/extensions/third-party/test-extension/index.js', EXT_INDEX],
@@ -131,9 +131,9 @@ export async function generateAll(outDir) {
   ];
   for (const [fileName, entries] of packs) {
     const outPath = path.join(outDir, fileName);
-    const writer = await ZipWriter.create(outPath);
+    const writer = await zipIo.createWriter(outPath);
     for (const [name, data] of entries) {
-      writer.add(name, data);
+      await writer.add(name, data);
     }
     await writer.close();
     outputs[fileName] = outPath;

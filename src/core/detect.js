@@ -1,3 +1,5 @@
+import { zipIo } from './zip-io.js';
+
 export const LAYOUTS = Object.freeze({
   ST: 'st',            // zip 根摊平 ST 用户目录,无 manifest
   L: 'l',              // 同 ST 摊平 + manifest.json{schemaVersion,handle,selection}
@@ -67,3 +69,17 @@ function parseJson(data) {
     return null;
   }
 }
+
+/**
+ * 识别指定 zip 源（Blob/File 或路径）的布局
+ * @param {Blob|File|string} source
+ */
+export async function detectLayout(source) {
+  const reader = await zipIo.openReader(source);
+  try {
+    return await detectFromReader(reader);
+  } finally {
+    await reader.close();
+  }
+}
+

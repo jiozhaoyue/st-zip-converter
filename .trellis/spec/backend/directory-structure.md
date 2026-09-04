@@ -18,32 +18,34 @@ Key design principles:
 ## Directory Layout
 
 ```
-tavern-convert/
-├── cli.js                  # CLI entry point (Node.js shebang, parseArgs, exit codes)
+st-zip-converter/
+├── index.html              # Trinity web entry point (SillyTavern modal / Standalone / GitHub Pages)
+├── index.js                # Top-level ESM controller & lifecycle coordinator
+├── style.css               # Responsive SillyTavern dark/light style sheet
+├── manifest.json           # Standard SillyTavern third-party extension manifest
 ├── src/
 │   ├── core/               # Platform-agnostic conversion & transform engine
 │   │   ├── detect.js       # Format layout detection (ST, L, TT, PT)
 │   │   ├── null-writer.js  # Null writer for dry-run inspection without disk writes
-│   │   ├── read.js         # Streaming zip reader abstraction
 │   │   ├── report.js       # Transformation report and structured statistics
 │   │   ├── transform.js    # Core conversion pipeline (hub normalization + target adapter)
-│   │   └── write.js        # Streaming zip writer abstraction
-│   └── io/                 # Runtime-specific IO adapter implementations
-│       ├── node-io.js      # Node.js runtime adapter (yauzl / yazl lazy streams)
-│       └── zipjs-io.js     # Universal/Browser runtime adapter (@zip.js/zip.js)
+│   │   └── zip-io.js       # Universal standard zip IO adapter (@zip.js/zip.js)
+│   └── ui/                 # UI components and host bridge
+│       ├── host-bridge.js  # Host sniffing (SillyTavern extension vs standalone web)
+│       ├── file-drop.js    # Drag-and-drop file upload & format detection card
+│       └── view.js         # Progress bar, report display accordion, and download trigger
 ├── fixtures/               # Generated test fixture packages for all 4 layouts
 │   └── gen.js              # Fixture generator script
-├── test/                   # Vitest unit, integration, mirror, and parity tests
+├── test/                   # Vitest unit, integration, mirror, and web engine tests
 │   ├── convert.test.js     # Transformation rules & matrix unit tests
 │   ├── detect.test.js      # Format detection unit tests
 │   ├── mirror.test.js      # Platform import router mirroring tests
-│   ├── plugin.test.js      # Plugin bundle smoke tests
+│   ├── plugin.test.js      # Plugin manifest & web assets structure tests
 │   ├── read-write.test.js  # Zip read/write roundtrip tests
 │   ├── real-samples.test.js# Real dataset routing verification
 │   ├── roundtrip.test.js   # CRC32 roundtrip integrity tests
-│   ├── termux.test.js      # Termux compatibility & 192MiB V8 heap tests
 │   ├── verify-secrets.mjs  # Cryptographic secret preservation verification
-│   └── zipjs-io.test.js    # zip.js vs node.js IO bit-parity tests
+│   └── web-converter.test.js # Pure web Blob-to-Blob conversion tests
 └── out/                    # Converted artifacts and dry-run execution reports
 ```
 
@@ -52,20 +54,21 @@ tavern-convert/
 ## Module Organization
 
 ### 1. `src/core/`
-- **Zero runtime bindings**: Must NOT directly import Node `fs`, `path` (use POSIX zip path conventions `/`), or browser globals.
-- **Pure contract**: Accepts generic `io` adapter adhering to `{ detectLayout, ZipReader, ZipWriter, NullZipWriter }`.
+- **Zero Node.js runtime bindings**: Relies purely on Web APIs (`Blob`, `Uint8Array`, `TransformStream`, `TextDecoder`) and `@zip.js/zip.js`.
+- **Pure contract**: Accepts generic `io` adapter adhering to `{ openReader, createWriter }`, defaulting to `zipIo`.
 - **Determinism**: Synthetic entries (e.g. `manifest.json`, `_tauritavern/extension-sources/`) must be sorted deterministically and placed at the tail of the archive with fixed timestamps (`2020-01-01T00:00:00.000Z`).
 
-### 2. `src/io/`
-- Encapsulates zip engine specific APIs:
-  - `node-io.js`: Uses `yauzl` for reading and `yazl` with `addReadStreamLazy` for writing to prevent thread pool congestion.
-  - `zipjs-io.js`: Uses `@zip.js/zip.js` with `BlobReader` and `BlobWriter`.
-- Both must produce bit-for-bit or entry-for-entry identical output (verified by `test/zipjs-io.test.js`).
+### 2. `src/core/zip-io.js`
+- Encapsulates universal zip IO:
+  - Supports browser `Blob` / `File` as input and `zip.BlobWriter` as output.
+  - Supports Node.js file path strings transparently for test suites and headless benchmarks.
+  - Implements an internal sequential Promise queue to prevent concurrent stream write contention on the same zip file.
+  - Automatically deduplicates duplicate entries to ensure archive integrity.
 
-### 3. `cli.js`
-- Parses CLI flags via Node.js built-in `util.parseArgs` (zero external CLI framework dependencies).
-- Formats reports for human terminal output or machine-readable JSON (`--json`).
-- Handles process exit codes: `0` (success), `1` (conversion failure), `2` (CLI usage error).
+### 3. `src/ui/`
+- `host-bridge.js`: Detects whether running inside SillyTavern / Luker iframe/parent environment or standalone web. Manages CSRF tokens and automated `/api/users/backup` export triggers.
+- `file-drop.js`: Drag-and-drop file target and dynamic layout detection card.
+- `view.js`: Progress bars, live state management, report details, and blob download dispatching.
 
 ---
 

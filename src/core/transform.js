@@ -245,7 +245,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
           if (rest === name + '/manifest.json') {
             const data = await entry.read();
             noteExtensionPackage(context, migratedHub, data);
-            writer.add(outPath, data);
+            await writer.add(outPath, data);
           } else {
             if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
           }
@@ -268,7 +268,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
         if (extensionRelativePath(routed.hubPath) === 'manifest.json') {
           const data = await entry.read();
           noteExtensionPackage(context, routed.hubPath, data);
-          writer.add(outPath, data);
+          await writer.add(outPath, data);
           report.copied(routed.hubPath, entry.uncompressedSize);
           continue;
         }

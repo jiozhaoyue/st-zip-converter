@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { ZipReader } from '../src/core/read.js';
-import { ZipWriter } from '../src/core/write.js';
-import { nodeIo } from '../src/io/node-io.js';
+import { zipIo } from '../src/core/zip-io.js';
 import { convert, TARGETS } from '../src/core/transform.js';
 import { stEntries, lEntries, ttEntries } from '../fixtures/gen.js';
 
@@ -25,19 +23,19 @@ async function tmpDir() {
 async function zipFrom(entries) {
   const dir = await tmpDir();
   const outPath = path.join(dir, 'in.zip');
-  const writer = await ZipWriter.create(outPath);
+  const writer = await zipIo.createWriter(outPath);
   for (const [name, data] of entries) {
-    writer.add(name, data);
+    await writer.add(name, data);
   }
   await writer.close();
   return outPath;
 }
 
 async function readZipMap(outPath) {
-  const reader = await ZipReader.open(outPath);
+  const reader = await zipIo.openReader(outPath);
   const map = new Map();
   for await (const entry of reader.entries()) {
-    map.set(entry.fileName, await entry.read());
+    map.set(entry.fileName, Buffer.from(await entry.read()));
   }
   await reader.close();
   return map;
@@ -47,7 +45,7 @@ async function convertFixture(entries, target) {
   const source = await zipFrom(entries);
   const dir = await tmpDir();
   const outPath = path.join(dir, `out-${target}.zip`);
-  await convert(source, outPath, { target, io: nodeIo });
+  await convert(source, outPath, { target, io: zipIo });
   return readZipMap(outPath);
 }
 

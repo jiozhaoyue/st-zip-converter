@@ -21,8 +21,8 @@
 - [x] C3 实现 `src/ui/view.js`：状态机流转、进度条、四平台目标选择联动、转换报告摘要卡片、多项警告折叠面板与一键下载。
 - [x] C4 汇聚于主入口 `index.js`，完成模块拼装与生命周期初始化。
 
-## Phase D: 验证、旧代码清理与 GitHub Pages 部署
-- [ ] D1 启动本地 Vite 开发服务（`npm start`）进行全平台双向数据包转换测试（ST ↔ L ↔ TT ↔ PT）。
-- [ ] D2 在真实或本地酒馆第三方扩展目录下验证插件自动注册、一键备份转换功能。
+## Phase D: 验证、旧代码清理与 GitHub Pages 部署 ✅
+- [x] D1 启动本地 Vite 开发服务（`npm start`）进行全平台双向数据包转换测试（ST ↔ L ↔ TT ↔ PT）。
+- [x] D2 在真实或本地酒馆第三方扩展目录下验证插件自动注册、一键备份转换功能。
 - [x] D3 编写 GitHub Pages 自动化部署配置（`.github/workflows/deploy.yml`）并在 README.md 中编写详细的使用与部署指引。
-- [ ] D4 验证全部通过后，彻底删除旧版 `cli.js`、`src/io/node-io.js`、`src/plugins/build.mjs` 及 `yauzl`/`yazl` 依赖。
+- [x] D4 验证全部通过后，彻底删除旧版 `cli.js`、`src/io/node-io.js`、`src/plugins/build.mjs` 及 `yauzl`/`yazl` 依赖。

@@ -1,59 +1,64 @@
-# Directory Structure (Tavern In-App Plugins)
+# Directory Structure (Trinity Web & Extension Architecture)
 
-> How in-app browser plugins for SillyTavern and Luker are organized and built.
+> How the "Trinity" web application (`st-zip-converter`) is organized: SillyTavern standard extension, local standalone web, and GitHub Pages deployment.
 
 ---
 
 ## Overview
 
-The "frontend" layer consists of browser extensions injected directly into SillyTavern and Luker web interfaces. They provide in-app export buttons allowing users to download backups transformed on-the-fly to another platform's format without using the CLI.
+`st-zip-converter` adopts a **Trinity Architecture**:
+1. **SillyTavern / Luker Extension**: Git clone directly into `public/scripts/extensions/third-party/st-zip-converter`. SillyTavern loads `manifest.json` and imports root `index.js`.
+2. **Local Standalone Application**: Run `npm start` (Vite dev server) to open `http://localhost:5173` for standalone desktop / browser conversion.
+3. **GitHub Pages Web App**: Automated static site deployment via `.github/workflows/deploy.yml` with clean relative assets (`vite build --base=./`).
 
 Key principles:
-- **Shared Codebase**: Both SillyTavern and Luker plugins share `src/plugins/plugin.js`. Platform specifics are injected at build-time via esbuild `define`.
-- **Zero External Dependencies**: Bundles are standalone IIFEs (~158 KiB) with all `@zip.js/zip.js` code and deflater WASM base64-inlined. No internet access or CDN imports needed.
-- **Isomorphic Core**: The plugin executes the identical transformation rules (`src/core/transform.js`) used by the CLI, swapped only with `src/io/zipjs-io.js`.
+- **Zero Base64 Inlining**: Strictly avoid monolithic inline HTML. Maintain standard separated web files (`index.html`, `style.css`, `index.js`, `manifest.json`).
+- **Standard ESM Modules**: Native browser ES modules loaded directly or bundled cleanly via Vite.
+- **Adaptive Host Sniffing**: `src/ui/host-bridge.js` dynamically sniffs if running inside SillyTavern/Luker (mounting quick backup buttons in the host UI) or standalone web (showing file drag-and-drop zone).
 
 ---
 
 ## Directory Layout
 
 ```
-tavern-convert/
+st-zip-converter/
+├── index.html              # Trinity semantic web interface
+├── index.js                # ESM main entry & lifecycle controller
+├── style.css               # SillyTavern dark/light responsive styles
+├── manifest.json           # Standard SillyTavern extension manifest
 ├── src/
-│   ├── plugins/
-│   │   ├── build.mjs       # esbuild build script for ST & Luker targets
-│   │   └── plugin.js       # Shared browser plugin source logic & UI mounting
-│   └── io/
-│       └── zipjs-io.js     # Universal IO adapter backed by @zip.js/zip.js
-└── dist/
-    └── plugins/
-        ├── st/             # Built plugin for SillyTavern
-        │   ├── index.js    # Self-contained IIFE bundle
-        │   └── manifest.json
-        └── luker/          # Built plugin for Luker
-            ├── index.js    # Self-contained IIFE bundle
-            └── manifest.json
+│   ├── core/               # Pure Web conversion engine
+│   │   ├── detect.js       # Layout detection (ST, L, TT, PT)
+│   │   ├── null-writer.js  # Null writer for dry-run inspection
+│   │   ├── report.js       # Structured conversion reports
+│   │   ├── transform.js    # Core hub transform & routing rules
+│   │   └── zip-io.js       # Stream IO adapter (@zip.js/zip.js)
+│   └── ui/                 # UI components and host bridge
+│       ├── host-bridge.js  # Host detection (SillyTavern vs standalone) & backup API
+│       ├── file-drop.js    # Drag-and-drop area & format inspection card
+│       └── view.js         # Progress bar, report display accordion, and download trigger
+├── fixtures/               # Deterministic fixture generation
+│   └── gen.js
+├── test/                   # Vitest unit & integration tests
+│   ├── plugin.test.js      # Extension structure and manifest validation
+│   └── web-converter.test.js # Pure web Blob-to-Blob conversion verification
+└── dist/                   # Production Vite build output (for GitHub Pages / distribution)
 ```
 
 ---
 
-## Module Organization & Build Pipeline
+## Component Architecture
 
-### 1. Source Logic (`src/plugins/plugin.js`)
-- Handles DOM detection, UI injection into `#extensionsMenu`, fallback floating action button, status display, and triggering file downloads via `URL.createObjectURL(blob)`.
-- Calls platform backup endpoints (`POST /api/users/backup`) with appropriate CSRF headers.
+### 1. `src/ui/host-bridge.js`
+- Checks `window.SillyTavern` or host DOM markers to determine environment.
+- Inside SillyTavern: registers extension settings/button, fetches CSRF tokens, and triggers `/api/users/backup` for 1-click conversion.
+- Standalone web: shows file upload/drop area with direct user-selected zip conversion.
 
-### 2. Build Pipeline (`src/plugins/build.mjs`)
-- Run with `npm run build:plugins`.
-- Uses `esbuild` to compile two targets:
-  - Target 1: `dist/plugins/st/index.js` with `__TAVERN_CONVERT_PLATFORM__ = 'st'`
-  - Target 2: `dist/plugins/luker/index.js` with `__TAVERN_CONVERT_PLATFORM__ = 'luker'`
-- Copies and formats `manifest.json` for each respective platform.
+### 2. `src/ui/file-drop.js`
+- Drag-and-drop file target and dynamic layout detection card.
+- Sniffs file magic bytes and central directory to display format indicator.
 
----
-
-## Naming & Artifact Conventions
-
-- **Entrypoints**: Every plugin distribution folder must contain an `index.js` and a valid `manifest.json`.
-- **Platform Identifiers**: `'st'` for SillyTavern, `'luker'` for Luker.
-- **Exported File Names**: Follows `${platform}-to-${target}-${YYYY-MM-DD-HH-mm-ss}.zip`.
+### 3. `src/ui/view.js`
+- Progress bar and live status updates during conversion.
+- Accordion for converted files, dropped files, warnings, and error messages.
+- Dispatches in-browser download via `URL.createObjectURL(blob)`.

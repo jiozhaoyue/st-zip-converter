@@ -5,8 +5,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { ZipReader } from '../src/core/read.js';
-import { nodeIo } from '../src/io/node-io.js';
+import { zipIo } from '../src/core/zip-io.js';
 import { convert, TARGETS } from '../src/core/transform.js';
 
 const L_SOURCE = 'default-user-2026-08-25-172056.zip';
@@ -16,7 +15,7 @@ const DERIVED = ['thumbnails/', 'backups/', 'vectors/'];
 const ENGINE_DUMP = ['_engine_dump.bin', '_engine_meta.json'];
 
 async function crcMap(zipPath) {
-  const reader = await ZipReader.open(zipPath);
+  const reader = await zipIo.openReader(zipPath);
   const map = new Map();
   for await (const entry of reader.entries()) {
     // 目录占位条目(零字节、以 / 结尾)由文件条目隐含,转换器按设计不搬运,比对时排除
@@ -36,8 +35,8 @@ describe.skipIf(!existsSync(L_SOURCE))('真实往返 l→st→l', () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rt-l-'));
     const hub = path.join(dir, 'hub-st.zip');
     const back = path.join(dir, 'back-l.zip');
-    await convert(L_SOURCE, hub, { target: TARGETS.ST, io: nodeIo });
-    await convert(hub, back, { target: TARGETS.L, io: nodeIo });
+    await convert(L_SOURCE, hub, { target: TARGETS.ST, io: zipIo });
+    await convert(hub, back, { target: TARGETS.L, io: zipIo });
 
     const [source, result] = await Promise.all([crcMap(L_SOURCE), crcMap(back)]);
     const problems = [];
@@ -67,8 +66,8 @@ describe.skipIf(!existsSync(TT_SOURCE))('真实往返 tt→pt→tt', () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'rt-tt-'));
     const pt = path.join(dir, 'mid-pt.zip');
     const back = path.join(dir, 'back-tt.zip');
-    await convert(TT_SOURCE, pt, { target: TARGETS.PT, io: nodeIo });
-    await convert(pt, back, { target: TARGETS.TT, io: nodeIo });
+    await convert(TT_SOURCE, pt, { target: TARGETS.PT, io: zipIo });
+    await convert(pt, back, { target: TARGETS.TT, io: zipIo });
 
     const [source, result] = await Promise.all([crcMap(TT_SOURCE), crcMap(back)]);
     const problems = [];

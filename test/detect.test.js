@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { ZipWriter } from '../src/core/write.js';
-import { detectLayout, LAYOUTS } from '../src/io/node-io.js';
+import { zipIo } from '../src/core/zip-io.js';
+import { detectLayout, LAYOUTS } from '../src/core/detect.js';
 import { generateAll, stEntries, lEntries, ttEntries } from '../fixtures/gen.js';
 
 const tmpDirs = [];
@@ -17,9 +17,9 @@ async function tmpDir() {
 async function zipFrom(entries) {
   const dir = await tmpDir();
   const outPath = path.join(dir, 'sample.zip');
-  const writer = await ZipWriter.create(outPath);
+  const writer = await zipIo.createWriter(outPath);
   for (const [name, data] of entries) {
-    writer.add(name, data);
+    await writer.add(name, data);
   }
   await writer.close();
   return outPath;

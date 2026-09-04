@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ZipReader } from '../src/core/read.js';
+import { zipIo } from '../src/core/zip-io.js';
 
 const OUT = 'out';
 const REAL = {
@@ -21,7 +21,7 @@ const has = (p) => existsSync(p);
 const hasAll = (...paths) => paths.every(has);
 
 async function listPaths(zipPath) {
-  const reader = await ZipReader.open(zipPath);
+  const reader = await zipIo.openReader(zipPath);
   const paths = [];
   for await (const entry of reader.entries()) {
     paths.push(entry.fileName);

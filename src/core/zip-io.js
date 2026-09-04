@@ -1,8 +1,8 @@
 import * as zip from '@zip.js/zip.js';
 
 /**
- * 纯浏览器/标准 ESM zip IO 适配器
- * 基于 @zip.js/zip.js 实现流式直通与惰性读写。
+ * 通用标准 zip IO 适配器 (基于 @zip.js/zip.js)
+ * 支持纯浏览器 Blob/File，同时兼顾 Node 测试环境中的文件路径读写。
  */
 
 zip.configure({ useWebWorkers: false });
@@ -10,10 +10,17 @@ zip.configure({ useWebWorkers: false });
 export const zipIo = {
   /**
    * 打开 ZipReader 读取器
-   * @param {Blob|File} source
+   * @param {Blob|File|string} source
    */
   async openReader(source) {
-    const blobReader = source instanceof zip.BlobReader ? source : new zip.BlobReader(source);
+    let blobSource = source;
+    if (typeof source === 'string') {
+      const fs = await import('node:fs/promises');
+      const buffer = await fs.readFile(source);
+      blobSource = new Blob([buffer], { type: 'application/zip' });
+    }
+
+    const blobReader = blobSource instanceof zip.BlobReader ? blobSource : new zip.BlobReader(blobSource);
     const reader = new zip.ZipReader(blobReader);
     const rawEntries = await reader.getEntries();
 
@@ -26,6 +33,7 @@ export const zipIo = {
             fileName: entry.filename,
             uncompressedSize: entry.uncompressedSize,
             lastModified: entry.lastModDate ?? null,
+            crc32: entry.crc32 ?? null,
             isDirectory: false,
             openStream: async () => {
               const { readable, writable } = new TransformStream({}, { highWaterMark: 1 });
@@ -47,31 +55,60 @@ export const zipIo = {
 
   /**
    * 创建 ZipWriter 写入器
-   * @param {zip.BlobWriter} destination
+   * @param {zip.BlobWriter|string} [destination]
    */
   async createWriter(destination = new zip.BlobWriter('application/zip')) {
-    const writer = new zip.ZipWriter(destination, { level: 6 });
+    const isFilePath = typeof destination === 'string';
+    const writerTarget = isFilePath ? new zip.Uint8ArrayWriter() : destination;
+    const writer = new zip.ZipWriter(writerTarget, { level: 6 });
+    let queue = Promise.resolve();
+    const written = new Set();
+
+    function enqueue(task) {
+      const next = queue.then(task, task);
+      queue = next;
+      return next;
+    }
+
     return {
       async add(name, data) {
-        await writer.add(name, new zip.Uint8ArrayReader(new Uint8Array(data)));
+        if (written.has(name)) return;
+        written.add(name);
+        return enqueue(async () => {
+          await writer.add(name, new zip.Uint8ArrayReader(new Uint8Array(data)));
+        });
       },
       addLazy(name, openFn) {
-        const { readable, writable } = new TransformStream({}, { highWaterMark: 1 });
-        openFn((err, source) => {
-          if (err) {
-            writable.abort(err);
-            return;
-          }
-          source.pipeTo(writable).catch((err) => writable.abort(err));
+        if (written.has(name)) return;
+        written.add(name);
+        return enqueue(async () => {
+          const { readable, writable } = new TransformStream({}, { highWaterMark: 1 });
+          openFn((err, source) => {
+            if (err) {
+              writable.abort(err);
+              return;
+            }
+            source.pipeTo(writable).catch((err) => writable.abort(err));
+          });
+          await writer.add(name, readable);
         });
-        void writer.add(name, readable);
       },
-      waitForRoom: async () => {},
+      waitForRoom: async () => {
+        await queue;
+      },
       async close() {
-        await writer.close();
+        await queue;
+        const result = await writer.close();
+        if (isFilePath) {
+          const fs = await import('node:fs/promises');
+          await fs.writeFile(destination, result);
+          return destination;
+        }
         return destination;
       },
-      async abort() {},
+      async abort() {
+        await queue.catch(() => {});
+      },
     };
   },
 };
