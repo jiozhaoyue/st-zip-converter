@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Module organization and zipIo stream adapter contract"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Trinity web structure, separated web files, and host-bridge"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Platform zip layouts, entry prefixes, and secrets preservation rules"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing matrix, verification commands, and forbidden patterns"}
