@@ -8,7 +8,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@zip.js/zip.js": "^2.9.0"
+    "@zip.js/zip.js": "^2.9.0",
+    "fzstd": "^0.1.1"
   },
   "devDependencies": {
     "vite": "^7.3.6",

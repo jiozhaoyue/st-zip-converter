@@ -1158,3 +1158,437 @@ body {
     justify-content: flex-end;
   }
 }
+
+/* ==========================================================================
+   宿主直接导出工作台 (Host Workstation)
+   ========================================================================== */
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.host-tag-platform {
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--accent-luker);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.host-category-box {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.host-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.category-chip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  color: var(--text-main);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.category-chip-label:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent);
+}
+
+.category-chip-label input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.host-options-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.link-option-row {
+  margin: 6px 0 10px 0;
+}
+
+.host-export-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.host-action-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   二次确认还原写入弹窗 (Restore Modal)
+   ========================================================================== */
+.restore-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.restore-modal-card {
+  max-width: 480px;
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+.modal-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.restore-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.radio-label:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent);
+}
+
+.radio-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radio-text strong {
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+
+.radio-text span {
+  font-size: 0.75rem;
+  color: var(--text-sub);
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ==========================================================================
+   底部实时抽屉式日志控制台 (Log Console Drawer)
+   ========================================================================== */
+.log-console-drawer {
+  width: 100%;
+  background: rgba(18, 21, 30, 0.95);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+.log-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+  user-select: none;
+  border-bottom: 1px solid transparent;
+}
+
+.log-console-drawer.expanded .log-bar-header {
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.log-bar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.log-indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--success);
+}
+
+.log-indicator-dot.dot-warn {
+  background: var(--warning);
+}
+
+.log-indicator-dot.dot-error {
+  background: var(--danger);
+  animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.3); }
+}
+
+.log-latest-text {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.log-bar-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0 10px;
+  flex-shrink: 0;
+}
+
+.log-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.badge-info {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent);
+}
+
+.badge-warn {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--warning);
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.25);
+  color: var(--danger);
+}
+
+.btn-toggle-log {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-toggle-log:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.log-console-body {
+  height: 240px;
+  display: flex;
+  flex-direction: column;
+  background: #0b0d13;
+}
+
+.log-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.log-filter-group {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-log-filter {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.btn-log-filter.active {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.log-action-group {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-log-action {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.btn-log-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+.log-stream-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #d1d5db;
+}
+
+.log-empty-state {
+  text-align: center;
+  color: var(--text-sub);
+  padding: 30px 0;
+  font-style: italic;
+}
+
+.log-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  word-break: break-word;
+}
+
+.log-time {
+  color: var(--text-sub);
+}
+
+.log-tag {
+  font-weight: 600;
+}
+
+.tag-info { color: #60a5fa; }
+.tag-warn { color: #fbbf24; }
+.tag-error { color: #f87171; }
+.tag-success { color: #34d399; }
+
+.log-detail {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-left: 2px solid var(--accent);
+  border-radius: 3px;
+  color: #9ca3af;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+}
+
+/* ==========================================================================
+   移动端深度优化与防撕裂规则 (Mobile Responsiveness)
+   ========================================================================== */
+@media (max-width: 768px) {
+  body {
+    padding: 8px 6px;
+  }
+
+  .host-category-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .host-export-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .host-action-buttons {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .host-action-buttons button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .log-console-body {
+    height: 38vh;
+  }
+
+  .btn-archive-action {
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+}
+

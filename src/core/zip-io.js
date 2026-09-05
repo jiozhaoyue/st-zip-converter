@@ -1,11 +1,44 @@
-import * as zip from '@zip.js/zip.js';
+import * as zip from '../vendor/zip.js';
+import { Decompress } from '../vendor/fzstd.js';
+import { logger } from './logger.js';
 
 /**
- * 通用标准 zip IO 适配器 (基于 @zip.js/zip.js)
+ * 通用标准 zip IO 适配器 (基于自包含 zip.js + fzstd)
  * 支持纯浏览器 Blob/File，同时兼顾 Node 测试环境中的文件路径读写。
+ * 原生注册 Method 93 (Zstandard / 7-Zip ZS / TauriTavern) 解码器。
  */
 
 zip.configure({ useWebWorkers: false });
+
+// 注册 Method 93 (Zstandard) 解码器
+class ZstdDecompressionStream extends TransformStream {
+  constructor() {
+    let decompressor;
+    super({
+      start(controller) {
+        decompressor = new Decompress((chunk) => {
+          controller.enqueue(chunk);
+        });
+      },
+      transform(chunk) {
+        decompressor.push(chunk, false);
+      },
+      flush() {
+        decompressor.push(new Uint8Array(0), true);
+      },
+    });
+  }
+}
+
+try {
+  zip.registerCodec({
+    compressionMethod: 93,
+    format: 'zstd',
+    DecompressionStream: ZstdDecompressionStream,
+  });
+} catch {
+  // 忽略重复注册
+}
 
 export const zipIo = {
   /**
@@ -24,8 +57,14 @@ export const zipIo = {
     const reader = new zip.ZipReader(blobReader);
     const rawEntries = await reader.getEntries();
 
+    const fileEntries = rawEntries.filter((e) => !e.directory);
+    const zstdCount = fileEntries.filter((e) => e.compressionMethod === 93).length;
+    if (zstdCount > 0) {
+      logger.info(`检测到 ${zstdCount} 个 7-Zip ZS / TauriTavern Zstandard (Method 93) 压缩文件条目，已激活透明解压`);
+    }
+
     return {
-      totalEntries: rawEntries.filter((e) => !e.directory).length,
+      totalEntries: fileEntries.length,
       async *entries() {
         for (const entry of rawEntries) {
           if (entry.directory) continue;
@@ -34,6 +73,7 @@ export const zipIo = {
             uncompressedSize: entry.uncompressedSize,
             lastModified: entry.lastModDate ?? null,
             crc32: entry.crc32 ?? null,
+            compressionMethod: entry.compressionMethod,
             isDirectory: false,
             openStream: async () => {
               const { readable, writable } = new TransformStream({}, { highWaterMark: 1 });
@@ -41,7 +81,7 @@ export const zipIo = {
               return readable;
             },
             read: async () => {
-              return new Uint8Array(await entry.arrayBuffer());
+              return await entry.getData(new zip.Uint8ArrayWriter());
             },
             skip: () => {},
           };

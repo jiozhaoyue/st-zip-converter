@@ -382,14 +382,27 @@ export function invertSelection() {
 
 /**
  * 应用辅助快捷筛选预设
- * @param {'chars'|'safe'} preset
+ * @param {'chars'|'chats'|'safe'} preset
  */
 export function applyPreset(preset) {
   currentExcludedPaths.clear();
 
+  const linkCheck = document.getElementById('link-char-chats-check');
+  const isLinked = linkCheck ? linkCheck.checked : true;
+
   availableCategories.forEach((cat) => {
     if (preset === 'chars') {
-      currentSelection[cat] = (cat === CATEGORIES.CHARACTERS || cat === CATEGORIES.ASSETS);
+      if (isLinked) {
+        currentSelection[cat] = (cat === CATEGORIES.CHARACTERS || cat === CATEGORIES.ASSETS || cat === CATEGORIES.CHATS);
+      } else {
+        currentSelection[cat] = (cat === CATEGORIES.CHARACTERS || cat === CATEGORIES.ASSETS);
+      }
+    } else if (preset === 'chats') {
+      if (isLinked) {
+        currentSelection[cat] = (cat === CATEGORIES.CHATS || cat === CATEGORIES.CHARACTERS || cat === CATEGORIES.ASSETS);
+      } else {
+        currentSelection[cat] = (cat === CATEGORIES.CHATS);
+      }
     } else if (preset === 'safe') {
       currentSelection[cat] = (cat !== CATEGORIES.SECRETS && cat !== CATEGORIES.CHATS);
     }

@@ -1,4 +1,4 @@
-import * as zip from '@zip.js/zip.js';
+import * as zip from '../vendor/zip.js';
 import { convert } from './transform.js';
 import { generatePlan } from './plan-preview.js';
 import { zipIo } from './zip-io.js';

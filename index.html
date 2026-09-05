@@ -2,8 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>st-zip-converter - 酒馆数据包互转器</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>st-zip-converter - 全能酒馆数据包工作站</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -12,9 +12,12 @@
     <header class="app-header">
       <div class="title-group">
         <h1>st-zip-converter</h1>
-        <p>跨酒馆（SillyTavern / Luker / PureTavern / TauriTavern）数据包互转工具</p>
+        <p>全平台跨酒馆数据包工作站 · 导出 · 转换 · 增量合并 · 恢复</p>
       </div>
-      <div class="badge" id="env-badge">独立 Web 模式</div>
+      <div class="header-badges">
+        <div class="badge" id="env-badge">独立 Web 模式</div>
+        <div class="badge badge-user" id="host-user-badge" style="display: none;">用户: 未登录</div>
+      </div>
     </header>
 
     <!-- Workspace Bar -->
@@ -33,14 +36,96 @@
       <!-- 由 archive-manager.js 动态挂载已上传与已转换双列表 -->
     </div>
 
-    <!-- Section 1: 宿主快捷导出区 (仅在酒馆/Luker插件环境中激活) -->
+    <!-- Section 1: 宿主酒馆数据导出工作台 (在酒馆/Luker插件环境中完整激活) -->
     <section class="card" id="host-export-card" style="display: none;">
-      <h2 class="card-title">🚀 导出当前酒馆数据包</h2>
-      <div class="export-grid">
-        <button class="btn-export btn-st" data-target="st">→ SillyTavern</button>
-        <button class="btn-export btn-luker" data-target="l">→ Luker</button>
-        <button class="btn-export btn-tt" data-target="tt">→ TauriTavern</button>
-        <button class="btn-export btn-pt" data-target="pt">→ PureTavern</button>
+      <div class="card-header-row">
+        <h2 class="card-title">🏛️ 宿主酒馆数据导出工作台</h2>
+        <div class="host-meta-status" id="host-meta-status">
+          <span class="host-tag-platform" id="host-tag-platform">宿主环境: 检测中</span>
+        </div>
+      </div>
+
+      <!-- 细粒度导出类目勾选区 -->
+      <div class="host-category-box">
+        <div class="category-header">
+          <div class="category-title-group">
+            <span class="category-title">📋 细粒度导出类目勾选</span>
+            <span class="category-sub-summary" id="host-category-summary">已勾选全部标准数据</span>
+          </div>
+          <div class="category-actions">
+            <div class="btn-group-quick">
+              <button type="button" class="btn-tool btn-host-quick" data-preset="all">全选</button>
+              <button type="button" class="btn-tool btn-host-quick" data-preset="chars">仅角色卡</button>
+              <button type="button" class="btn-tool btn-host-quick" data-preset="chats">仅聊天记录</button>
+              <button type="button" class="btn-tool btn-host-quick" data-preset="safe">安全脱敏</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="host-category-grid" id="host-category-grid">
+          <label class="category-chip-label">
+            <input type="checkbox" name="host-cat" value="characters" checked>
+            <span>🎭 角色卡</span>
+          </label>
+          <label class="category-chip-label">
+            <input type="checkbox" name="host-cat" value="chats" checked>
+            <span>💬 聊天记录</span>
+          </label>
+          <label class="category-chip-label">
+            <input type="checkbox" name="host-cat" value="lorebooks" checked>
+            <span>📖 世界书</span>
+          </label>
+          <label class="category-chip-label">
+            <input type="checkbox" name="host-cat" value="presets" checked>
+            <span>⚙️ 预设配置</span>
+          </label>
+          <label class="category-chip-label">
+            <input type="checkbox" name="host-cat" value="assets" checked>
+            <span>🖼️ 资产与背景</span>
+          </label>
+          <label class="category-chip-label">
+            <input type="checkbox" name="host-cat" value="settings" checked>
+            <span>🛠️ 系统设置</span>
+          </label>
+          <label class="category-chip-label">
+            <input type="checkbox" name="host-cat" value="secrets" checked>
+            <span>🔑 敏感密钥</span>
+          </label>
+          <label class="category-chip-label">
+            <input type="checkbox" name="host-cat" value="extensions" checked>
+            <span>🧩 扩展插件</span>
+          </label>
+        </div>
+
+        <div class="host-options-row">
+          <label class="checkbox-group" title="开启后，勾选角色或聊天时自动联动对方，确保头像与对话记录完整">
+            <input type="checkbox" id="host-link-char-chats" checked>
+            <span>角色与聊天智能联动</span>
+          </label>
+          <label class="checkbox-group" title="增量导出模式：按变更状态或指定条件仅导出更新数据">
+            <input type="checkbox" id="host-incremental-export">
+            <span>增量导出模式</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 宿主直出目标与控制 -->
+      <div class="host-export-controls">
+        <div class="target-select-group">
+          <label for="host-target-select">一步直出格式:</label>
+          <select id="host-target-select" class="select-input">
+            <option value="native" selected>当前宿主原生格式</option>
+            <option value="st">SillyTavern (ST 摊平)</option>
+            <option value="l">Luker (带清单)</option>
+            <option value="tt">TauriTavern (TT 布局)</option>
+            <option value="pt">PureTavern (PT 兼容)</option>
+          </select>
+        </div>
+
+        <div class="host-action-buttons">
+          <button type="button" class="btn-primary" id="btn-host-export-download">🚀 导出并立即下载</button>
+          <button type="button" class="btn-secondary" id="btn-host-export-workspace">📥 导出并存入工作区</button>
+        </div>
       </div>
     </section>
 
@@ -68,9 +153,17 @@
             </div>
             <div class="btn-group-quick">
               <button type="button" class="btn-tool btn-quick" data-preset="chars" title="仅勾选角色卡与素材">仅角色卡</button>
+              <button type="button" class="btn-tool btn-quick" data-preset="chats" title="仅勾选聊天记录">仅聊天记录</button>
               <button type="button" class="btn-tool btn-quick" data-preset="safe" title="脱敏导出：排除密钥与聊天记录">安全脱敏</button>
             </div>
           </div>
+        </div>
+
+        <div class="link-option-row">
+          <label class="checkbox-group" title="开启后，选择角色或聊天时自动联动对方，确保头像与对话上下文完整">
+            <input type="checkbox" id="link-char-chats-check" checked>
+            <span>角色与聊天智能联动</span>
+          </label>
         </div>
 
         <!-- 完全扫描动作预测条 -->
@@ -80,7 +173,7 @@
         </div>
 
         <div class="category-grid" id="category-checkboxes">
-          <!-- 动态注入全部 10 项细粒度 Checkbox 与体积计数 -->
+          <!-- 动态注入全部细粒度 Checkbox 与体积计数 -->
         </div>
       </div>
 
@@ -132,9 +225,13 @@
             <input type="checkbox" id="include-private-check">
             <span>私有配置</span>
           </label>
+          <label class="checkbox-group" title="增量合并模式：当包内存在相同文件时仅更新较新文件">
+            <input type="checkbox" id="incremental-mode-check">
+            <span>增量合并模式</span>
+          </label>
         </div>
 
-        <div style="display: flex; gap: 8px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           <button class="btn-primary" id="btn-convert" disabled>开始转换并下载</button>
           <button class="btn-primary" id="btn-restore-luker" style="display: none; background: var(--accent-luker);" disabled>直接恢复到当前用户</button>
         </div>
@@ -181,6 +278,34 @@
         <pre id="warnings-log"></pre>
       </details>
     </section>
+
+    <!-- 二次确认恢复弹窗 (内嵌于面板内部) -->
+    <div class="restore-modal-overlay" id="restore-modal-overlay" style="display: none;">
+      <div class="restore-modal-card">
+        <h3 class="modal-title">⚠️ 确认写入/恢复至当前宿主酒馆</h3>
+        <p class="modal-desc" id="restore-modal-desc">即将把数据包恢复到当前宿主酒馆当前登录用户，请选择恢复模式：</p>
+        <div class="restore-mode-group">
+          <label class="radio-label">
+            <input type="radio" name="restore-mode" value="merge" checked>
+            <div class="radio-text">
+              <strong>增量合并 (推荐)</strong>
+              <span>保留酒馆已有数据，仅新增缺失数据或覆盖同名冲突文件</span>
+            </div>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="restore-mode" value="overwrite">
+            <div class="radio-text">
+              <strong>全量覆盖</strong>
+              <span>重置当前用户数据，完全替换为该数据包内容</span>
+            </div>
+          </label>
+        </div>
+        <div class="modal-buttons">
+          <button type="button" class="btn-secondary" id="btn-cancel-restore">取消</button>
+          <button type="button" class="btn-primary" id="btn-confirm-restore" style="background: var(--accent-luker);">确认恢复写入</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Footer -->
     <footer class="app-footer">

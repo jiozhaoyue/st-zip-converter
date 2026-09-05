@@ -25,8 +25,19 @@ function formatDate(timestamp) {
  * @param {string|null} params.activeFileId 当前活跃文件 ID
  * @param {function(object): void} params.onLoadFile 载入文件回调
  * @param {function(): void} params.onListChanged 列表变更回调
+ * @param {function(Array): void} [params.onBatchConvert] 批量转换回调
+ * @param {function(object): void} [params.onRestoreToHost] 恢复写入宿主回调
+ * @param {boolean} [params.isHostAvailable] 是否处于宿主插件环境
  */
-export async function renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged, onBatchConvert }) {
+export async function renderArchiveManager({
+  containerEl,
+  activeFileId,
+  onLoadFile,
+  onListChanged,
+  onBatchConvert,
+  onRestoreToHost,
+  isHostAvailable = false,
+}) {
   if (!containerEl) return;
 
   const [sources, outputs] = await Promise.all([
@@ -126,7 +137,7 @@ export async function renderArchiveManager({ containerEl, activeFileId, onLoadFi
         if (confirm(`确定要从暂存中删除「${file.name}」吗？`)) {
           await deleteFile(file.id);
           if (typeof onListChanged === 'function') onListChanged();
-          renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged, onBatchConvert });
+          renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged, onBatchConvert, onRestoreToHost, isHostAvailable });
         }
       });
       btnWrap.appendChild(btnDelete);
@@ -216,6 +227,21 @@ export async function renderArchiveManager({ containerEl, activeFileId, onLoadFi
       });
       btnWrap.appendChild(btnLoadAsSource);
 
+      if (isHostAvailable && typeof onRestoreToHost === 'function') {
+        const btnRestore = document.createElement('button');
+        btnRestore.type = 'button';
+        btnRestore.className = 'btn-archive-action restore';
+        btnRestore.textContent = '🔄 写入宿主';
+        btnRestore.title = '将该包一键恢复/写入到当前酒馆宿主';
+        btnRestore.addEventListener('click', async () => {
+          const full = await getFile(file.id);
+          if (full?.blob) {
+            onRestoreToHost(full);
+          }
+        });
+        btnWrap.appendChild(btnRestore);
+      }
+
       const btnDelete = document.createElement('button');
       btnDelete.type = 'button';
       btnDelete.className = 'btn-archive-action delete';
@@ -224,7 +250,7 @@ export async function renderArchiveManager({ containerEl, activeFileId, onLoadFi
         if (confirm(`确定要从暂存中删除产物「${file.name}」吗？`)) {
           await deleteFile(file.id);
           if (typeof onListChanged === 'function') onListChanged();
-          renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged, onBatchConvert });
+          renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged, onBatchConvert, onRestoreToHost, isHostAvailable });
         }
       });
       btnWrap.appendChild(btnDelete);

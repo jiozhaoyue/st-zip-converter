@@ -1,7 +1,11 @@
 /**
- * 宿主环境桥接模块 (SillyTavern & Luker)
- * 负责环境嗅探、CSRF Token 获取、备份数据拉取与菜单注入。
+ * 宿主环境桥接与增量流控模块 (SillyTavern & Luker)
+ * 负责环境嗅探、CSRF Token 获取、细粒度备份拉取、增量恢复写入与多包增量合并。
  */
+
+import { logger } from '../core/logger.js';
+import { zipIo } from '../core/zip-io.js';
+import * as zip from '../vendor/zip.js';
 
 export const FULL_SELECTION = Object.freeze({
   settings: true,
@@ -21,8 +25,8 @@ export const FULL_SELECTION = Object.freeze({
  * @returns {{ platform: 'st'|'luker'|'standalone', isPlugin: boolean }}
  */
 export function detectHost() {
-  const isLuker = typeof window.luker !== 'undefined' || Boolean(document.querySelector('#luker-app'));
-  const isST = typeof window.SillyTavern !== 'undefined' || Boolean(document.querySelector('#extensionsMenu'));
+  const isLuker = typeof window !== 'undefined' && (typeof window.luker !== 'undefined' || Boolean(document.querySelector('#luker-app')));
+  const isST = typeof window !== 'undefined' && (typeof window.SillyTavern !== 'undefined' || Boolean(document.querySelector('#extensionsMenu')));
 
   if (isLuker) return { platform: 'luker', isPlugin: true };
   if (isST) return { platform: 'st', isPlugin: true };
@@ -50,15 +54,21 @@ export async function getHandle() {
 }
 
 /**
- * 从当前酒馆端点拉取全量备份 Zip Blob
+ * 从当前酒馆端点拉取细粒度或全量备份 Zip Blob
  * @param {'st'|'luker'} platform
+ * @param {Record<string, boolean>} [selection] 细粒度类目选择
  * @returns {Promise<Blob>}
  */
-export async function fetchHostBackup(platform) {
+export async function fetchHostBackup(platform, selection = null) {
+  logger.info(`正在连接宿主 [${platform.toUpperCase()}] 获取授权凭证...`);
   const [token, handle] = await Promise.all([getCsrfToken(), getHandle()]);
+
+  const sel = selection ? { ...selection } : { ...FULL_SELECTION };
   const body = platform === 'luker'
-    ? { handle, selection: { ...FULL_SELECTION } }
-    : { handle };
+    ? { handle, selection: sel }
+    : { handle, selection: sel };
+
+  logger.info(`向宿主发起数据包导出请求 (用户: ${handle})...`);
 
   const response = await fetch('/api/users/backup', {
     method: 'POST',
@@ -78,21 +88,33 @@ export async function fetchHostBackup(platform) {
     } catch {
       // 忽略非 JSON 响应
     }
-    throw new Error(`备份请求失败 (${response.status})${detail ? `: ${detail}` : ''}`);
+    const err = new Error(`备份请求失败 (${response.status})${detail ? `: ${detail}` : ''}`);
+    logger.error('宿主数据包导出失败', err);
+    throw err;
   }
 
-  return response.blob();
+  const blob = await response.blob();
+  logger.success(`成功从宿主拉取数据包，大小: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+  return blob;
 }
 
 /**
- * (Luker 专享) 直接调用恢复 API 将目标包恢复到当前用户
+ * 直接调用恢复 API 将目标包恢复/写入到当前酒馆宿主
+ * 支持增量合并 (mode: 'merge') 与全量覆盖 (mode: 'overwrite')
  * @param {Blob} zipBlob
+ * @param {object} [options]
+ * @param {'merge'|'overwrite'} [options.mode='merge'] 恢复模式
+ * @param {string} [options.platform='st'] 宿主类型
  */
-export async function restoreToLuker(zipBlob) {
+export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st' } = {}) {
+  logger.info(`准备向宿主 [${platform.toUpperCase()}] 恢复写入数据包 (模式: ${mode === 'merge' ? '增量合并' : '全量覆盖'})...`);
   const [token, handle] = await Promise.all([getCsrfToken(), getHandle()]);
+
   const formData = new FormData();
   formData.append('avatar', zipBlob, 'backup.zip');
   formData.append('handle', handle);
+  formData.append('mode', mode);
+  formData.append('incremental', mode === 'merge' ? 'true' : 'false');
 
   const response = await fetch('/api/users/restore', {
     method: 'POST',
@@ -111,17 +133,102 @@ export async function restoreToLuker(zipBlob) {
     } catch {
       // 忽略非 JSON
     }
-    throw new Error(`恢复失败 (${response.status})${detail ? `: ${detail}` : ''}`);
+    const err = new Error(`恢复失败 (${response.status})${detail ? `: ${detail}` : ''}`);
+    logger.error('恢复数据包至宿主酒馆失败', err);
+    throw err;
   }
 
-  return response.json().catch(() => ({ success: true }));
+  const result = await response.json().catch(() => ({ success: true }));
+  logger.success(`数据包恢复至当前用户 (${handle}) 成功！模式: ${mode === 'merge' ? '增量合并' : '全量覆盖'}`);
+  return result;
+}
+
+/**
+ * 兼容旧版命名
+ */
+export async function restoreToLuker(zipBlob, options = {}) {
+  return restoreToHost(zipBlob, { ...options, platform: 'luker' });
+}
+
+/**
+ * 对两个 Zip 数据包执行增量合并 (Incremental Archive Merge)
+ * 尤其适合 TauriTavern / SillyTavern 数据包的差量累加与历史补丁融合
+ * @param {Blob|File|string} baseArchive 基准包 (原有包)
+ * @param {Blob|File|string} incomingArchive 增量包 (新数据包)
+ * @param {object} [options]
+ * @param {(current: number, total: number, filename: string) => void} [options.onProgress]
+ * @returns {Promise<{ resultBlob: Blob, updatedCount: number, preservedCount: number, totalCount: number }>}
+ */
+export async function incrementalMergeArchives(baseArchive, incomingArchive, { onProgress } = {}) {
+  logger.info('启动数据包增量合并 (Incremental Archive Merge)...');
+
+  const incomingReader = await zipIo.openReader(incomingArchive);
+  const baseReader = await zipIo.openReader(baseArchive);
+
+  // 1. 扫描增量包中所有的文件清单
+  const incomingMap = new Map();
+  for await (const entry of incomingReader.entries()) {
+    incomingMap.set(entry.fileName, entry);
+  }
+
+  const writerTarget = new zip.BlobWriter('application/zip');
+  const writer = await zipIo.createWriter(writerTarget, { level: 5 });
+
+  let updatedCount = 0;
+  let preservedCount = 0;
+  const processedIncoming = new Set();
+
+  // 2. 遍历基准包中的每个文件
+  for await (const baseEntry of baseReader.entries()) {
+    const filename = baseEntry.fileName;
+    if (incomingMap.has(filename)) {
+      // 冲突项：采用增量包更新版本
+      const incEntry = incomingMap.get(filename);
+      const incData = await incEntry.read();
+      await writer.add(filename, incData);
+      processedIncoming.add(filename);
+      updatedCount++;
+      if (onProgress) onProgress(updatedCount, incomingMap.size, filename);
+    } else {
+      // 基准包独有项：完整保留
+      const baseData = await baseEntry.read();
+      await writer.add(filename, baseData);
+      preservedCount++;
+    }
+  }
+
+  // 3. 将增量包中独有的新增文件全部写入
+  for (const [filename, incEntry] of incomingMap.entries()) {
+    if (!processedIncoming.has(filename)) {
+      const incData = await incEntry.read();
+      await writer.add(filename, incData);
+      updatedCount++;
+      if (onProgress) onProgress(updatedCount, incomingMap.size, filename);
+    }
+  }
+
+  await baseReader.close();
+  await incomingReader.close();
+  await writer.close();
+
+  const resultBlob = await writerTarget.getData();
+  const totalCount = updatedCount + preservedCount;
+  logger.success(`数据包增量合并完成: 共计 ${totalCount} 个文件 (保留原有 ${preservedCount} 项，新增/更新 ${updatedCount} 项)`);
+
+  return {
+    resultBlob,
+    updatedCount,
+    preservedCount,
+    totalCount,
+  };
 }
 
 /**
  * 宿主扩展菜单按钮注入 (SillyTavern / Luker)
- * @param {() => void} onOpenModal 呼出模态弹窗回调
+ * @param {() => void} onOpenModal 呼出模态工作台回调
  */
 export function registerMenuButton(onOpenModal) {
+  if (typeof document === 'undefined') return;
   const menuList = document.querySelector('#extensionsMenu .list-group');
   if (!menuList) return;
 
