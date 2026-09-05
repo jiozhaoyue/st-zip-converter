@@ -186,3 +186,25 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: 实现 IndexedDB 暂存工作区、完全扫描动作预测与单项穿透勾选器
+<!-- trellis-session: v=2 fp=f7386e7ec8404117 -->
+
+**Date**: 2026-09-05
+**Task**: 实现 IndexedDB 暂存工作区、完全扫描动作预测与单项穿透勾选器
+**Branch**: `full-dev`
+
+### Summary
+
+1. 切换至 full-dev 分支开启全能数据包处理工作站演进。2. 实现基于浏览器原生 IndexedDB 的存储适配器 (src/storage/db.js)，支持源包与转换包暂存、工作区无损恢复与容量统计清空。3. 构建完全扫描规划引擎 (src/core/plan-preview.js)，在转换前秒级预测条目动作（直通、路由、迁移、合成、丢弃）与预估产物体积。4. 实现单项穿透树形勾选器与模糊搜索 (src/ui/file-tree-picker.js)，支持单张角色卡、单个扩展或聊天独立剔除。5. 解耦派生缓存、历史备份与应用私有配置的独立控制开关。6. 全量测试通过 (60/60 passed)，打包顺畅。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `21e50ab` | feat(storage,preview): 实现 IndexedDB 暂存工作区、完全扫描动作预测与单项穿透勾选器 |
+
+### Status
+
+[OK] **Completed**
