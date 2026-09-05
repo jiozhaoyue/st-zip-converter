@@ -236,3 +236,31 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: 批量队列与链式流转：常驻双列表、包名占位符芯片与多端排版精修
+<!-- trellis-session: v=2 fp=9a1e7e96392256b3 -->
+
+**Date**: 2026-09-05
+**Task**: 批量队列与链式流转：常驻双列表、包名占位符芯片与多端排版精修
+**Branch**: `full-dev`
+
+### Summary
+
+1. 取消双文件列表的折叠隐藏逻辑，设为界面常驻展示，一目了然掌控源包与产物。2. 自定义文件名增加交互式占位符药丸芯片 (+ {source}, + {target}, + {date}, + {handle}) 与说明，点击即刻插入。3. 全面优化多端排版，彻底移除冗余副标题说明与描述文字，加入全量防撕裂换行与移动端断点适配。4. 支持拖拽/选取多个 Zip 包批量入库，并在源包列表提供一键批量转换队列与总进度汇报。5. 产物列表无缝支持一键作为源包进入下一轮转换，通过单元测试验证了 ST -> TT -> PT 多跳链式转换能力。6. 67 个单元测试全量通过，生产构建顺畅。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ec43217` | feat: permanent dual list, placeholder chips, batch conversion queue and responsive typography |
+| `d6be988` | chore(task): archive 09-05-batch-and-chain |
+
+### Testing
+
+- [OK] npm test (67 passed, 2 skipped)
+- [OK] npm run build (Vite 844ms clean build)
+
+### Status
+
+[OK] **Completed**
