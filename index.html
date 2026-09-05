@@ -24,8 +24,14 @@
         <span id="workspace-status-text">工作区就绪</span>
       </div>
       <div class="workspace-actions">
+        <button type="button" class="btn-workspace-toggle" id="btn-toggle-workspace" title="展开/收起已上传源包与已转换产物双列表">双列表管理 ▾</button>
         <button type="button" class="btn-workspace-clear" id="btn-clear-workspace" title="清除暂存的数据包并重置工作区">清空暂存</button>
       </div>
+    </div>
+
+    <!-- Workspace Dual List Panel (Collapsible) -->
+    <div class="workspace-panel card" id="workspace-panel" style="display: none;">
+      <!-- 由 archive-manager.js 动态挂载已上传与已转换双列表 -->
     </div>
 
     <!-- Section 1: 宿主快捷导出区 (仅在酒馆/Luker插件环境中激活) -->
@@ -101,6 +107,21 @@
             <option value="tt">TauriTavern (TT 布局)</option>
             <option value="pt" selected>PureTavern (PT 兼容)</option>
           </select>
+        </div>
+
+        <div class="compression-select-group">
+          <label for="compression-select">Zip 压缩率:</label>
+          <select id="compression-select" class="select-input">
+            <option value="5" selected>标准均衡 (Deflate 5)</option>
+            <option value="0">极速存储 (Store 0 / 秒级导出)</option>
+            <option value="1">快速轻度 (Deflate 1)</option>
+            <option value="9">极限压缩 (Deflate 9 / 最小体积)</option>
+          </select>
+        </div>
+
+        <div class="filename-input-group">
+          <label for="filename-template-input">自定义包名:</label>
+          <input type="text" id="filename-template-input" class="text-input" placeholder="{source}-to-{target}-{date}.zip" value="{source}-to-{target}-{date}.zip" title="支持占位符: {source}, {target}, {date}, {handle}">
         </div>
 
         <div class="advanced-switches-group">

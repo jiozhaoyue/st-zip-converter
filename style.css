@@ -196,6 +196,38 @@ body {
   font-size: 0.85rem;
 }
 
+.compression-select-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.filename-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  flex: 1;
+  min-width: 220px;
+}
+
+.text-input {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  outline: none;
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.text-input:focus {
+  border-color: var(--accent);
+}
+
 .select-input {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -443,6 +475,28 @@ body {
   font-size: 1rem;
 }
 
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-workspace-toggle {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: var(--accent);
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-workspace-toggle:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 .btn-workspace-clear {
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.3);
@@ -457,6 +511,183 @@ body {
 .btn-workspace-clear:hover {
   background: rgba(239, 68, 68, 0.3);
   color: #fff;
+}
+
+/* Dual File List Panel */
+.workspace-panel {
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  margin-top: -6px;
+}
+
+.archive-manager-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.archive-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  padding: 12px;
+}
+
+.archive-col-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.col-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.col-desc {
+  font-size: 0.72rem;
+  color: var(--text-sub);
+}
+
+.archive-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.archive-empty {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-sub);
+  padding: 24px 0;
+}
+
+.archive-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  gap: 8px;
+  transition: all 0.15s ease;
+}
+
+.archive-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.archive-card.active {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.archive-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.archive-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: monospace;
+}
+
+.archive-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--text-sub);
+}
+
+.meta-badge {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.meta-badge.output {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.archive-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.btn-archive-action {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-archive-action:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn-archive-action.download {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #10b981;
+}
+
+.btn-archive-action.download:hover {
+  background: #10b981;
+  color: #fff;
+}
+
+.btn-archive-action.delete {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #f87171;
+}
+
+.btn-archive-action.delete:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+.badge-active-file {
+  font-size: 0.7rem;
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
 }
 
 /* Plan Preview Summary Bar */
@@ -559,9 +790,27 @@ body {
   gap: 6px;
 }
 
+.detail-tool-row,
 .detail-search-row {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.detail-sort-select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  padding: 4px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.detail-sort-select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .detail-search-input {
@@ -597,6 +846,16 @@ body {
   background: rgba(255, 255, 255, 0.02);
   font-size: 0.76rem;
   gap: 8px;
+  transition: all 0.12s ease;
+}
+
+.file-detail-row.large-warn {
+  border-left: 2px solid #fbbf24;
+}
+
+.file-detail-row.large-heavy {
+  border-left: 2px solid #ef4444;
+  background: rgba(239, 68, 68, 0.05);
 }
 
 .file-detail-row:hover {
@@ -647,6 +906,28 @@ body {
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+}
+
+.badge-large-file {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.badge-large-file.warn {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.badge-large-file.heavy {
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
 }
 
 .action-pill {

@@ -84,6 +84,7 @@ export async function convert(sourcePath, targetPath, {
   includeCache = false,
   includeBackups = true,
   includeAppPrivate = false,
+  compressionLevel = 5,
 } = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
     throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
@@ -109,7 +110,7 @@ export async function convert(sourcePath, targetPath, {
   }
 
   const reader = await io.openReader(sourcePath);
-  const writer = dryRun ? new NullZipWriter() : await io.createWriter(targetPath);
+  const writer = dryRun ? new NullZipWriter() : await io.createWriter(targetPath, { level: compressionLevel });
   const totalEntries = reader.totalEntries ?? 0;
   let processedEntries = 0;
 

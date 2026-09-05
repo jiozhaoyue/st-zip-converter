@@ -56,11 +56,13 @@ export const zipIo = {
   /**
    * 创建 ZipWriter 写入器
    * @param {zip.BlobWriter|string} [destination]
+   * @param {object} [options]
+   * @param {number} [options.level=5] 压缩等级 0(Store)-9(Max)
    */
-  async createWriter(destination = new zip.BlobWriter('application/zip')) {
+  async createWriter(destination = new zip.BlobWriter('application/zip'), { level = 5 } = {}) {
     const isFilePath = typeof destination === 'string';
     const writerTarget = isFilePath ? new zip.Uint8ArrayWriter() : destination;
-    const writer = new zip.ZipWriter(writerTarget, { level: 6 });
+    const writer = new zip.ZipWriter(writerTarget, { level, bufferedWrite: true });
     let queue = Promise.resolve();
     const written = new Set();
 

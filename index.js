@@ -25,6 +25,8 @@ import {
   clearAll,
   isStorageSupported,
 } from './src/storage/db.js';
+import { renderArchiveManager } from './src/ui/archive-manager.js';
+import { resolveFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
 import { detectHost, fetchHostBackup, restoreToLuker, registerMenuButton } from './src/ui/host-bridge.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
@@ -58,11 +60,18 @@ async function main() {
 
   const workspaceBar = document.getElementById('workspace-bar');
   const workspaceStatusText = document.getElementById('workspace-status-text');
+  const btnToggleWorkspace = document.getElementById('btn-toggle-workspace');
   const btnClearWorkspace = document.getElementById('btn-clear-workspace');
+  const workspacePanel = document.getElementById('workspace-panel');
 
   const includeBackupsCheck = document.getElementById('include-backups-check');
   const includeCacheCheck = document.getElementById('include-cache-check');
   const includePrivateCheck = document.getElementById('include-private-check');
+
+  const compressionSelect = document.getElementById('compression-select');
+  const filenameTemplateInput = document.getElementById('filename-template-input');
+
+  let workspacePanelOpen = false;
 
   // 初始化类目过滤器组件
   setupCategoryFilter({
@@ -70,6 +79,44 @@ async function main() {
       refreshPlan();
     },
   });
+
+  // 刷新双文件列表管理组件
+  async function refreshArchiveManagerUI() {
+    if (!workspacePanel || !workspacePanelOpen) return;
+    await renderArchiveManager({
+      containerEl: workspacePanel,
+      activeFileId: currentFileId,
+      onLoadFile: async (fileRecord) => {
+        if (!fileRecord?.blob) return;
+        currentFile = fileRecord.blob;
+        currentFile.name = fileRecord.name;
+        currentFileId = fileRecord.id;
+
+        btnConvert.disabled = false;
+        if (dropHandler?.setFilename) {
+          dropHandler.setFilename(fileRecord.name);
+        }
+        view.setProgress(0, `已载入数据包：${fileRecord.name} (${formatBytes(fileRecord.size)})`);
+        await refreshPlan();
+        refreshArchiveManagerUI();
+      },
+      onListChanged: async () => {
+        await updateWorkspaceUI();
+      },
+    });
+  }
+
+  // 展开/折叠双文件列表管理面板
+  if (btnToggleWorkspace && workspacePanel) {
+    btnToggleWorkspace.addEventListener('click', async () => {
+      workspacePanelOpen = !workspacePanelOpen;
+      workspacePanel.style.display = workspacePanelOpen ? 'block' : 'none';
+      btnToggleWorkspace.textContent = workspacePanelOpen ? '双列表管理 ▴' : '双列表管理 ▾';
+      if (workspacePanelOpen) {
+        await refreshArchiveManagerUI();
+      }
+    });
+  }
 
   // 1. 更新工作区状态栏
   async function updateWorkspaceUI() {
@@ -83,6 +130,14 @@ async function main() {
         }
       } else {
         workspaceBar.style.display = 'none';
+        if (workspacePanel) {
+          workspacePanel.style.display = 'none';
+          workspacePanelOpen = false;
+          if (btnToggleWorkspace) btnToggleWorkspace.textContent = '双列表管理 ▾';
+        }
+      }
+      if (workspacePanelOpen) {
+        await refreshArchiveManagerUI();
       }
     } catch (err) {
       console.warn('获取工作区用量失败:', err);
@@ -127,6 +182,8 @@ async function main() {
           includeBackups,
           includeCache,
           includeAppPrivate,
+          compressionLevel: compressionSelect ? compressionSelect.value : '5',
+          filenameTemplate: filenameTemplateInput ? filenameTemplateInput.value : '',
         });
       }
     } catch (err) {
@@ -181,6 +238,8 @@ async function main() {
         const sourceBlob = await fetchHostBackup(host.platform);
         view.setProgress(20, `备份数据拉取完毕 (${formatBytes(sourceBlob.size)})，正在多线程转换...`);
 
+        const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
+
         const { report, resultBlob } = await runConversionTask({
           source: sourceBlob,
           target,
@@ -188,6 +247,7 @@ async function main() {
             includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : true,
             includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
             includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
+            compressionLevel,
           },
           onProgress: (cur, total, name) => {
             const pct = total > 0 ? 20 + Math.round((cur / total) * 75) : 50;
@@ -197,7 +257,26 @@ async function main() {
 
         view.setProgress(100, `转换完成！已导出为 ${targetLabel}`);
 
-        const filename = `${host.platform}-to-${target}-${formatTimestamp()}.zip`;
+        const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
+        const filename = resolveFilename(template, {
+          sourceName: `${host.platform}-backup`,
+          target,
+        });
+
+        // 暂存导出产物到 IndexedDB
+        try {
+          await saveFile({
+            name: filename,
+            size: resultBlob.size,
+            blob: resultBlob,
+            layout: target,
+            role: 'output',
+          });
+          await updateWorkspaceUI();
+        } catch (e) {
+          console.warn('暂存产物失败:', e);
+        }
+
         view.triggerDownload(resultBlob, filename);
         view.renderReport(report);
       } catch (err) {
@@ -230,6 +309,7 @@ async function main() {
           size: file.size,
           blob: file,
           layout: detection.layout,
+          role: 'source',
         });
         await updateWorkspaceUI();
       } catch (err) {
@@ -249,6 +329,12 @@ async function main() {
   // 目标平台或高级开关改动时，动态重新生成动作规划
   if (targetSelect) {
     targetSelect.addEventListener('change', () => refreshPlan());
+  }
+  if (compressionSelect) {
+    compressionSelect.addEventListener('change', () => refreshPlan());
+  }
+  if (filenameTemplateInput) {
+    filenameTemplateInput.addEventListener('input', () => refreshPlan());
   }
   if (includeBackupsCheck) {
     includeBackupsCheck.addEventListener('change', () => refreshPlan());
@@ -270,6 +356,11 @@ async function main() {
         btnConvert.disabled = true;
         resetCategoryFilter();
         if (dropHandler?.reset) dropHandler.reset();
+        if (workspacePanel) {
+          workspacePanel.style.display = 'none';
+          workspacePanelOpen = false;
+          if (btnToggleWorkspace) btnToggleWorkspace.textContent = '双列表管理 ▾';
+        }
         await updateWorkspaceUI();
         view.setProgress(0, '工作区暂存已清空');
       }
@@ -285,6 +376,7 @@ async function main() {
     const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : true;
     const includeCache = includeCacheCheck ? includeCacheCheck.checked : false;
     const includeAppPrivate = includePrivateCheck ? includePrivateCheck.checked : false;
+    const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
 
     try {
       btnConvert.disabled = true;
@@ -300,6 +392,7 @@ async function main() {
           includeBackups,
           includeCache,
           includeAppPrivate,
+          compressionLevel,
         },
         onProgress: (cur, total, name) => {
           const pct = total > 0 ? 5 + Math.round((cur / total) * 90) : 50;
@@ -311,13 +404,19 @@ async function main() {
       view.setProgress(100, `转换成功！共写入 ${report.totals.written} 项，已丢弃/过滤 ${report.totals.dropped + (report.totals.filtered || 0)} 项`);
 
       // 暂存转换产物到 IndexedDB
-      const outputFilename = `converted-${target}-${currentFile.name.replace(/\.zip$/i, '')}-${formatTimestamp()}.zip`;
+      const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
+      const outputFilename = resolveFilename(template, {
+        sourceName: currentFile.name,
+        target,
+      });
+
       try {
         await saveFile({
           name: outputFilename,
           size: resultBlob.size,
           blob: resultBlob,
           layout: target,
+          role: 'output',
         });
         await updateWorkspaceUI();
       } catch (e) {
@@ -353,6 +452,12 @@ async function main() {
           // 恢复目标选择与开关
           if (savedState.target && targetSelect) {
             targetSelect.value = savedState.target;
+          }
+          if (savedState.compressionLevel && compressionSelect) {
+            compressionSelect.value = savedState.compressionLevel;
+          }
+          if (savedState.filenameTemplate && filenameTemplateInput) {
+            filenameTemplateInput.value = savedState.filenameTemplate;
           }
           if (typeof savedState.includeBackups === 'boolean' && includeBackupsCheck) {
             includeBackupsCheck.checked = savedState.includeBackups;

@@ -37,6 +37,7 @@ let currentSelection = {
 let currentExcludedPaths = new Set();
 let availableCategories = new Set();
 let expandedCategories = new Set();
+let activeActionFilter = null;
 let currentPlan = null;
 let onSelectionChangeCallback = null;
 
@@ -127,13 +128,45 @@ export function renderCategoryStats(planOrInspectResult) {
       for (const [actionKey, count] of Object.entries(planOrInspectResult.actionStats)) {
         if (count > 0) {
           const info = ACTION_LABELS[actionKey] || { label: actionKey, color: '#9ca3af' };
-          const badge = document.createElement('span');
-          badge.className = `action-summary-pill pill-${actionKey.toLowerCase()}`;
+          const badge = document.createElement('button');
+          badge.type = 'button';
+          const isActive = activeActionFilter === actionKey;
+          badge.className = `action-summary-pill pill-${actionKey.toLowerCase()} ${isActive ? 'active' : ''}`;
           badge.textContent = `${info.label} ${count}`;
           badge.style.borderColor = info.color;
-          badge.style.color = info.color;
+          badge.style.color = isActive ? '#fff' : info.color;
+          if (isActive) badge.style.background = info.color;
+          badge.title = `点击${isActive ? '取消' : '按'}「${info.label}」动作筛选文件明细`;
+
+          badge.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (activeActionFilter === actionKey) {
+              activeActionFilter = null;
+            } else {
+              activeActionFilter = actionKey;
+              for (const [catKey, catData] of Object.entries(planOrInspectResult.categories)) {
+                if (catData.items?.some((it) => it.action === actionKey)) {
+                  expandedCategories.add(catKey);
+                }
+              }
+            }
+            renderCategoryStats(currentPlan);
+          });
+
           actionBadgesEl.appendChild(badge);
         }
+      }
+      if (activeActionFilter) {
+        const btnClearFilter = document.createElement('button');
+        btnClearFilter.type = 'button';
+        btnClearFilter.className = 'btn-clear-action-filter';
+        btnClearFilter.textContent = '重置动作筛选 ✕';
+        btnClearFilter.addEventListener('click', (e) => {
+          e.preventDefault();
+          activeActionFilter = null;
+          renderCategoryStats(currentPlan);
+        });
+        actionBadgesEl.appendChild(btnClearFilter);
       }
     }
     if (outputEstimateEl) {
@@ -275,6 +308,7 @@ export function renderCategoryStats(planOrInspectResult) {
         categoryKey: key,
         items,
         excludedPaths: currentExcludedPaths,
+        actionFilter: activeActionFilter,
         onItemToggle: (sourcePath, checked) => {
           if (checked) {
             currentExcludedPaths.delete(sourcePath);

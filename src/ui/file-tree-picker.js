@@ -1,7 +1,7 @@
 /**
  * 可穿透单项文件树与动作预览选择器 (File Tree Picker)
  * 允许用户穿透展开任意类目，查看每一个文件的目标归宿与计划动作 (直通/路由/迁移/合成/丢弃)，
- * 并支持单文件精确反选与即时模糊搜索。
+ * 并支持单文件精确反选、即时模糊搜索、动作筛选联动、体积排序与大文件醒目标注。
  */
 
 import { ACTION_LABELS, ACTIONS } from '../core/plan-preview.js';
@@ -19,10 +19,11 @@ function formatBytes(bytes) {
  * @param {string} params.categoryKey 类目标识
  * @param {Array<object>} params.items 条目列表
  * @param {Set<string>} params.excludedPaths 排除集合
+ * @param {string|null} [params.actionFilter] 动作过滤类型 (如 'ROUTE')
  * @param {function(string, boolean): void} params.onItemToggle
  * @returns {HTMLElement}
  */
-export function createCategoryDetailList({ categoryKey, items, excludedPaths, onItemToggle }) {
+export function createCategoryDetailList({ categoryKey, items, excludedPaths, actionFilter = null, onItemToggle }) {
   const container = document.createElement('div');
   container.className = 'category-detail-container';
   container.id = `detail-${categoryKey}`;
@@ -35,41 +36,76 @@ export function createCategoryDetailList({ categoryKey, items, excludedPaths, on
     return container;
   }
 
-  // 搜索过滤栏
-  const searchRow = document.createElement('div');
-  searchRow.className = 'detail-search-row';
+  // 工具行：搜索 + 排序
+  const toolRow = document.createElement('div');
+  toolRow.className = 'detail-tool-row';
 
   const searchInput = document.createElement('input');
   searchInput.type = 'search';
   searchInput.placeholder = `搜索此分类 ${items.length} 个文件...`;
   searchInput.className = 'detail-search-input';
 
-  searchRow.appendChild(searchInput);
-  container.appendChild(searchRow);
+  const sortSelect = document.createElement('select');
+  sortSelect.className = 'detail-sort-select';
+  sortSelect.innerHTML = `
+    <option value="default">默认顺序</option>
+    <option value="size-desc">体积降序 (大文件优先)</option>
+    <option value="name-asc">文件名 A-Z</option>
+  `;
+
+  toolRow.appendChild(searchInput);
+  toolRow.appendChild(sortSelect);
+  container.appendChild(toolRow);
 
   // 文件列表
   const listEl = document.createElement('div');
   listEl.className = 'detail-file-list';
 
+  let currentSort = 'default';
+
   function renderList(filterQuery = '') {
     listEl.innerHTML = '';
     const q = filterQuery.trim().toLowerCase();
 
-    const filtered = q
-      ? items.filter((it) => it.sourcePath.toLowerCase().includes(q) || (it.targetPath && it.targetPath.toLowerCase().includes(q)))
-      : items;
+    let processed = items;
 
-    if (filtered.length === 0) {
+    // 1. 动作过滤联动
+    if (actionFilter) {
+      processed = processed.filter((it) => it.action === actionFilter);
+    }
+
+    // 2. 文本搜索过滤
+    if (q) {
+      processed = processed.filter((it) =>
+        it.sourcePath.toLowerCase().includes(q)
+        || (it.targetPath && it.targetPath.toLowerCase().includes(q))
+        || (it.reason && it.reason.toLowerCase().includes(q)),
+      );
+    }
+
+    // 3. 排序
+    if (currentSort === 'size-desc') {
+      processed = [...processed].sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0));
+    } else if (currentSort === 'name-asc') {
+      processed = [...processed].sort((a, b) => a.sourcePath.localeCompare(b.sourcePath));
+    }
+
+    if (processed.length === 0) {
       const noMatch = document.createElement('div');
       noMatch.className = 'detail-empty';
-      noMatch.textContent = '未找到匹配文件';
+      noMatch.textContent = actionFilter
+        ? `未找到动作为 [${ACTION_LABELS[actionFilter]?.label || actionFilter}] 的匹配文件`
+        : '未找到匹配文件';
       listEl.appendChild(noMatch);
       return;
     }
 
-    filtered.forEach((item) => {
+    processed.forEach((item) => {
       const row = document.createElement('div');
-      row.className = `file-detail-row ${item.action.toLowerCase()}`;
+      const isLargeHeavy = (item.sizeBytes || 0) >= 5 * 1024 * 1024;
+      const isLargeWarn = !isLargeHeavy && (item.sizeBytes || 0) >= 1 * 1024 * 1024;
+
+      row.className = `file-detail-row ${item.action.toLowerCase()} ${isLargeHeavy ? 'large-heavy' : ''} ${isLargeWarn ? 'large-warn' : ''}`;
 
       const isExcluded = excludedPaths.has(item.sourcePath) || excludedPaths.has(item.hubPath);
       const isDrop = item.rawAction === ACTIONS.DROP;
@@ -120,9 +156,22 @@ export function createCategoryDetailList({ categoryKey, items, excludedPaths, on
         pathWrap.appendChild(reasonEl);
       }
 
-      // 动作 Badge
+      // 动作 Badge 与大文件警示
       const metaWrap = document.createElement('div');
       metaWrap.className = 'file-meta-wrap';
+
+      if (isLargeHeavy) {
+        const heavyBadge = document.createElement('span');
+        heavyBadge.className = 'badge-large-file heavy';
+        heavyBadge.textContent = '🔥 >5MB';
+        heavyBadge.title = '超大文件：请注意备份包总下载体积';
+        metaWrap.appendChild(heavyBadge);
+      } else if (isLargeWarn) {
+        const warnBadge = document.createElement('span');
+        warnBadge.className = 'badge-large-file warn';
+        warnBadge.textContent = '⚠️ >1MB';
+        metaWrap.appendChild(warnBadge);
+      }
 
       const actionInfo = ACTION_LABELS[item.action] || { label: item.action, color: '#6b7280' };
       const actionPill = document.createElement('span');
@@ -148,6 +197,11 @@ export function createCategoryDetailList({ categoryKey, items, excludedPaths, on
 
   searchInput.addEventListener('input', (e) => {
     renderList(e.target.value);
+  });
+
+  sortSelect.addEventListener('change', (e) => {
+    currentSort = e.target.value;
+    renderList(searchInput.value);
   });
 
   renderList();

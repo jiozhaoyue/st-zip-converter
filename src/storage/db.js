@@ -86,22 +86,26 @@ async function runTransaction(storeName, mode, operation) {
 /**
  * 暂存上传的原始数据包或生成包
  * @param {object} item
- * @param {string} item.id 唯一标识
+ * @param {string} [item.id] 唯一标识
  * @param {string} item.name 文件名
- * @param {number} item.size 字节数
+ * @param {number} [item.size] 字节数
  * @param {Blob|File} item.blob 实际二进制数据
  * @param {string} [item.layout] 识别出的布局
+ * @param {'source'|'output'} [item.role='source'] 文件角色
+ * @param {object} [item.metadata] 附加元数据
  * @returns {Promise<string|null>}
  */
-export async function saveFile({ id, name, size, blob, layout }) {
+export async function saveFile({ id, name, size, blob, layout, role = 'source', metadata = {} }) {
   if (!isStorageSupported()) return null;
-  const fileId = id || `file_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const fileId = id || `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const record = {
     id: fileId,
     name,
     size: size || blob?.size || 0,
     blob,
     layout: layout || 'unknown',
+    role,
+    metadata,
     createdAt: Date.now(),
   };
 
@@ -112,7 +116,7 @@ export async function saveFile({ id, name, size, blob, layout }) {
 /**
  * 获取暂存的数据包记录
  * @param {string} id
- * @returns {Promise<{id: string, name: string, size: number, blob: Blob, layout: string}|null>}
+ * @returns {Promise<{id: string, name: string, size: number, blob: Blob, layout: string, role: string, metadata: object}|null>}
  */
 export async function getFile(id) {
   if (!isStorageSupported() || !id) return null;
@@ -129,10 +133,11 @@ export async function deleteFile(id) {
 }
 
 /**
- * 获取所有暂存文件清单（不含 blob 大对象）
- * @returns {Promise<Array<{id: string, name: string, size: number, layout: string, createdAt: number}>>}
+ * 获取暂存文件清单（不含 blob 大对象）
+ * @param {'source'|'output'|null} [roleFilter]
+ * @returns {Promise<Array<{id: string, name: string, size: number, layout: string, role: string, metadata: object, createdAt: number}>>}
  */
-export async function listStoredFiles() {
+export async function listStoredFiles(roleFilter = null) {
   if (!isStorageSupported()) return [];
   const db = await openDb();
   if (!db) return [];
@@ -146,8 +151,19 @@ export async function listStoredFiles() {
     cursorReq.onsuccess = (e) => {
       const cursor = e.target.result;
       if (cursor) {
-        const { id, name, size, layout, createdAt } = cursor.value;
-        list.push({ id, name, size, layout, createdAt });
+        const val = cursor.value;
+        const role = val.role || 'source';
+        if (!roleFilter || role === roleFilter) {
+          list.push({
+            id: val.id,
+            name: val.name,
+            size: val.size,
+            layout: val.layout,
+            role,
+            metadata: val.metadata || {},
+            createdAt: val.createdAt,
+          });
+        }
         cursor.continue();
       } else {
         resolve(list.sort((a, b) => b.createdAt - a.createdAt));
@@ -155,6 +171,20 @@ export async function listStoredFiles() {
     };
     cursorReq.onerror = () => reject(cursorReq.error);
   });
+}
+
+/**
+ * 获取所有已上传/暂存的源包
+ */
+export async function listSourceFiles() {
+  return listStoredFiles('source');
+}
+
+/**
+ * 获取所有已转换生成的产物包
+ */
+export async function listOutputFiles() {
+  return listStoredFiles('output');
 }
 
 /**
