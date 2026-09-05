@@ -164,3 +164,25 @@
 ### Next Steps
 
 - 用户在浏览器中打开 http://localhost:5173 进行新特性的直观体验与大包验证
+
+
+## Session 6: 对齐 ST/Luker 原生规范实现 10 大标准备份类目细粒度选择器
+<!-- trellis-session: v=2 fp=6d6176a3d84aadb0 -->
+
+**Date**: 2026-09-05
+**Task**: 对齐 ST/Luker 原生规范实现 10 大标准备份类目细粒度选择器
+**Branch**: `main`
+
+### Summary
+
+1. 重构中央目录预检与类目定义 (src/core/inspect.js)，全面对齐 SillyTavern 与 Luker 的 10 大标准备份项 (characters, chats, lorebooks, presets, settings, secrets, assets, extensions, globalExtensions, vectors)。2. 优化 transform.js 与 Luker manifest 合成，确保用户勾选与 manifest.json.selection 字典完全同步。3. 重构类目选择 UI (category-filter.js 与 index.html/style.css)，提供全量细粒度复选框、文件数与解压体积展示、全选/全不选/反选与快捷预设。4. 更新单元测试 (test/filter.test.js)，56 个单元测试全部通过，生产包构建无报错。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `59c71bb` | feat(ui): 对齐 ST/Luker 规范实现 10 大标准备份类目全量勾选面板 |
+
+### Status
+
+[OK] **Completed**

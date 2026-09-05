@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
-- **Last Active**: 2026-09-04
+- **Total Sessions**: 6
+- **Last Active**: 2026-09-05
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~166 | Active |
+| `journal-1.md` | ~188 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-09-05 | 对齐 ST/Luker 原生规范实现 10 大标准备份类目细粒度选择器 | `59c71bb` | `main` |
 | 5 | 2026-09-04 | Web Worker 多线程加速与独立模式类目选择性导出/安全脱敏落地 | `f1af968` | `main` |
 | 4 | 2026-09-04 | 三位一体架构收敛与旧版 CLI / 单文件插件彻底移除 | `c73fce5` | `main` |
 | 3 | 2026-09-04 | 任务终验归档与规范库全量填充 | `6ac7000`, `ab10268`, `f7931ec` | `main` |
