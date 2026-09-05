@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-09-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~210 | Active |
+| `journal-1.md` | ~238 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-09-05 | 工作站高级控制台：双文件列表、自定义包名/压缩率与动作筛选联动 | `9f35511`, `7192780` | `full-dev` |
 | 7 | 2026-09-05 | 实现 IndexedDB 暂存工作区、完全扫描动作预测与单项穿透勾选器 | `21e50ab` | `full-dev` |
 | 6 | 2026-09-05 | 对齐 ST/Luker 原生规范实现 10 大标准备份类目细粒度选择器 | `59c71bb` | `main` |
 | 5 | 2026-09-04 | Web Worker 多线程加速与独立模式类目选择性导出/安全脱敏落地 | `f1af968` | `main` |

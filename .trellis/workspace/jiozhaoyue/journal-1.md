@@ -208,3 +208,31 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: 工作站高级控制台：双文件列表、自定义包名/压缩率与动作筛选联动
+<!-- trellis-session: v=2 fp=d9b20f050658d423 -->
+
+**Date**: 2026-09-05
+**Task**: 工作站高级控制台：双文件列表、自定义包名/压缩率与动作筛选联动
+**Branch**: `full-dev`
+
+### Summary
+
+1. 实现了基于 IndexedDB 的已上传源包与已转换产物双文件列表管理组件 (src/ui/archive-manager.js)，支持一键重新载入、独立下载与删除，支持将产物作为新源包多跳再转换。2. 支持自定义导出包名模板 (src/core/filename-template.js)，提供 {source}, {target}, {date}, {handle} 占位符解析与跨系统文件名净化。3. 实现了 0(极速存储/Store)、1(快速)、5(标准默认)、9(极限压缩) 四档 Zip 压缩率调节，并确保完全兼容 ST/Luker/TT/PT 解压引擎。4. 文件树支持按体积降序排列，对 >1MB 及 >5MB 大文件显示醒目警示徽标。5. 动作预测条各动作胶囊支持动态联动过滤下方文件树。6. 新增单元测试 (66/66 passed)，打包验证顺畅。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9f35511` | feat: implement dual archive manager, custom filenames, compression level and action filtering |
+| `7192780` | chore(task): archive 09-05-workstation-advanced-controls |
+
+### Testing
+
+- [OK] npm test (66 passed, 2 skipped)
+- [OK] npm run build (Vite 647ms clean build)
+
+### Status
+
+[OK] **Completed**
