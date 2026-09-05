@@ -17,20 +17,19 @@
       <div class="badge" id="env-badge">独立 Web 模式</div>
     </header>
 
-    <!-- Workspace Banner -->
-    <div class="workspace-bar" id="workspace-bar" style="display: none;">
+    <!-- Workspace Bar -->
+    <div class="workspace-bar" id="workspace-bar">
       <div class="workspace-info">
         <span class="workspace-icon">💾</span>
         <span id="workspace-status-text">工作区就绪</span>
       </div>
       <div class="workspace-actions">
-        <button type="button" class="btn-workspace-toggle" id="btn-toggle-workspace" title="展开/收起已上传源包与已转换产物双列表">双列表管理 ▾</button>
         <button type="button" class="btn-workspace-clear" id="btn-clear-workspace" title="清除暂存的数据包并重置工作区">清空暂存</button>
       </div>
     </div>
 
-    <!-- Workspace Dual List Panel (Collapsible) -->
-    <div class="workspace-panel card" id="workspace-panel" style="display: none;">
+    <!-- Workspace Dual List Panel (Permanent) -->
+    <div class="workspace-panel card" id="workspace-panel">
       <!-- 由 archive-manager.js 动态挂载已上传与已转换双列表 -->
     </div>
 
@@ -38,33 +37,20 @@
     <section class="card" id="host-export-card" style="display: none;">
       <h2 class="card-title">🚀 导出当前酒馆数据包</h2>
       <div class="export-grid">
-        <button class="btn-export btn-st" data-target="st">
-          <span>→ SillyTavern</span>
-          <span class="desc">摊平布局 / 基础结构</span>
-        </button>
-        <button class="btn-export btn-luker" data-target="l">
-          <span>→ Luker</span>
-          <span class="desc">含 manifest.json / 全选</span>
-        </button>
-        <button class="btn-export btn-tt" data-target="tt">
-          <span>→ TauriTavern</span>
-          <span class="desc">data/ 根 / 系统分离</span>
-        </button>
-        <button class="btn-export btn-pt" data-target="pt">
-          <span>→ PureTavern</span>
-          <span class="desc">自动迁移扩展来源 / TT布局</span>
-        </button>
+        <button class="btn-export btn-st" data-target="st">→ SillyTavern</button>
+        <button class="btn-export btn-luker" data-target="l">→ Luker</button>
+        <button class="btn-export btn-tt" data-target="tt">→ TauriTavern</button>
+        <button class="btn-export btn-pt" data-target="pt">→ PureTavern</button>
       </div>
-      <p class="notice-tip" id="host-tip">点击即刻从当前酒馆一键导出并转换为目标平台包。</p>
     </section>
 
     <!-- Section 2: 外部数据包互转区 (全环境通用) -->
     <section class="card" id="external-convert-card">
       <h2 class="card-title">📦 转换任意酒馆 Zip 数据包</h2>
       <div class="dropzone" id="dropzone">
-        <input type="file" id="file-input" accept=".zip" style="display: none;">
+        <input type="file" id="file-input" accept=".zip" multiple style="display: none;">
         <p class="main-text" id="drop-main-text">将酒馆 Zip 数据包拖放到此处，或点击浏览选择</p>
-        <p class="sub-text" id="drop-sub-text">支持任意四平台（ST / Luker / TT / PT）导出的备份压缩包</p>
+        <p class="sub-text" id="drop-sub-text">支持多选或同时拖入多个 Zip 备份包批量入库</p>
       </div>
 
       <!-- Section 2.5: 数据包内容与细粒度类目选择 (对齐 ST / Luker) -->
@@ -120,8 +106,17 @@
         </div>
 
         <div class="filename-input-group">
-          <label for="filename-template-input">自定义包名:</label>
-          <input type="text" id="filename-template-input" class="text-input" placeholder="{source}-to-{target}-{date}.zip" value="{source}-to-{target}-{date}.zip" title="支持占位符: {source}, {target}, {date}, {handle}">
+          <div class="filename-top-row">
+            <label for="filename-template-input">自定义包名:</label>
+            <div class="placeholder-chips" id="placeholder-chips">
+              <button type="button" class="btn-chip" data-insert="{source}" title="插入源包名称">+ {source}</button>
+              <button type="button" class="btn-chip" data-insert="{target}" title="插入目标平台代码">+ {target}</button>
+              <button type="button" class="btn-chip" data-insert="{date}" title="插入时间戳">+ {date}</button>
+              <button type="button" class="btn-chip" data-insert="{handle}" title="插入用户标识">+ {handle}</button>
+            </div>
+          </div>
+          <input type="text" id="filename-template-input" class="text-input" placeholder="{source}-to-{target}-{date}.zip" value="{source}-to-{target}-{date}.zip">
+          <span class="filename-guide">点击标签可快速插入变量，生成时自动替换并过滤非法字符</span>
         </div>
 
         <div class="advanced-switches-group">

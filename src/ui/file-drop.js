@@ -11,6 +11,7 @@ export function setupFileDrop({
   mainTextEl,
   subTextEl,
   onFileReady,
+  onFilesReady,
   onError,
 }) {
   let selectedFile = null;
@@ -39,7 +40,7 @@ export function setupFileDrop({
 
     const files = e.dataTransfer?.files;
     if (files && files.length > 0) {
-      await handleFile(files[0]);
+      await handleFiles(files);
     }
   });
 
@@ -49,57 +50,96 @@ export function setupFileDrop({
 
   fileInputEl.addEventListener('change', async () => {
     if (fileInputEl.files && fileInputEl.files.length > 0) {
-      await handleFile(fileInputEl.files[0]);
+      await handleFiles(fileInputEl.files);
     }
   });
 
-  async function handleFile(file) {
-    if (!file.name.toLowerCase().endsWith('.zip')) {
+  async function handleFiles(fileList) {
+    const rawFiles = Array.from(fileList);
+    const zipFiles = rawFiles.filter((f) => f.name.toLowerCase().endsWith('.zip'));
+
+    if (zipFiles.length === 0) {
       if (onError) onError(new Error('请选择 .zip 格式的酒馆备份压缩包'));
       return;
     }
 
-    selectedFile = file;
-    const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
-    mainTextEl.textContent = `📁 ${file.name} (${sizeMb} MB)`;
-    subTextEl.textContent = '正在分析包结构并自动嗅探源平台...';
+    const layoutNames = {
+      st: 'SillyTavern',
+      l: 'Luker',
+      tt: 'TauriTavern',
+      'pt-native': 'PureTavern',
+      unknown: '未知格式',
+    };
 
-    try {
-      const reader = await zipIo.openReader(file);
-      let detection;
+    if (zipFiles.length === 1) {
+      const file = zipFiles[0];
+      selectedFile = file;
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+      mainTextEl.textContent = `📁 ${file.name} (${sizeMb} MB)`;
+      subTextEl.textContent = '正在分析包结构并自动嗅探源平台...';
+
       try {
-        detection = await detectFromReader(reader);
-      } finally {
-        await reader.close();
+        const reader = await zipIo.openReader(file);
+        let detection;
+        try {
+          detection = await detectFromReader(reader);
+        } finally {
+          await reader.close();
+        }
+
+        const detectedName = layoutNames[detection.layout] ?? detection.layout;
+        subTextEl.textContent = `已识别源平台: ${detectedName} (${detection.evidence})`;
+
+        if (onFilesReady) {
+          onFilesReady([{ file, detection }]);
+        } else if (onFileReady) {
+          onFileReady(file, detection);
+        }
+      } catch (err) {
+        subTextEl.textContent = `分析失败: ${err.message}`;
+        if (onError) onError(err);
+      }
+    } else {
+      mainTextEl.textContent = `📁 已选择 ${zipFiles.length} 个数据包`;
+      subTextEl.textContent = '正在批量分析并存入工作区...';
+
+      const results = [];
+      for (const file of zipFiles) {
+        try {
+          const reader = await zipIo.openReader(file);
+          let detection;
+          try {
+            detection = await detectFromReader(reader);
+          } finally {
+            await reader.close();
+          }
+          results.push({ file, detection });
+        } catch (err) {
+          console.warn(`分析 ${file.name} 失败:`, err);
+        }
       }
 
-      const layoutNames = {
-        st: 'SillyTavern (摊平布局)',
-        l: 'Luker (带清单布局)',
-        tt: 'TauriTavern (data/ 根布局)',
-        'pt-native': 'PureTavern (原生 sha256 归档)',
-        unknown: '未知格式',
-      };
+      selectedFile = results[0]?.file || null;
+      subTextEl.textContent = `已识别并存入 ${results.length} 个数据包到工作区`;
 
-      const detectedName = layoutNames[detection.layout] ?? detection.layout;
-      subTextEl.textContent = `已识别源平台: ${detectedName} (${detection.evidence})`;
-
-      if (onFileReady) {
-        onFileReady(file, detection);
+      if (onFilesReady) {
+        onFilesReady(results);
+      } else if (results.length > 0 && onFileReady) {
+        onFileReady(results[0].file, results[0].detection);
       }
-    } catch (err) {
-      subTextEl.textContent = `分析失败: ${err.message}`;
-      if (onError) onError(err);
     }
   }
 
   return {
     getSelectedFile: () => selectedFile,
+    setFilename: (name) => {
+      if (mainTextEl) mainTextEl.textContent = `📁 ${name}`;
+    },
     clear: () => {
       selectedFile = null;
       fileInputEl.value = '';
       mainTextEl.textContent = '将酒馆 Zip 数据包拖放到此处，或点击浏览选择';
-      subTextEl.textContent = '支持任意四平台（ST / Luker / TT / PT）导出的备份压缩包';
+      subTextEl.textContent = '支持多选或同时拖入多个 Zip 备份包批量入库';
     },
   };
 }

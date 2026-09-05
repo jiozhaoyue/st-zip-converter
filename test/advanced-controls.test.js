@@ -133,3 +133,50 @@ describe('多级 Zip 压缩率支持 (Store 0 vs Deflate 9)', () => {
     expect(maxText).toEqual(largeText);
   });
 });
+
+describe('多跳链式流转流水线 (Multi-Hop Chaining)', () => {
+  it('支持 ST -> TT -> PT 级联多跳转换且角色卡无损流转', async () => {
+    // 1. 初始源包为 ST 格式
+    const { stEntries } = await import('../fixtures/gen.js');
+    const stBlob = await createFixtureBlob(stEntries());
+
+    // 第一跳: ST -> TT
+    const hop1Writer = new zip.BlobWriter('application/zip');
+    await convert(stBlob, hop1Writer, {
+      target: TARGETS.TT,
+      io: zipIo,
+      compressionLevel: 5,
+    });
+    const ttBlob = await hop1Writer.getData();
+    expect(ttBlob.size).toBeGreaterThan(0);
+
+    // 验证第一跳产物具备 TT 特征 (data/default-user/characters/)
+    const ttReader = await zipIo.openReader(ttBlob);
+    const ttNames = [];
+    for await (const entry of ttReader.entries()) {
+      ttNames.push(entry.fileName);
+    }
+    await ttReader.close();
+    expect(ttNames.some((n) => n.startsWith('data/default-user/characters/'))).toBe(true);
+
+    // 第二跳: 作为新源包直接转换 TT -> PT
+    const hop2Writer = new zip.BlobWriter('application/zip');
+    await convert(ttBlob, hop2Writer, {
+      target: TARGETS.PT,
+      io: zipIo,
+      compressionLevel: 5,
+    });
+    const ptBlob = await hop2Writer.getData();
+    expect(ptBlob.size).toBeGreaterThan(0);
+
+    // 验证第二跳产物具备 PT 兼容特征且角色卡完整保留
+    const ptReader = await zipIo.openReader(ptBlob);
+    const ptNames = [];
+    for await (const entry of ptReader.entries()) {
+      ptNames.push(entry.fileName);
+    }
+    await ptReader.close();
+    expect(ptNames.some((n) => n.includes('Fixture Character.png'))).toBe(true);
+  });
+});
+

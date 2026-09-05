@@ -113,10 +113,9 @@ body {
 
 .btn-export {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -125,13 +124,7 @@ body {
   transition: all 0.2s ease;
   font-size: 0.85rem;
   font-weight: 600;
-  gap: 4px;
-}
-
-.btn-export span.desc {
-  font-size: 0.72rem;
-  font-weight: 400;
-  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .btn-export:hover:not(:disabled) {
@@ -144,12 +137,6 @@ body {
 .btn-export.btn-luker:hover { border-color: var(--accent-luker); }
 .btn-export.btn-tt:hover { border-color: var(--accent-tt); }
 .btn-export.btn-pt:hover { border-color: var(--accent-pt); }
-
-.notice-tip {
-  font-size: 0.75rem;
-  color: var(--text-sub);
-  margin-top: 8px;
-}
 
 /* Dropzone */
 .dropzone {
@@ -205,11 +192,49 @@ body {
 
 .filename-input-group {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   font-size: 0.85rem;
   flex: 1;
-  min-width: 220px;
+  min-width: 260px;
+}
+
+.filename-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.placeholder-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.btn-chip {
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: var(--accent);
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.btn-chip:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.filename-guide {
+  font-size: 0.72rem;
+  color: var(--text-sub);
+  word-break: keep-all;
 }
 
 .text-input {
@@ -481,20 +506,20 @@ body {
   gap: 8px;
 }
 
-.btn-workspace-toggle {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.35);
-  color: var(--accent);
-  padding: 3px 10px;
+.btn-batch-convert {
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid var(--accent);
+  color: #fff;
+  padding: 2px 8px;
   border-radius: var(--radius-sm);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.15s ease;
 }
 
-.btn-workspace-toggle:hover {
+.btn-batch-convert:hover {
   background: var(--accent);
-  color: #fff;
 }
 
 .btn-workspace-clear {
@@ -1006,4 +1031,130 @@ body {
 
 .app-footer a:hover {
   color: var(--accent);
+}
+
+/* ==========================================================================
+   多端响应式与防不自然换行精修 (Mobile / Tablet / Desktop)
+   ========================================================================== */
+
+/* 核心按钮与徽标文本防撕裂截断 */
+.btn-primary,
+.btn-export,
+.btn-tool,
+.btn-archive-action,
+.btn-batch-convert,
+.btn-chip,
+.badge,
+.meta-badge,
+.action-pill,
+.action-summary-pill,
+.badge-large-file {
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+/* 标签防折行 */
+.category-item-label,
+.target-select-group label,
+.compression-select-group label,
+.filename-top-row label,
+.checkbox-group span {
+  word-break: keep-all;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 12px 10px;
+    gap: 12px;
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .archive-manager-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .controls-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .target-select-group,
+  .compression-select-group,
+  .filename-input-group {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .target-select-group .select-input,
+  .compression-select-group .select-input {
+    flex: 1;
+    width: 100%;
+  }
+
+  .advanced-switches-group {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .category-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .category-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .plan-summary-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .export-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .export-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .category-actions {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .btn-group-main,
+  .btn-group-quick {
+    width: 100%;
+    display: flex;
+  }
+
+  .btn-group-main .btn-tool,
+  .btn-group-quick .btn-tool {
+    flex: 1;
+  }
+
+  .archive-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .archive-buttons {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }

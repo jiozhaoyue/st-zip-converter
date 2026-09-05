@@ -60,7 +60,6 @@ async function main() {
 
   const workspaceBar = document.getElementById('workspace-bar');
   const workspaceStatusText = document.getElementById('workspace-status-text');
-  const btnToggleWorkspace = document.getElementById('btn-toggle-workspace');
   const btnClearWorkspace = document.getElementById('btn-clear-workspace');
   const workspacePanel = document.getElementById('workspace-panel');
 
@@ -70,8 +69,7 @@ async function main() {
 
   const compressionSelect = document.getElementById('compression-select');
   const filenameTemplateInput = document.getElementById('filename-template-input');
-
-  let workspacePanelOpen = false;
+  const placeholderChips = document.getElementById('placeholder-chips');
 
   // 初始化类目过滤器组件
   setupCategoryFilter({
@@ -80,9 +78,69 @@ async function main() {
     },
   });
 
-  // 刷新双文件列表管理组件
+  // 批量队列转换执行逻辑
+  async function runBatchConversion(sourceRecords) {
+    if (!sourceRecords || sourceRecords.length === 0) return;
+    const target = targetSelect ? targetSelect.value : 'pt';
+    const totalCount = sourceRecords.length;
+    btnConvert.disabled = true;
+    view.setProgress(0, `正在开始批量转换 ${totalCount} 个数据包...`);
+
+    let completed = 0;
+    for (let i = 0; i < totalCount; i++) {
+      const srcMeta = sourceRecords[i];
+      const full = await getFile(srcMeta.id);
+      if (!full?.blob) continue;
+
+      const currentBlob = full.blob;
+      currentBlob.name = full.name;
+
+      const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
+      const outputFilename = resolveFilename(template, {
+        sourceName: currentBlob.name,
+        target,
+      });
+
+      const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
+
+      try {
+        const { report, resultBlob } = await runConversionTask({
+          source: currentBlob,
+          target,
+          options: {
+            includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : true,
+            includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
+            includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
+            compressionLevel,
+          },
+          onProgress: (cur, tot, name) => {
+            const basePct = Math.round((i / totalCount) * 100);
+            const itemPct = tot > 0 ? Math.round((cur / tot) * (100 / totalCount)) : 0;
+            view.setProgress(basePct + itemPct, `[${i + 1}/${totalCount}] ${currentBlob.name} -> ${name}`);
+          },
+        });
+
+        await saveFile({
+          name: outputFilename,
+          size: resultBlob.size,
+          blob: resultBlob,
+          layout: target,
+          role: 'output',
+        });
+        completed++;
+      } catch (err) {
+        console.error(`转换 ${currentBlob.name} 失败:`, err);
+      }
+    }
+
+    await updateWorkspaceUI();
+    view.setProgress(100, `批量转换完成！已成功转换 ${completed}/${totalCount} 个数据包并存入产物库`);
+    btnConvert.disabled = false;
+  }
+
+  // 刷新双文件列表管理组件 (常驻展示)
   async function refreshArchiveManagerUI() {
-    if (!workspacePanel || !workspacePanelOpen) return;
+    if (!workspacePanel) return;
     await renderArchiveManager({
       containerEl: workspacePanel,
       activeFileId: currentFileId,
@@ -103,42 +161,47 @@ async function main() {
       onListChanged: async () => {
         await updateWorkspaceUI();
       },
+      onBatchConvert: async (sources) => {
+        await runBatchConversion(sources);
+      },
     });
   }
 
-  // 展开/折叠双文件列表管理面板
-  if (btnToggleWorkspace && workspacePanel) {
-    btnToggleWorkspace.addEventListener('click', async () => {
-      workspacePanelOpen = !workspacePanelOpen;
-      workspacePanel.style.display = workspacePanelOpen ? 'block' : 'none';
-      btnToggleWorkspace.textContent = workspacePanelOpen ? '双列表管理 ▴' : '双列表管理 ▾';
-      if (workspacePanelOpen) {
-        await refreshArchiveManagerUI();
+  // 占位符标签点击插入到包名输入框
+  if (placeholderChips && filenameTemplateInput) {
+    placeholderChips.addEventListener('click', (e) => {
+      const btn = e.target.closest('.btn-chip');
+      if (!btn) return;
+      const insertVal = btn.getAttribute('data-insert');
+      if (!insertVal) return;
+
+      const input = filenameTemplateInput;
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? input.value.length;
+      const val = input.value;
+
+      if (start === val.length && val.toLowerCase().endsWith('.zip')) {
+        const base = val.slice(0, -4);
+        input.value = `${base}-${insertVal}.zip`;
+      } else {
+        input.value = val.slice(0, start) + insertVal + val.slice(end);
       }
+      input.dispatchEvent(new Event('input'));
+      input.focus();
     });
   }
 
   // 1. 更新工作区状态栏
   async function updateWorkspaceUI() {
-    if (!isStorageSupported() || !workspaceBar) return;
+    if (!isStorageSupported()) return;
     try {
       const usage = await getStorageUsage();
-      if (usage.count > 0) {
-        workspaceBar.style.display = 'flex';
-        if (workspaceStatusText) {
-          workspaceStatusText.textContent = `IndexedDB 工作区：已暂存 ${usage.count} 个数据包 (${formatBytes(usage.totalBytes)})`;
-        }
-      } else {
-        workspaceBar.style.display = 'none';
-        if (workspacePanel) {
-          workspacePanel.style.display = 'none';
-          workspacePanelOpen = false;
-          if (btnToggleWorkspace) btnToggleWorkspace.textContent = '双列表管理 ▾';
-        }
+      if (workspaceStatusText) {
+        workspaceStatusText.textContent = usage.count > 0
+          ? `IndexedDB 工作区：已暂存 ${usage.count} 个数据包 (${formatBytes(usage.totalBytes)})`
+          : 'IndexedDB 工作区：暂存 0 个数据包';
       }
-      if (workspacePanelOpen) {
-        await refreshArchiveManagerUI();
-      }
+      await refreshArchiveManagerUI();
     } catch (err) {
       console.warn('获取工作区用量失败:', err);
     }
@@ -294,30 +357,35 @@ async function main() {
     fileInputEl: document.getElementById('file-input'),
     mainTextEl: document.getElementById('drop-main-text'),
     subTextEl: document.getElementById('drop-sub-text'),
-    onFileReady: async (file, detection) => {
-      currentFile = file;
+    onFilesReady: async (fileItems) => {
+      if (!fileItems || fileItems.length === 0) return;
       btnConvert.disabled = false;
 
-      // 智能预选：如果源是 ST，默认目标设为 L；如果源是 TT，设为 PT
-      if (detection.layout === 'st' && targetSelect) targetSelect.value = 'l';
-      if (detection.layout === 'tt' && targetSelect) targetSelect.value = 'pt';
-
-      // 异步暂存到 IndexedDB
-      try {
-        currentFileId = await saveFile({
-          name: file.name,
-          size: file.size,
-          blob: file,
-          layout: detection.layout,
-          role: 'source',
-        });
-        await updateWorkspaceUI();
-      } catch (err) {
-        console.warn('暂存文件到 IndexedDB 失败:', err);
+      // 批量存入 IndexedDB
+      for (const item of fileItems) {
+        try {
+          const id = await saveFile({
+            name: item.file.name,
+            size: item.file.size,
+            blob: item.file,
+            layout: item.detection.layout,
+            role: 'source',
+          });
+          if (!currentFile) {
+            currentFile = item.file;
+            currentFileId = id;
+            if (item.detection.layout === 'st' && targetSelect) targetSelect.value = 'l';
+            if (item.detection.layout === 'tt' && targetSelect) targetSelect.value = 'pt';
+          }
+        } catch (err) {
+          console.warn('暂存文件到 IndexedDB 失败:', err);
+        }
       }
 
-      // 执行完全扫描与计划动作预测
-      await refreshPlan();
+      await updateWorkspaceUI();
+      if (currentFile) {
+        await refreshPlan();
+      }
     },
     onError: (err) => {
       btnConvert.disabled = true;
@@ -355,12 +423,7 @@ async function main() {
         currentFileId = null;
         btnConvert.disabled = true;
         resetCategoryFilter();
-        if (dropHandler?.reset) dropHandler.reset();
-        if (workspacePanel) {
-          workspacePanel.style.display = 'none';
-          workspacePanelOpen = false;
-          if (btnToggleWorkspace) btnToggleWorkspace.textContent = '双列表管理 ▾';
-        }
+        if (dropHandler?.clear) dropHandler.clear();
         await updateWorkspaceUI();
         view.setProgress(0, '工作区暂存已清空');
       }

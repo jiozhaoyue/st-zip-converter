@@ -26,7 +26,7 @@ function formatDate(timestamp) {
  * @param {function(object): void} params.onLoadFile 载入文件回调
  * @param {function(): void} params.onListChanged 列表变更回调
  */
-export async function renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged }) {
+export async function renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged, onBatchConvert }) {
   if (!containerEl) return;
 
   const [sources, outputs] = await Promise.all([
@@ -47,8 +47,20 @@ export async function renderArchiveManager({ containerEl, activeFileId, onLoadFi
   sourceHeader.className = 'archive-col-header';
   sourceHeader.innerHTML = `
     <span class="col-title">📥 已上传源包 (${sources.length})</span>
-    <span class="col-desc">暂存的源备份包</span>
   `;
+
+  if (sources.length > 1 && typeof onBatchConvert === 'function') {
+    const btnBatch = document.createElement('button');
+    btnBatch.type = 'button';
+    btnBatch.className = 'btn-batch-convert';
+    btnBatch.textContent = '⚡ 批量转换全部';
+    btnBatch.title = '按当前配置依次转换所有已上传源包';
+    btnBatch.addEventListener('click', () => {
+      onBatchConvert(sources);
+    });
+    sourceHeader.appendChild(btnBatch);
+  }
+
   sourceCol.appendChild(sourceHeader);
 
   const sourceList = document.createElement('div');
@@ -114,7 +126,7 @@ export async function renderArchiveManager({ containerEl, activeFileId, onLoadFi
         if (confirm(`确定要从暂存中删除「${file.name}」吗？`)) {
           await deleteFile(file.id);
           if (typeof onListChanged === 'function') onListChanged();
-          renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged });
+          renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged, onBatchConvert });
         }
       });
       btnWrap.appendChild(btnDelete);
@@ -134,7 +146,6 @@ export async function renderArchiveManager({ containerEl, activeFileId, onLoadFi
   outputHeader.className = 'archive-col-header';
   outputHeader.innerHTML = `
     <span class="col-title">📤 已转换生成包 (${outputs.length})</span>
-    <span class="col-desc">暂存的转换产物</span>
   `;
   outputCol.appendChild(outputHeader);
 
@@ -213,7 +224,7 @@ export async function renderArchiveManager({ containerEl, activeFileId, onLoadFi
         if (confirm(`确定要从暂存中删除产物「${file.name}」吗？`)) {
           await deleteFile(file.id);
           if (typeof onListChanged === 'function') onListChanged();
-          renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged });
+          renderArchiveManager({ containerEl, activeFileId, onLoadFile, onListChanged, onBatchConvert });
         }
       });
       btnWrap.appendChild(btnDelete);
