@@ -264,3 +264,39 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: 全能酒馆数据包工作站与全闭环架构 (v1.0.0 正式发布)
+<!-- trellis-session: v=2 fp=a4f912b7ce11e309 -->
+
+**Date**: 2026-09-05
+**Task**: 全能酒馆数据包工作站：宿主直接细粒度导出、增量恢复写入、Method 93透明解压、实时日志抽屉与移动端深度适配
+**Branch**: `full-dev` / `main`
+**Tag**: `v1.0.0`
+
+### Summary
+
+1. 架构升维为全平台兼容的「全能酒馆数据包工作站」，所有操作（导出、细粒度筛选、跨格式直出、双列表管理、增量差量合并、恢复写入宿主、实时日志审计）均收拢在单一统一面板内闭环完成。
+2. 宿主直接导出工作台支持 8 项细粒度类目自由勾选，支持一键快捷预设（全选、仅角色卡、仅聊天记录、安全脱敏），支持角色与聊天记录智能联动，并可一步直出为 ST / Luker / TT / PT 格式。
+3. 实现了增量导出模式与一键写入恢复宿主（支持增量合并 mode: merge 与全量覆盖 mode: overwrite 双模式），支持离线两包差量合并 (incrementalMergeArchives)，尤其针对 TauriTavern 数据包提供无损融合补丁能力。
+4. 原生兼容 7-Zip-zstd (7-Zip ZS) 与 TauriTavern 的 Method 93 (Zstandard in Zip) 压缩条目，通过纯 JS fzstd 流实现自适应透明解密解压。
+5. 依赖自包含化 (src/vendor/zip.js, src/vendor/fzstd.js)，实现 SillyTavern 扩展管理器通过 Git URL 一键克隆安装即开即用，零 npm install、零构建依赖。
+6. 主面板底部常驻抽屉式实时日志与诊断控制台 (src/ui/log-console.js)，支持高亮滚屏、级别过滤、耗时统计、一键复制与下载 .log 文件。
+7. 移动端与手机竖屏极致深度适配，保证 touch target >= 44px，双列表单列垂直堆叠，杜绝横向滚动溢出。
+8. 全量 73 个自动化单元与集成测试全部通过，Vite 生产构建顺畅无警告，正式发布并推送 v1.0.0 标签。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ba30dac` | feat: 全能酒馆数据包工作站与全闭环操作架构 (细粒度导出/增量恢复/Method93/自包含引擎/实时日志控制台/移动端适配) |
+
+### Testing
+
+- [OK] npm test (73 passed, 2 skipped)
+- [OK] npm run build (Vite 635ms clean build)
+
+### Status
+
+[OK] **Completed**
+
