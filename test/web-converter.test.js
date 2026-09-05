@@ -85,4 +85,23 @@ describe('纯 Web 转换引擎 (zipIo + transform)', () => {
     expect(report.target).toBe(TARGETS.ST);
     expect(report.totals.filtered).toBeGreaterThanOrEqual(1);
   });
+
+  it('runPlanTask 能够在降级环境下执行完全扫描规划', async () => {
+    const { runPlanTask } = await import('../src/core/worker-client.js');
+    const sourceBlob = await createFixtureBlob(lEntries());
+
+    const plan = await runPlanTask({
+      source: sourceBlob,
+      target: TARGETS.TT,
+      options: {
+        includeCache: false,
+        includeBackups: true,
+      },
+    });
+
+    expect(plan.sourceLayout).toBe('l');
+    expect(plan.targetLayout).toBe('tt');
+    expect(plan.categories.characters.items.length).toBe(1);
+    expect(plan.expectedOutputFiles).toBeGreaterThan(0);
+  });
 });

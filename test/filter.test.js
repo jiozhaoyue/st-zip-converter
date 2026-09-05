@@ -142,4 +142,31 @@ describe('类目选择过滤与安全脱敏导出 (convert with selection)', () 
     expect(names.some((n) => n.includes('extensions/'))).toBe(false);
     expect(names.some((n) => n.includes('_tauritavern/extension-sources/'))).toBe(false);
   });
+
+  it('单项穿透排除 (excludedPaths) 与缓存/备份独立开关', async () => {
+    const sourceBlob = await createFixtureBlob(stEntries());
+    const targetWriter = new zip.BlobWriter('application/zip');
+
+    // 穿透剔除特定角色卡与头像，且开启 includeCache 但关闭 includeBackups
+    const report = await convert(sourceBlob, targetWriter, {
+      target: TARGETS.L,
+      io: zipIo,
+      excludedPaths: new Set(['characters/Fixture Character.png']),
+      includeCache: true,
+      includeBackups: false,
+    });
+
+    const resultBlob = await targetWriter.getData();
+    const names = await listEntryNames(resultBlob);
+
+    // 该特定角色卡已被穿透剔除
+    expect(names.includes('characters/Fixture Character.png')).toBe(false);
+    // 派生缓存因 includeCache: true 被保留
+    expect(names.includes('thumbnails/fixture-avatar.png')).toBe(true);
+    // 备份快照因 includeBackups: false 被排除
+    expect(names.includes('backups/auto-2026.json')).toBe(false);
+
+    const json = report.toJSON();
+    expect(json.filtered.some((f) => f.path === 'characters/Fixture Character.png')).toBe(true);
+  });
 });

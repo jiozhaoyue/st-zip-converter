@@ -73,7 +73,18 @@ const L_SELECTION = Object.freeze({
  * @param {boolean} [options.dryRun] 只产出报告不写文件(数据条目跳过读取)
  * @returns {Promise<Report>}
  */
-export async function convert(sourcePath, targetPath, { target, keepAll = false, dryRun = false, io = zipIo, onProgress, selection } = {}) {
+export async function convert(sourcePath, targetPath, {
+  target,
+  keepAll = false,
+  dryRun = false,
+  io = zipIo,
+  onProgress,
+  selection,
+  excludedPaths,
+  includeCache = false,
+  includeBackups = true,
+  includeAppPrivate = false,
+} = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
     throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
   }
@@ -145,6 +156,22 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
       }
       let routed = routeSource(entry.fileName, detection.layout);
 
+      // 按单文件细粒度排除过滤 (可穿透树形勾选)
+      if (excludedPaths && (excludedPaths.has(entry.fileName) || excludedPaths.has(routed.hubPath))) {
+        entry.skip();
+        report.filtered(routed.hubPath, 'item-excluded');
+        continue;
+      }
+
+      // 按历史备份快照开关过滤
+      if (routed.hubPath.startsWith('backups/')) {
+        if (!includeBackups && !keepAll) {
+          entry.skip();
+          report.dropped(routed.hubPath, '历史备份快照(用户选择不包含)');
+          continue;
+        }
+      }
+
       // 按用户类目选择过滤（脱敏排除）
       if (selection && typeof selection === 'object') {
         const cat = categoryOfHubPath(routed.hubPath);
@@ -185,7 +212,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
         continue;
       }
       if (routed.kind === 'tt-private') {
-        if (keepAll) {
+        if (keepAll || includeCache) {
           const outPath = (target === TARGETS.TT || target === TARGETS.PT)
             ? entry.fileName
             : routed.hubPath;
@@ -193,19 +220,19 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
-          report.dropped(routed.hubPath, 'TT 私有/缓存,目标平台不消费(--keep-all 可保留)');
+          report.dropped(routed.hubPath, 'TT 私有/缓存,目标平台不消费');
         }
         continue;
       }
       if (routed.kind === 'tt-app-private') {
-        // TT 应用级私有设置:TT 目标原位保留,其余目标丢弃(keep-all 保留在 hub 根)
-        if (target === TARGETS.TT || keepAll) {
+        // TT 应用级私有设置:TT 目标原位保留,其余目标丢弃
+        if (target === TARGETS.TT || keepAll || includeAppPrivate) {
           const outPath = target === TARGETS.TT ? entry.fileName : routed.hubPath;
           if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
-          report.dropped(routed.hubPath, 'TT 应用私有设置,仅 TT 目标有意义(--keep-all 可保留)');
+          report.dropped(routed.hubPath, 'TT 应用私有设置,仅 TT 目标有意义');
         }
         continue;
       }
@@ -213,12 +240,12 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
         routed = { kind: 'derived', hubPath: routed.hubPath };
       }
       if (routed.kind === 'derived') {
-        if (keepAll) {
+        if (keepAll || includeCache) {
           if (!dryRun) writer.addLazy(targetEntryPath(routed.hubPath, target), lazyOpen(entry));
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
-          report.dropped(routed.hubPath, '派生缓存,平台按需重建(--keep-all 可保留)');
+          report.dropped(routed.hubPath, '派生缓存,导入后会自动重新生成');
         }
         continue;
       }
@@ -300,7 +327,7 @@ export async function convert(sourcePath, targetPath, { target, keepAll = false,
 }
 
 /** 源条目路由:决定 hub 路径与处理类别。hub 路径 = ST 摊平用户目录视角。 */
-function routeSource(sourcePath, layout) {
+export function routeSource(sourcePath, layout) {
   if (layout === LAYOUTS.TT) {
     if (sourcePath.startsWith(TT_USER_PREFIX)) {
       const hubPath = sourcePath.slice(TT_USER_PREFIX.length);
@@ -355,7 +382,7 @@ function routeSource(sourcePath, layout) {
 }
 
 /** hub 路径 → 目标平台上的最终条目路径。 */
-function targetEntryPath(hubPath, target) {
+export function targetEntryPath(hubPath, target) {
   if (target === TARGETS.TT || target === TARGETS.PT) {
     if (hubPath.startsWith(THIRD_PARTY_PREFIX)) {
       return `data/extensions/third-party/${hubPath.slice(THIRD_PARTY_PREFIX.length)}`;
@@ -366,7 +393,7 @@ function targetEntryPath(hubPath, target) {
 }
 
 /** 预扫用:路径若属于 third-party 扩展包,返回目录名(st/l 与 TT 两种布局都认)。 */
-function thirdPartyFolderOf(sourcePath, layout) {
+export function thirdPartyFolderOf(sourcePath, layout) {
   const prefixes = layout === LAYOUTS.TT ? [TT_THIRD_PARTY_PREFIX] : [THIRD_PARTY_PREFIX];
   for (const prefix of prefixes) {
     if (!sourcePath.startsWith(prefix)) continue;

@@ -17,6 +17,17 @@
       <div class="badge" id="env-badge">独立 Web 模式</div>
     </header>
 
+    <!-- Workspace Banner -->
+    <div class="workspace-bar" id="workspace-bar" style="display: none;">
+      <div class="workspace-info">
+        <span class="workspace-icon">💾</span>
+        <span id="workspace-status-text">工作区就绪</span>
+      </div>
+      <div class="workspace-actions">
+        <button type="button" class="btn-workspace-clear" id="btn-clear-workspace" title="清除暂存的数据包并重置工作区">清空暂存</button>
+      </div>
+    </div>
+
     <!-- Section 1: 宿主快捷导出区 (仅在酒馆/Luker插件环境中激活) -->
     <section class="card" id="host-export-card" style="display: none;">
       <h2 class="card-title">🚀 导出当前酒馆数据包</h2>
@@ -69,6 +80,13 @@
             </div>
           </div>
         </div>
+
+        <!-- 完全扫描动作预测条 -->
+        <div class="plan-summary-bar" id="plan-summary-bar" style="display: none;">
+          <div class="action-badges" id="action-stats-badges"></div>
+          <div class="output-estimate" id="output-estimate-text"></div>
+        </div>
+
         <div class="category-grid" id="category-checkboxes">
           <!-- 动态注入全部 10 项细粒度 Checkbox 与体积计数 -->
         </div>
@@ -85,10 +103,20 @@
           </select>
         </div>
 
-        <label class="checkbox-group">
-          <input type="checkbox" id="keep-all-check">
-          <span>保留缓存与私有数据 (--keep-all)</span>
-        </label>
+        <div class="advanced-switches-group">
+          <label class="checkbox-group" title="包含 backups/ 历史快照备份包">
+            <input type="checkbox" id="include-backups-check" checked>
+            <span>历史备份 (backups/)</span>
+          </label>
+          <label class="checkbox-group" title="包含缩略图与派生缓存 (thumbnails/, _cache/)">
+            <input type="checkbox" id="include-cache-check">
+            <span>派生缓存</span>
+          </label>
+          <label class="checkbox-group" title="包含应用私有设置与引擎状态">
+            <input type="checkbox" id="include-private-check">
+            <span>私有配置</span>
+          </label>
+        </div>
 
         <div style="display: flex; gap: 8px;">
           <button class="btn-primary" id="btn-convert" disabled>开始转换并下载</button>

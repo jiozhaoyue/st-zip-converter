@@ -1,4 +1,6 @@
 import { CATEGORIES, CATEGORY_LABELS } from '../core/inspect.js';
+import { ACTION_LABELS, SPECIAL_CATEGORIES, SPECIAL_LABELS } from '../core/plan-preview.js';
+import { createCategoryDetailList } from './file-tree-picker.js';
 
 const CATEGORY_ICONS = {
   [CATEGORIES.CHARACTERS]: '🎭',
@@ -11,6 +13,9 @@ const CATEGORY_ICONS = {
   [CATEGORIES.EXTENSIONS]: '🧩',
   [CATEGORIES.GLOBAL_EXTENSIONS]: '🌐',
   [CATEGORIES.VECTORS]: '🧠',
+  [SPECIAL_CATEGORIES.BACKUPS]: '📦',
+  [SPECIAL_CATEGORIES.CACHE]: '⚡',
+  [SPECIAL_CATEGORIES.APP_PRIVATE]: '🔒',
 };
 
 let currentSelection = {
@@ -24,9 +29,15 @@ let currentSelection = {
   extensions: true,
   globalExtensions: true,
   vectors: true,
+  backups: true,
+  cache: false,
+  appPrivate: false,
 };
 
+let currentExcludedPaths = new Set();
 let availableCategories = new Set();
+let expandedCategories = new Set();
+let currentPlan = null;
 let onSelectionChangeCallback = null;
 
 function formatBytes(bytes) {
@@ -54,7 +65,9 @@ function updateSummaryBadge() {
     if (currentSelection[cat]) selectedAvail += 1;
   }
 
-  badge.textContent = `已选 ${selectedAvail}/${totalAvail} 项有效类目`;
+  const excludedCount = currentExcludedPaths.size;
+  const excludedSuffix = excludedCount > 0 ? ` (穿透排除 ${excludedCount} 个文件)` : '';
+  badge.textContent = `已选 ${selectedAvail}/${totalAvail} 类目${excludedSuffix}`;
 }
 
 /**
@@ -92,45 +105,120 @@ export function setupCategoryFilter({ onSelectionChange } = {}) {
 }
 
 /**
- * 依据 inspectArchive 结果动态渲染 10 大标准类目与资产徽标
- * @param {object} inspectResult
+ * 依据 inspectArchive 或 generatePlan 结果渲染细粒度类目卡片与动作预测条
+ * @param {object} planOrInspectResult
  */
-export function renderCategoryStats(inspectResult) {
+export function renderCategoryStats(planOrInspectResult) {
   const panel = document.getElementById('category-panel');
   const container = document.getElementById('category-checkboxes');
-  if (!panel || !container || !inspectResult?.categories) return;
+  const planSummaryBar = document.getElementById('plan-summary-bar');
+  const actionBadgesEl = document.getElementById('action-stats-badges');
+  const outputEstimateEl = document.getElementById('output-estimate-text');
 
+  if (!panel || !container || !planOrInspectResult?.categories) return;
+
+  currentPlan = planOrInspectResult;
+
+  // 1. 渲染完全扫描动作预测汇总条
+  if (planSummaryBar && planOrInspectResult.actionStats) {
+    planSummaryBar.style.display = 'flex';
+    if (actionBadgesEl) {
+      actionBadgesEl.innerHTML = '';
+      for (const [actionKey, count] of Object.entries(planOrInspectResult.actionStats)) {
+        if (count > 0) {
+          const info = ACTION_LABELS[actionKey] || { label: actionKey, color: '#9ca3af' };
+          const badge = document.createElement('span');
+          badge.className = `action-summary-pill pill-${actionKey.toLowerCase()}`;
+          badge.textContent = `${info.label} ${count}`;
+          badge.style.borderColor = info.color;
+          badge.style.color = info.color;
+          actionBadgesEl.appendChild(badge);
+        }
+      }
+    }
+    if (outputEstimateEl) {
+      const outFiles = planOrInspectResult.expectedOutputFiles ?? 0;
+      const outBytes = planOrInspectResult.expectedOutputBytes ?? 0;
+      outputEstimateEl.textContent = `预计产物: ${outFiles} 个文件 · ${formatBytes(outBytes)}`;
+    }
+  }
+
+  // 2. 渲染类目卡片与穿透明细
   container.innerHTML = '';
   availableCategories.clear();
 
-  for (const [key, data] of Object.entries(inspectResult.categories)) {
+  for (const [key, data] of Object.entries(planOrInspectResult.categories)) {
     const isAvailable = (data.count || 0) > 0;
     if (isAvailable) {
       availableCategories.add(key);
-      currentSelection[key] = true;
+      if (typeof currentSelection[key] === 'undefined') {
+        currentSelection[key] = (key !== SPECIAL_CATEGORIES.CACHE);
+      }
     } else {
       currentSelection[key] = false;
     }
 
-    const item = document.createElement('label');
-    item.className = `category-item ${isAvailable ? '' : 'disabled'}`;
-    item.title = isAvailable ? `${data.label}: ${data.count} 项` : `${data.label}: 源包中未包含此资产`;
+    const card = document.createElement('div');
+    card.className = `category-card ${isAvailable ? '' : 'disabled'}`;
+    card.dataset.category = key;
 
-    const labelWrap = document.createElement('div');
+    const header = document.createElement('div');
+    header.className = 'category-card-header';
+
+    const labelWrap = document.createElement('label');
     labelWrap.className = 'category-item-label';
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.dataset.category = key;
-    checkbox.checked = isAvailable;
     checkbox.disabled = !isAvailable;
 
-    checkbox.addEventListener('change', (e) => {
-      currentSelection[key] = e.target.checked;
-      updateSummaryBadge();
-      if (typeof onSelectionChangeCallback === 'function') {
-        onSelectionChangeCallback(getSelectionState());
+    // 检查该分类下是否部分被单项排除
+    const items = data.items || [];
+    let excludedInThisCat = 0;
+    items.forEach((it) => {
+      if (currentExcludedPaths.has(it.sourcePath) || currentExcludedPaths.has(it.hubPath)) {
+        excludedInThisCat += 1;
       }
+    });
+
+    if (!isAvailable) {
+      checkbox.checked = false;
+    } else if (currentSelection[key] === false) {
+      checkbox.checked = false;
+      checkbox.indeterminate = false;
+    } else if (excludedInThisCat === 0) {
+      checkbox.checked = true;
+      checkbox.indeterminate = false;
+    } else if (excludedInThisCat >= items.length) {
+      checkbox.checked = false;
+      checkbox.indeterminate = false;
+    } else {
+      checkbox.checked = false;
+      checkbox.indeterminate = true;
+    }
+
+    checkbox.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      currentSelection[key] = isChecked;
+      checkbox.indeterminate = false;
+
+      // 如果勾选整个类目，清除属于该类目的单项排除
+      if (isChecked) {
+        items.forEach((it) => {
+          currentExcludedPaths.delete(it.sourcePath);
+          currentExcludedPaths.delete(it.hubPath);
+        });
+      } else {
+        // 如果取消整个类目，清除单项排除避免冗余记录
+        items.forEach((it) => {
+          currentExcludedPaths.delete(it.sourcePath);
+          currentExcludedPaths.delete(it.hubPath);
+        });
+      }
+
+      updateSummaryBadge();
+      notifySelectionChanged();
     });
 
     const icon = document.createElement('span');
@@ -139,77 +227,123 @@ export function renderCategoryStats(inspectResult) {
 
     const text = document.createElement('span');
     text.className = 'cat-text';
-    text.textContent = data.label || CATEGORY_LABELS[key] || key;
+    text.textContent = data.label || CATEGORY_LABELS[key] || SPECIAL_LABELS[key] || key;
 
     labelWrap.appendChild(checkbox);
     labelWrap.appendChild(icon);
     labelWrap.appendChild(text);
 
+    const rightGroup = document.createElement('div');
+    rightGroup.className = 'category-right-group';
+
     const badge = document.createElement('span');
     badge.className = 'cat-badge';
     badge.textContent = isAvailable ? `${data.count} 项 · ${formatBytes(data.sizeBytes)}` : '0 项 · 0 B';
 
-    item.appendChild(labelWrap);
-    item.appendChild(badge);
-    container.appendChild(item);
+    rightGroup.appendChild(badge);
+
+    // 如果包含单文件详情，渲染展开/收起按钮
+    if (items.length > 0) {
+      const isExpanded = expandedCategories.has(key);
+      const btnExpand = document.createElement('button');
+      btnExpand.type = 'button';
+      btnExpand.className = 'btn-expand-detail';
+      btnExpand.textContent = isExpanded ? '收起 ▴' : '明细 ▾';
+      btnExpand.title = isExpanded ? '收起单项文件明细' : '展开查看该类目下的每个文件与动作，支持穿透反选';
+
+      btnExpand.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (expandedCategories.has(key)) {
+          expandedCategories.delete(key);
+        } else {
+          expandedCategories.add(key);
+        }
+        renderCategoryStats(currentPlan);
+      });
+
+      rightGroup.appendChild(btnExpand);
+    }
+
+    header.appendChild(labelWrap);
+    header.appendChild(rightGroup);
+    card.appendChild(header);
+
+    // 展开的内容区域
+    if (items.length > 0 && expandedCategories.has(key)) {
+      const detailView = createCategoryDetailList({
+        categoryKey: key,
+        items,
+        excludedPaths: currentExcludedPaths,
+        onItemToggle: (sourcePath, checked) => {
+          if (checked) {
+            currentExcludedPaths.delete(sourcePath);
+          } else {
+            currentExcludedPaths.add(sourcePath);
+          }
+          renderCategoryStats(currentPlan);
+          notifySelectionChanged();
+        },
+      });
+      card.appendChild(detailView);
+    }
+
+    container.appendChild(card);
   }
 
   updateSummaryBadge();
   panel.style.display = 'block';
 }
 
+function notifySelectionChanged() {
+  if (typeof onSelectionChangeCallback === 'function') {
+    onSelectionChangeCallback({
+      selection: getSelectionState(),
+      excludedPaths: getExcludedPaths(),
+    });
+  }
+}
+
 /**
- * 全选所有包内存在的有效类目
+ * 全选所有包内存在的有效类目并清空单项排除
  */
 export function selectAll() {
-  const checkboxes = document.querySelectorAll('#category-checkboxes input[type="checkbox"]');
-  checkboxes.forEach((cb) => {
-    if (cb.disabled) return;
-    const cat = cb.dataset.category;
-    cb.checked = true;
+  availableCategories.forEach((cat) => {
     currentSelection[cat] = true;
   });
+  currentExcludedPaths.clear();
 
+  if (currentPlan) renderCategoryStats(currentPlan);
   updateSummaryBadge();
-  if (typeof onSelectionChangeCallback === 'function') {
-    onSelectionChangeCallback(getSelectionState());
-  }
+  notifySelectionChanged();
 }
 
 /**
  * 取消所有类目的勾选
  */
 export function deselectAll() {
-  const checkboxes = document.querySelectorAll('#category-checkboxes input[type="checkbox"]');
-  checkboxes.forEach((cb) => {
-    if (cb.disabled) return;
-    const cat = cb.dataset.category;
-    cb.checked = false;
+  availableCategories.forEach((cat) => {
     currentSelection[cat] = false;
   });
+  currentExcludedPaths.clear();
 
+  if (currentPlan) renderCategoryStats(currentPlan);
   updateSummaryBadge();
-  if (typeof onSelectionChangeCallback === 'function') {
-    onSelectionChangeCallback(getSelectionState());
-  }
+  notifySelectionChanged();
 }
 
 /**
  * 反选所有包内存在的有效类目
  */
 export function invertSelection() {
-  const checkboxes = document.querySelectorAll('#category-checkboxes input[type="checkbox"]');
-  checkboxes.forEach((cb) => {
-    if (cb.disabled) return;
-    const cat = cb.dataset.category;
-    cb.checked = !cb.checked;
-    currentSelection[cat] = cb.checked;
+  availableCategories.forEach((cat) => {
+    currentSelection[cat] = !currentSelection[cat];
   });
+  currentExcludedPaths.clear();
 
+  if (currentPlan) renderCategoryStats(currentPlan);
   updateSummaryBadge();
-  if (typeof onSelectionChangeCallback === 'function') {
-    onSelectionChangeCallback(getSelectionState());
-  }
+  notifySelectionChanged();
 }
 
 /**
@@ -217,27 +351,19 @@ export function invertSelection() {
  * @param {'chars'|'safe'} preset
  */
 export function applyPreset(preset) {
-  const checkboxes = document.querySelectorAll('#category-checkboxes input[type="checkbox"]');
+  currentExcludedPaths.clear();
 
-  checkboxes.forEach((cb) => {
-    if (cb.disabled) return;
-    const cat = cb.dataset.category;
-
+  availableCategories.forEach((cat) => {
     if (preset === 'chars') {
-      // 仅角色卡与素材
-      cb.checked = (cat === CATEGORIES.CHARACTERS || cat === CATEGORIES.ASSETS);
+      currentSelection[cat] = (cat === CATEGORIES.CHARACTERS || cat === CATEGORIES.ASSETS);
     } else if (preset === 'safe') {
-      // 安全脱敏：排除 secrets 和 chats
-      cb.checked = (cat !== CATEGORIES.SECRETS && cat !== CATEGORIES.CHATS);
+      currentSelection[cat] = (cat !== CATEGORIES.SECRETS && cat !== CATEGORIES.CHATS);
     }
-
-    currentSelection[cat] = cb.checked;
   });
 
+  if (currentPlan) renderCategoryStats(currentPlan);
   updateSummaryBadge();
-  if (typeof onSelectionChangeCallback === 'function') {
-    onSelectionChangeCallback(getSelectionState());
-  }
+  notifySelectionChanged();
 }
 
 /**
@@ -249,6 +375,30 @@ export function getSelectionState() {
 }
 
 /**
+ * 设置类目筛选状态
+ * @param {Record<string, boolean>} selection
+ */
+export function setSelectionState(selection) {
+  currentSelection = { ...currentSelection, ...selection };
+}
+
+/**
+ * 获取单项穿透排除集合
+ * @returns {Set<string>}
+ */
+export function getExcludedPaths() {
+  return new Set(currentExcludedPaths);
+}
+
+/**
+ * 设置单项穿透排除集合
+ * @param {Set<string>|Array<string>} paths
+ */
+export function setExcludedPaths(paths) {
+  currentExcludedPaths = new Set(paths || []);
+}
+
+/**
  * 重置过滤器状态并隐藏面板
  */
 export function resetCategoryFilter() {
@@ -256,5 +406,11 @@ export function resetCategoryFilter() {
   if (panel) panel.style.display = 'none';
   const container = document.getElementById('category-checkboxes');
   if (container) container.innerHTML = '';
+  const planSummaryBar = document.getElementById('plan-summary-bar');
+  if (planSummaryBar) planSummaryBar.style.display = 'none';
+
   availableCategories.clear();
+  currentExcludedPaths.clear();
+  expandedCategories.clear();
+  currentPlan = null;
 }

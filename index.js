@@ -3,16 +3,28 @@
  * 具备三位一体自适应能力:
  * 1. 独立运行 (本地开发服务 / GitHub Pages)
  * 2. SillyTavern / Luker 第三方扩展插件模式
+ * 3. 具备浏览器 IndexedDB 工作区持久化、完全扫描与单项穿透预览选择能力
  */
 
-import { runConversionTask } from './src/core/worker-client.js';
-import { inspectArchive } from './src/core/inspect.js';
+import { runConversionTask, runPlanTask } from './src/core/worker-client.js';
 import {
   setupCategoryFilter,
   renderCategoryStats,
   getSelectionState,
+  setSelectionState,
+  getExcludedPaths,
+  setExcludedPaths,
   resetCategoryFilter,
 } from './src/ui/category-filter.js';
+import {
+  saveFile,
+  getFile,
+  getStorageUsage,
+  saveWorkspaceState,
+  loadWorkspaceState,
+  clearAll,
+  isStorageSupported,
+} from './src/storage/db.js';
 import { detectHost, fetchHostBackup, restoreToLuker, registerMenuButton } from './src/ui/host-bridge.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
@@ -21,21 +33,110 @@ function formatTimestamp() {
   return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
 }
 
-function main() {
+function formatBytes(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+async function main() {
   const host = detectHost();
   const view = createViewController();
 
-  // 初始化类目过滤器组件
-  setupCategoryFilter();
+  let currentFile = null;
+  let currentFileId = null;
+  let lastConvertedBlob = null;
+  let isPlanning = false;
 
-  // 1. 宿主环境识别与 Badge 标识
+  // DOM 元素引用
   const envBadge = document.getElementById('env-badge');
   const hostExportCard = document.getElementById('host-export-card');
   const btnRestoreLuker = document.getElementById('btn-restore-luker');
   const targetSelect = document.getElementById('target-select');
-  const keepAllCheck = document.getElementById('keep-all-check');
   const btnConvert = document.getElementById('btn-convert');
 
+  const workspaceBar = document.getElementById('workspace-bar');
+  const workspaceStatusText = document.getElementById('workspace-status-text');
+  const btnClearWorkspace = document.getElementById('btn-clear-workspace');
+
+  const includeBackupsCheck = document.getElementById('include-backups-check');
+  const includeCacheCheck = document.getElementById('include-cache-check');
+  const includePrivateCheck = document.getElementById('include-private-check');
+
+  // 初始化类目过滤器组件
+  setupCategoryFilter({
+    onSelectionChange: () => {
+      refreshPlan();
+    },
+  });
+
+  // 1. 更新工作区状态栏
+  async function updateWorkspaceUI() {
+    if (!isStorageSupported() || !workspaceBar) return;
+    try {
+      const usage = await getStorageUsage();
+      if (usage.count > 0) {
+        workspaceBar.style.display = 'flex';
+        if (workspaceStatusText) {
+          workspaceStatusText.textContent = `IndexedDB 工作区：已暂存 ${usage.count} 个数据包 (${formatBytes(usage.totalBytes)})`;
+        }
+      } else {
+        workspaceBar.style.display = 'none';
+      }
+    } catch (err) {
+      console.warn('获取工作区用量失败:', err);
+    }
+  }
+
+  // 2. 调度完全扫描与动作预测规划
+  async function refreshPlan() {
+    if (!currentFile || isPlanning) return;
+    isPlanning = true;
+
+    try {
+      const target = targetSelect ? targetSelect.value : 'l';
+      const selection = getSelectionState();
+      const excludedPaths = getExcludedPaths();
+      const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : true;
+      const includeCache = includeCacheCheck ? includeCacheCheck.checked : false;
+      const includeAppPrivate = includePrivateCheck ? includePrivateCheck.checked : false;
+
+      const plan = await runPlanTask({
+        source: currentFile,
+        target,
+        options: {
+          selection,
+          excludedPaths,
+          includeBackups,
+          includeCache,
+          includeAppPrivate,
+        },
+      });
+
+      renderCategoryStats(plan);
+
+      // 持久化当前工作区状态
+      if (currentFileId) {
+        await saveWorkspaceState({
+          fileId: currentFileId,
+          fileName: currentFile.name,
+          target,
+          selection,
+          excludedPaths: Array.from(excludedPaths),
+          includeBackups,
+          includeCache,
+          includeAppPrivate,
+        });
+      }
+    } catch (err) {
+      console.warn('执行规划预测失败:', err);
+    } finally {
+      isPlanning = false;
+    }
+  }
+
+  // 3. 宿主环境识别与 Badge 标识
   if (envBadge) {
     if (host.platform === 'st') {
       envBadge.textContent = 'SillyTavern 插件模式';
@@ -50,23 +151,21 @@ function main() {
     }
   }
 
-  // 2. 插件态界面激活
+  // 4. 插件态界面激活
   if (host.isPlugin) {
     if (hostExportCard) hostExportCard.style.display = 'block';
     if (host.platform === 'luker' && btnRestoreLuker) {
       btnRestoreLuker.style.display = 'inline-block';
     }
-    // 默认目标平台贴合宿主环境
     if (targetSelect) {
       targetSelect.value = host.platform === 'luker' ? 'l' : 'st';
     }
-    // 注册酒馆顶部/侧边扩展栏按钮
     registerMenuButton(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   }
 
-  // 3. 宿主一键导出快捷按钮组处理
+  // 5. 宿主一键导出快捷按钮组处理
   const exportButtons = document.querySelectorAll('.btn-export');
   exportButtons.forEach((btn) => {
     btn.addEventListener('click', async (e) => {
@@ -80,13 +179,15 @@ function main() {
         view.setProgress(5, `正在从 ${host.platform.toUpperCase()} 拉取当前备份包...`);
 
         const sourceBlob = await fetchHostBackup(host.platform);
-        view.setProgress(20, `备份数据拉取完毕 (${(sourceBlob.size / 1048576).toFixed(1)} MB)，正在多线程转换...`);
+        view.setProgress(20, `备份数据拉取完毕 (${formatBytes(sourceBlob.size)})，正在多线程转换...`);
 
         const { report, resultBlob } = await runConversionTask({
           source: sourceBlob,
           target,
           options: {
-            keepAll: keepAllCheck ? keepAllCheck.checked : false,
+            includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : true,
+            includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
+            includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
           },
           onProgress: (cur, total, name) => {
             const pct = total > 0 ? 20 + Math.round((cur / total) * 75) : 50;
@@ -108,10 +209,7 @@ function main() {
     });
   });
 
-  // 4. 外部 Zip 拖拽与转换交互
-  let currentFile = null;
-  let lastConvertedBlob = null;
-
+  // 6. 外部 Zip 拖拽与转换交互
   const dropHandler = setupFileDrop({
     dropzoneEl: document.getElementById('dropzone'),
     fileInputEl: document.getElementById('file-input'),
@@ -120,17 +218,26 @@ function main() {
     onFileReady: async (file, detection) => {
       currentFile = file;
       btnConvert.disabled = false;
-      // 智能预选：如果源是 ST，默认目标设为 L 或 TT
+
+      // 智能预选：如果源是 ST，默认目标设为 L；如果源是 TT，设为 PT
       if (detection.layout === 'st' && targetSelect) targetSelect.value = 'l';
       if (detection.layout === 'tt' && targetSelect) targetSelect.value = 'pt';
 
-      // 毫秒级中央目录预检并展开类目与脱敏选择器
+      // 异步暂存到 IndexedDB
       try {
-        const inspectResult = await inspectArchive(file);
-        renderCategoryStats(inspectResult);
+        currentFileId = await saveFile({
+          name: file.name,
+          size: file.size,
+          blob: file,
+          layout: detection.layout,
+        });
+        await updateWorkspaceUI();
       } catch (err) {
-        console.warn('中央目录预检失败:', err);
+        console.warn('暂存文件到 IndexedDB 失败:', err);
       }
+
+      // 执行完全扫描与计划动作预测
+      await refreshPlan();
     },
     onError: (err) => {
       btnConvert.disabled = true;
@@ -139,12 +246,45 @@ function main() {
     },
   });
 
-  // 开始转换外部 Zip
+  // 目标平台或高级开关改动时，动态重新生成动作规划
+  if (targetSelect) {
+    targetSelect.addEventListener('change', () => refreshPlan());
+  }
+  if (includeBackupsCheck) {
+    includeBackupsCheck.addEventListener('change', () => refreshPlan());
+  }
+  if (includeCacheCheck) {
+    includeCacheCheck.addEventListener('change', () => refreshPlan());
+  }
+  if (includePrivateCheck) {
+    includePrivateCheck.addEventListener('change', () => refreshPlan());
+  }
+
+  // 清空工作区按钮
+  if (btnClearWorkspace) {
+    btnClearWorkspace.addEventListener('click', async () => {
+      if (confirm('确定要清空工作区暂存的所有数据包吗？')) {
+        await clearAll();
+        currentFile = null;
+        currentFileId = null;
+        btnConvert.disabled = true;
+        resetCategoryFilter();
+        if (dropHandler?.reset) dropHandler.reset();
+        await updateWorkspaceUI();
+        view.setProgress(0, '工作区暂存已清空');
+      }
+    });
+  }
+
+  // 7. 开始转换外部 Zip
   btnConvert.addEventListener('click', async () => {
     if (!currentFile) return;
     const target = targetSelect.value;
-    const keepAll = keepAllCheck.checked;
     const selection = getSelectionState();
+    const excludedPaths = getExcludedPaths();
+    const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : true;
+    const includeCache = includeCacheCheck ? includeCacheCheck.checked : false;
+    const includeAppPrivate = includePrivateCheck ? includePrivateCheck.checked : false;
 
     try {
       btnConvert.disabled = true;
@@ -155,55 +295,97 @@ function main() {
         source: currentFile,
         target,
         options: {
-          keepAll,
           selection,
+          excludedPaths,
+          includeBackups,
+          includeCache,
+          includeAppPrivate,
         },
         onProgress: (cur, total, name) => {
-          const pct = total > 0 ? 10 + Math.round((cur / total) * 85) : 50;
-          view.setProgress(pct, `多线程处理中 [${cur}/${total}]: ${name}`);
+          const pct = total > 0 ? 5 + Math.round((cur / total) * 90) : 50;
+          view.setProgress(pct, `正在转换写入 [${cur}/${total}]: ${name}`);
         },
       });
 
       lastConvertedBlob = resultBlob;
-      view.setProgress(100, '转换完成！已触发浏览器下载');
+      view.setProgress(100, `转换成功！共写入 ${report.totals.written} 项，已丢弃/过滤 ${report.totals.dropped + (report.totals.filtered || 0)} 项`);
 
-      const baseName = currentFile.name.replace(/\.zip$/i, '');
-      const outName = `${baseName}-to-${target}-${formatTimestamp()}.zip`;
-      view.triggerDownload(lastConvertedBlob, outName);
+      // 暂存转换产物到 IndexedDB
+      const outputFilename = `converted-${target}-${currentFile.name.replace(/\.zip$/i, '')}-${formatTimestamp()}.zip`;
+      try {
+        await saveFile({
+          name: outputFilename,
+          size: resultBlob.size,
+          blob: resultBlob,
+          layout: target,
+        });
+        await updateWorkspaceUI();
+      } catch (e) {
+        console.warn('暂存产物失败:', e);
+      }
+
+      view.triggerDownload(resultBlob, outputFilename);
       view.renderReport(report);
 
-      if (host.platform === 'luker' && btnRestoreLuker && target === 'l') {
+      if (btnRestoreLuker && host.platform === 'luker') {
         btnRestoreLuker.disabled = false;
       }
     } catch (err) {
-      view.setProgress(100, `转换失败: ${err.message}`);
+      view.setProgress(100, `转换出错: ${err.message}`);
       console.error(err);
     } finally {
       btnConvert.disabled = false;
     }
   });
 
-  // (Luker 专享) 直接恢复到当前用户
-  if (btnRestoreLuker) {
-    btnRestoreLuker.addEventListener('click', async () => {
-      if (!lastConvertedBlob) return;
-      try {
-        btnRestoreLuker.disabled = true;
-        view.setProgress(50, '正在向 Luker 发送恢复请求...');
-        await restoreToLuker(lastConvertedBlob);
-        view.setProgress(100, '已成功恢复至 Luker 当前用户！请刷新页面查看。');
-      } catch (err) {
-        view.setProgress(100, `恢复失败: ${err.message}`);
-        console.error(err);
-      } finally {
-        btnRestoreLuker.disabled = false;
-      }
-    });
-  }
+  // 8. 页面启动时无损恢复工作区状态
+  if (isStorageSupported()) {
+    try {
+      await updateWorkspaceUI();
+      const savedState = await loadWorkspaceState();
+      if (savedState && savedState.fileId) {
+        const fileRecord = await getFile(savedState.fileId);
+        if (fileRecord && fileRecord.blob) {
+          currentFile = fileRecord.blob;
+          currentFile.name = fileRecord.name;
+          currentFileId = fileRecord.id;
 
-  console.log(`[st-zip-converter] 初始化就绪 (环境: ${host.platform})`);
+          // 恢复目标选择与开关
+          if (savedState.target && targetSelect) {
+            targetSelect.value = savedState.target;
+          }
+          if (typeof savedState.includeBackups === 'boolean' && includeBackupsCheck) {
+            includeBackupsCheck.checked = savedState.includeBackups;
+          }
+          if (typeof savedState.includeCache === 'boolean' && includeCacheCheck) {
+            includeCacheCheck.checked = savedState.includeCache;
+          }
+          if (typeof savedState.includeAppPrivate === 'boolean' && includePrivateCheck) {
+            includePrivateCheck.checked = savedState.includeAppPrivate;
+          }
+          if (savedState.selection) {
+            setSelectionState(savedState.selection);
+          }
+          if (savedState.excludedPaths) {
+            setExcludedPaths(savedState.excludedPaths);
+          }
+
+          btnConvert.disabled = false;
+          if (dropHandler?.setFilename) {
+            dropHandler.setFilename(fileRecord.name);
+          }
+
+          view.setProgress(0, `已恢复上次工作区：${fileRecord.name} (${formatBytes(fileRecord.size)})`);
+          await refreshPlan();
+        }
+      }
+    } catch (err) {
+      console.warn('恢复工作区失败:', err);
+    }
+  }
 }
 
+// 启动应用
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', main);
 } else {
