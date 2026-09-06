@@ -153,12 +153,19 @@ export async function getHandle() {
 }
 
 /**
- * 从当前酒馆端点拉取细粒度或全量备份 Zip Blob
+ * 从当前酒馆端点拉取细粒度或全量备份 Zip Blob（三段式进度版）
+ *
+ * 阶段1 宿主生成：TTFB 前等待（宿主打包数据）
+ * 阶段2 传输：response.body 流式读取，按 Content-Length 估算百分比
+ * 阶段3 插件处理：由调用方 transform 阶段接管（onProgress 回调透传）
+ *
  * @param {'st'|'luker'} platform
  * @param {Record<string, boolean>} [selection] 细粒度类目选择
+ * @param {object} [options]
+ * @param {function(string, number, number): void} [options.onPhase] 阶段回调 (phase, received, total)
  * @returns {Promise<Blob>}
  */
-export async function fetchHostBackup(platform, selection = null) {
+export async function fetchHostBackup(platform, selection = null, { onPhase } = {}) {
   logger.info(`正在连接宿主 [${platform.toUpperCase()}] 获取授权凭证...`);
   const [token, handle] = await Promise.all([getCsrfToken(), getHandle()]);
 
@@ -168,6 +175,7 @@ export async function fetchHostBackup(platform, selection = null) {
     : { handle, selection: sel };
 
   logger.info(`向宿主发起数据包导出请求 (用户: ${handle})...`);
+  onPhase?.('host-generating', 0, 0);
 
   const response = await fetch('/api/users/backup', {
     method: 'POST',
@@ -192,7 +200,38 @@ export async function fetchHostBackup(platform, selection = null) {
     throw err;
   }
 
-  const blob = await response.blob();
+  // 流式读取：宿主生成耗时体现在 TTFB，传输耗时体现为 body 逐块到达
+  const contentLength = Number(response.headers.get('Content-Length')) || 0;
+  let blob;
+  if (response.body && typeof response.body.getReader === 'function') {
+    onPhase?.('transferring', 0, contentLength);
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+    let lastLoggedPct = -1;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (contentLength > 0) {
+        const pct = Math.round((received / contentLength) * 100);
+        if (pct >= lastLoggedPct + 10) {
+          lastLoggedPct = pct;
+          logger.info(`数据包传输中: ${pct}% (${(received / 1048576).toFixed(1)} / ${(contentLength / 1048576).toFixed(1)} MB)`);
+        }
+      } else if (received >= lastLoggedPct + 4194304) {
+        // chunked 响应无 Content-Length：按 4MB 步进汇报
+        lastLoggedPct = received - (received % 4194304);
+        logger.info(`数据包传输中: 已接收 ${(received / 1048576).toFixed(1)} MB`);
+      }
+      onPhase?.('transferring', received, contentLength);
+    }
+    blob = new Blob(chunks, { type: 'application/zip' });
+  } else {
+    blob = await response.blob();
+  }
+
   logger.success(`成功从宿主拉取数据包，大小: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
   await validateBackupShape(blob, platform);
   return blob;

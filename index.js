@@ -649,7 +649,20 @@ async function main(appRoot = document.getElementById('app')) {
         logger.info('ST 宿主端点仅支持全量导出，类目筛选将在导出后由插件内过滤执行');
       }
 
-      const rawBackupBlob = await fetchHostBackup(host.platform, endpointSelection);
+      const rawBackupBlob = await fetchHostBackup(host.platform, endpointSelection, {
+        onPhase: (phase, received, total) => {
+          if (phase === 'host-generating') {
+            view.setProgress(12, `宿主正在打包数据 (用户: ${currentHostHandle})，数据量越大耗时越久...`);
+          } else if (phase === 'transferring') {
+            if (total > 0) {
+              const pct = 15 + Math.round((received / total) * 20);
+              view.setProgress(pct, `数据包传输中 ${Math.round((received / total) * 100)}% (${(received / 1048576).toFixed(1)} MB)`);
+            } else {
+              view.setProgress(18, `数据包传输中，已接收 ${(received / 1048576).toFixed(1)} MB...`);
+            }
+          }
+        },
+      });
       
       const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
       const effectiveTarget = selectedTarget === 'native' ? host.platform : selectedTarget;
