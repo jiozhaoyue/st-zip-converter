@@ -79,3 +79,33 @@ function mountUi() {
   注意: SillyTavern 的备份端点不包含 secrets.json (API 密钥)，请用 tavern-convert CLI 处理含密钥的完整包。
   ```
 - **Warnings Truncation**: Display the first 10 conversion warnings directly in the panel, with a count for any remainder.
+
+---
+
+## CSS Scoping Mandate (Luker UI 异常教训 · 2026-09-07)
+
+**严禁全局选择器泄漏到宿主页面。** 插件 CSS 在宿主环境注入时，`*`、`body`、`:root`、页面级 `::-webkit-scrollbar` 会覆盖宿主主题与布局——实测曾把 Luker 的浅色主题变量 `--SmartThemeBodyColor` 覆盖为黑曜底色并把宿主 body 强制改为 flex 布局（即"Luker UI 变得很奇怪"的根因）。
+
+约定：
+
+1. **变量定义域**：所有 CSS 变量定义在双容器选择器上：
+   ```css
+   .app-container,            /* 独立 Web 模式挂载点 */
+   .st-converter-drawer-app { /* 宿主插件模式挂载点 */
+     --tavern-gold: #f59e0b;
+     /* ... */
+   }
+   ```
+2. **reset 范围**：通配 reset 只允许容器内前缀形式 `.app-container *, .st-converter-drawer-app *`。
+3. **body 骨架**：独立模式页面背景/布局用 `body:has(> .app-container)`，插件模式绝不触碰宿主 body。
+4. **滚动条**：页面级 `::-webkit-scrollbar` 必须写成容器后代选择器。
+5. **新增样式自查**：任何新规则的选择器必须以 `.app-container` 或 `.st-converter-drawer-app` 开头（或两者组合），PR 前用 `grep -n "^body\|^:root\|^\*" style.css` 自查应为空。
+
+## Host Detection Protocol (宿主识别协议 · 2026-09-07)
+
+Luker 前端**同时暴露** `globalThis.SillyTavern`（script.js:360 `= lukerApi`）与 `globalThis.lukerContext`（scripts/lukerContext.js）。`window.luker` 与 `#luker-app` 在 Luker 实例中不存在（死信号）。判定协议：
+
+1. **前端判定（detectHost）**：`globalThis.lukerContext` 存在（try/catch 惰性 getter）→ luker；否则 `SillyTavern` 存在或 `#extensionsMenu` → st；否则 standalone。**顺序不可颠倒。**
+2. **服务端校验（verifyHostPlatform）**：`GET /version`。Luker 形状 `{agent:"Luker:2.7.0:...", stCompatVersion, pkgVersion}`；ST 形状 `{version}` 或 `{agent:"SillyTavern:..."}`。`agent` 前缀或 `stCompatVersion` 字段存在 → luker。不一致以服务端为准并 logger.warn。
+3. **导出后软校验（validateBackupShape）**：Luker 导出含 manifest.json，ST 导出不含；不一致仅告警不阻断。
+4. **ST 宿主 selection 限制**：ST `/api/users/backup` 全量 glob 导出忽略 selection 参数——ST 宿主必须请求 `FULL_SELECTION`，类目勾选由插件内 transform 过滤生效；Luker 直接透传 selection。

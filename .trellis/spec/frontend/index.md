@@ -15,7 +15,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | In-app plugin architecture, esbuild targets, and bundle distribution | Ready |
-| [Component Guidelines](./component-guidelines.md) | Vanilla DOM injection, namespace isolation, and download UX | Ready |
+| [Component Guidelines](./component-guidelines.md) | Vanilla DOM injection, namespace isolation, CSS scoping mandate, and host detection protocol | Ready |
 | [Hook Guidelines](./hook-guidelines.md) | Host lifecycle integration, CSRF tokens, and backup API hooks | Ready |
 | [State Management](./state-management.md) | Ephemeral UI state, in-memory blob lifecycle, and URL revocation | Ready |
 | [Quality Guidelines](./quality-guidelines.md) | Bundle budget (<200KiB), engine parity, and headless smoke testing | Ready |
