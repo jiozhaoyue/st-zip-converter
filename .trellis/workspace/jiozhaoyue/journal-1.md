@@ -515,3 +515,25 @@ detectHost改为lukerContext优先协议(实测Luker同时暴露SillyTavern与lu
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: 统一工作区与待导出区落地(ui-unify)+父任务完结
+<!-- trellis-session: v=2 fp=f1a39a00d96ce425 -->
+
+**Date**: 2026-09-07
+**Task**: 统一工作区与待导出区落地(ui-unify)+父任务完结
+**Branch**: `main`
+
+### Summary
+
+工作区收敛为单列表+来源徽标(上传/宿主导出/转换/增量/分卷)+筛选;新增ExportQueue待导出区(宿主导出/转换/分卷统一出口,ephemeral按需入库,批量下载/存工作区/写回宿主);用量看板(配额条+来源统计+包体积列表);db v1→v2 origin/group 无损迁移;修复独立模式 index.html 静态模板漂移与 let 死区错误;Playwright 全流程闭环验证通过,137 测试全绿;三子任务全部归档,父任务完结
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c81b6f0` | docs(spec+task): dual-template sync mandate, export queue pattern, ui-unify verification records |
+
+### Status
+
+[OK] **Completed**

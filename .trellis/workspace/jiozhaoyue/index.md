@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
+- **Total Sessions**: 17
 - **Last Active**: 2026-09-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~517 | Active |
+| `journal-1.md` | ~539 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-09-07 | 统一工作区与待导出区落地(ui-unify)+父任务完结 | `c81b6f0` | `main` |
 | 16 | 2026-09-07 | 并发管线重写与实例卡顿诊断(perf-overhaul) | `9f2bbe1` | `main` |
 | 15 | 2026-09-07 | 宿主识别修复与Luker UI异常根治(host-detect) | `ffaa110` | `main` |
 | 14 | 2026-09-06 | 100% 酒馆原生抽屉展开 UI、全站 0 Emoji 矢量化、外部基准增量导出与备份聊天过滤 | `adf9bab`, `0212345` | `main` |
