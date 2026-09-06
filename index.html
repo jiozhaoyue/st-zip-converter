@@ -11,8 +11,8 @@
     <!-- Header -->
     <header class="app-header">
       <div class="title-group">
-        <h1>st-zip-converter</h1>
-        <p>全平台跨酒馆数据包工作站 · 导出 · 转换 · 增量合并 · 恢复</p>
+        <h1>🍺 酒馆数据包互转工坊 <span class="header-version">v1.0.0</span></h1>
+        <p>SillyTavern · Luker · TauriTavern · PureTavern 互转 · 细粒度导出 · 增量恢复</p>
       </div>
       <div class="header-badges">
         <div class="badge" id="env-badge">独立 Web 模式</div>
@@ -122,6 +122,11 @@
           </select>
         </div>
 
+        <div class="host-filename-preview-row" id="host-filename-preview-row">
+          <span class="preview-label">📦 导出文件名预览:</span>
+          <code class="preview-code" id="host-filename-preview">st-default-user-2026-09-06.zip</code>
+        </div>
+
         <div class="host-action-buttons">
           <button type="button" class="btn-primary" id="btn-host-export-download">🚀 导出并立即下载</button>
           <button type="button" class="btn-secondary" id="btn-host-export-workspace">📥 导出并存入工作区</button>
@@ -209,6 +214,10 @@
             </div>
           </div>
           <input type="text" id="filename-template-input" class="text-input" placeholder="{source}-to-{target}-{date}.zip" value="{source}-to-{target}-{date}.zip">
+          <div class="filename-preview-box" id="filename-preview-box">
+            <span class="preview-label">实时生成预览:</span>
+            <code class="preview-code" id="filename-preview">{source}-to-{target}-{date}.zip</code>
+          </div>
           <span class="filename-guide">点击标签可快速插入变量，生成时自动替换并过滤非法字符</span>
         </div>
 

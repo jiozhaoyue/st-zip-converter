@@ -29,7 +29,7 @@ import {
   isStorageSupported,
 } from './src/storage/db.js';
 import { renderArchiveManager } from './src/ui/archive-manager.js';
-import { resolveFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
+import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
 import {
   detectHost,
   fetchHostBackup,
@@ -61,9 +61,40 @@ async function main() {
 
   let currentFile = null;
   let currentFileId = null;
+  let currentFileHandle = 'default-user';
+  let currentHostHandle = 'default-user';
   let lastConvertedBlob = null;
   let isPlanning = false;
   let pendingRestoreFile = null;
+
+  // 实时生成文件名预览
+  function updateFilenamePreview() {
+    const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
+
+    const extPreviewEl = document.getElementById('filename-preview');
+    if (extPreviewEl) {
+      const srcName = currentFile?.name || 'archive.zip';
+      const target = targetSelect ? targetSelect.value : 'pt';
+      const handle = currentFileHandle || currentHostHandle || 'default-user';
+      extPreviewEl.textContent = previewFilename(template, {
+        sourceName: srcName,
+        target,
+        handle,
+      });
+    }
+
+    const hostPreviewEl = document.getElementById('host-filename-preview');
+    if (hostPreviewEl) {
+      const hostTargetSelect = document.getElementById('host-target-select');
+      const selectedTarget = hostTargetSelect ? hostTargetSelect.value : 'native';
+      const effectiveTarget = selectedTarget === 'native' ? (host.platform || 'st') : selectedTarget;
+      hostPreviewEl.textContent = previewFilename(template, {
+        sourceName: `${host.platform || 'st'}-${currentHostHandle}`,
+        target: effectiveTarget,
+        handle: currentHostHandle,
+      });
+    }
+  }
 
   // DOM 元素引用
   const envBadge = document.getElementById('env-badge');
@@ -123,6 +154,7 @@ async function main() {
       const outputFilename = resolveFilename(template, {
         sourceName: currentBlob.name,
         target,
+        handle: srcMeta.handle || currentHostHandle || 'default-user',
       });
 
       const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
@@ -176,13 +208,15 @@ async function main() {
         currentFile = fileRecord.blob;
         currentFile.name = fileRecord.name;
         currentFileId = fileRecord.id;
+        currentFileHandle = fileRecord.handle || 'default-user';
 
         btnConvert.disabled = false;
         if (dropHandler?.setFilename) {
           dropHandler.setFilename(fileRecord.name);
         }
         view.setProgress(0, `已载入数据包：${fileRecord.name} (${formatBytes(fileRecord.size)})`);
-        logger.info(`载入数据包作为当前处理源: ${fileRecord.name}`);
+        logger.info(`载入数据包作为当前处理源: ${fileRecord.name} (用户: ${currentFileHandle})`);
+        updateFilenamePreview();
         await refreshPlan();
         refreshArchiveManagerUI();
       },
@@ -198,8 +232,16 @@ async function main() {
     });
   }
 
-  // 占位符标签点击插入到包名输入框
+  // 占位符标签点击智能插入到包名输入框
   if (placeholderChips && filenameTemplateInput) {
+    // 阻止鼠标点击时失焦，保留用户光标位置
+    placeholderChips.addEventListener('mousedown', (e) => {
+      const btn = e.target.closest('.btn-chip');
+      if (btn) {
+        e.preventDefault();
+      }
+    });
+
     placeholderChips.addEventListener('click', (e) => {
       const btn = e.target.closest('.btn-chip');
       if (!btn) return;
@@ -207,18 +249,29 @@ async function main() {
       if (!insertVal) return;
 
       const input = filenameTemplateInput;
-      const start = input.selectionStart ?? input.value.length;
-      const end = input.selectionEnd ?? input.value.length;
-      const val = input.value;
+      let val = input.value || '';
+      const start = input.selectionStart ?? val.length;
+      const end = input.selectionEnd ?? val.length;
 
-      if (start === val.length && val.toLowerCase().endsWith('.zip')) {
-        const base = val.slice(0, -4);
-        input.value = `${base}-${insertVal}.zip`;
-      } else {
+      if (start !== end) {
+        // 用户主动划选了部分文本，直接替换选区
         input.value = val.slice(0, start) + insertVal + val.slice(end);
+        input.setSelectionRange(start + insertVal.length, start + insertVal.length);
+      } else if (val.toLowerCase().endsWith('.zip')) {
+        // 智能插入在 .zip 扩展名前，并按需自动补全连接符 -
+        const base = val.slice(0, -4);
+        const sep = (base.length > 0 && !base.endsWith('-') && !base.endsWith('_')) ? '-' : '';
+        input.value = `${base}${sep}${insertVal}.zip`;
+        const newPos = input.value.length - 4;
+        input.setSelectionRange(newPos, newPos);
+      } else {
+        const sep = (val.length > 0 && !val.endsWith('-') && !val.endsWith('_')) ? '-' : '';
+        input.value = `${val}${sep}${insertVal}`;
+        input.setSelectionRange(input.value.length, input.value.length);
       }
       input.dispatchEvent(new Event('input'));
       input.focus();
+      updateFilenamePreview();
     });
   }
 
@@ -312,11 +365,13 @@ async function main() {
     // 获取当前用户句柄
     getHandle()
       .then((handle) => {
+        currentHostHandle = handle;
         if (hostUserBadge) {
           hostUserBadge.style.display = 'inline-block';
           hostUserBadge.textContent = `用户: ${handle}`;
         }
         logger.info(`已连接宿主用户: ${handle}`);
+        updateFilenamePreview();
       })
       .catch((err) => {
         logger.warn('获取当前宿主用户信息提示:', err.message);
@@ -393,11 +448,18 @@ async function main() {
       logger.info(`向宿主请求导出数据包，勾选类目: ${Object.keys(selection).filter((k) => selection[k]).join(', ')}`);
 
       const rawBackupBlob = await fetchHostBackup(host.platform, selection);
-      rawBackupBlob.name = `${host.platform}-backup-${formatTimestamp()}.zip`;
-
+      
+      const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
+      const effectiveTarget = selectedTarget === 'native' ? host.platform : selectedTarget;
       let finalBlob = rawBackupBlob;
-      let finalFilename = rawBackupBlob.name;
       let targetLayout = host.platform;
+
+      // 无论原生直出还是跨格式直出，统一通过 resolveFilename 依据模板解析文件名并贯通 handle
+      let finalFilename = resolveFilename(template, {
+        sourceName: `${host.platform}-${currentHostHandle}`,
+        target: effectiveTarget,
+        handle: currentHostHandle,
+      });
 
       // 如果指定了跨平台直出格式 (非 native)
       if (selectedTarget !== 'native' && selectedTarget !== host.platform) {
@@ -423,12 +485,6 @@ async function main() {
         });
 
         finalBlob = resultBlob;
-        const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
-        finalFilename = resolveFilename(template, {
-          sourceName: `${host.platform}-backup`,
-          target: selectedTarget,
-        });
-
         view.renderReport(report);
       }
 
@@ -544,17 +600,20 @@ async function main() {
       // 批量存入 IndexedDB
       for (const item of fileItems) {
         try {
+          const itemHandle = item.detection.handle || 'default-user';
           const id = await saveFile({
             name: item.file.name,
             size: item.file.size,
             blob: item.file,
             layout: item.detection.layout,
+            handle: itemHandle,
             role: 'source',
           });
           logger.info(`外部数据包入库成功: ${item.file.name} (识别类型: ${item.detection.layout.toUpperCase()})`);
           if (!currentFile) {
             currentFile = item.file;
             currentFileId = id;
+            currentFileHandle = itemHandle;
             if (item.detection.layout === 'st' && targetSelect) targetSelect.value = 'l';
             if (item.detection.layout === 'tt' && targetSelect) targetSelect.value = 'pt';
           }
@@ -564,6 +623,7 @@ async function main() {
       }
 
       await updateWorkspaceUI();
+      updateFilenamePreview();
       if (currentFile) {
         await refreshPlan();
       }
@@ -575,15 +635,27 @@ async function main() {
     },
   });
 
-  // 目标平台或高级开关改动时，动态重新生成动作规划
+  // 目标平台或高级开关改动时，动态重新生成动作规划与实时更新预览
   if (targetSelect) {
-    targetSelect.addEventListener('change', () => refreshPlan());
+    targetSelect.addEventListener('change', () => {
+      updateFilenamePreview();
+      refreshPlan();
+    });
+  }
+  const hostTargetSelect = document.getElementById('host-target-select');
+  if (hostTargetSelect) {
+    hostTargetSelect.addEventListener('change', () => {
+      updateFilenamePreview();
+    });
   }
   if (compressionSelect) {
     compressionSelect.addEventListener('change', () => refreshPlan());
   }
   if (filenameTemplateInput) {
-    filenameTemplateInput.addEventListener('input', () => refreshPlan());
+    filenameTemplateInput.addEventListener('input', () => {
+      updateFilenamePreview();
+      refreshPlan();
+    });
   }
   if (includeBackupsCheck) {
     includeBackupsCheck.addEventListener('change', () => refreshPlan());
@@ -605,10 +677,12 @@ async function main() {
         await clearAll();
         currentFile = null;
         currentFileId = null;
+        currentFileHandle = 'default-user';
         btnConvert.disabled = true;
         resetCategoryFilter();
         if (dropHandler?.clear) dropHandler.clear();
         await updateWorkspaceUI();
+        updateFilenamePreview();
         view.setProgress(0, '工作区暂存已清空');
         logger.info('工作区所有数据包已清空');
       }
@@ -658,6 +732,7 @@ async function main() {
       const outputFilename = resolveFilename(template, {
         sourceName: currentFile.name,
         target,
+        handle: currentFileHandle || currentHostHandle || 'default-user',
       });
 
       try {
@@ -687,7 +762,9 @@ async function main() {
     }
   });
 
-  // 10. 页面启动时无损恢复工作区状态
+  // 10. 页面启动时无损恢复工作区状态与初始化文件名预览
+  updateFilenamePreview();
+
   if (isStorageSupported()) {
     try {
       await updateWorkspaceUI();
@@ -698,6 +775,7 @@ async function main() {
           currentFile = fileRecord.blob;
           currentFile.name = fileRecord.name;
           currentFileId = fileRecord.id;
+          currentFileHandle = fileRecord.handle || 'default-user';
 
           if (savedState.target && targetSelect) {
             targetSelect.value = savedState.target;
@@ -723,6 +801,7 @@ async function main() {
           if (savedState.excludedPaths) {
             setExcludedPaths(savedState.excludedPaths);
           }
+          updateFilenamePreview();
 
           btnConvert.disabled = false;
           if (dropHandler?.setFilename) {

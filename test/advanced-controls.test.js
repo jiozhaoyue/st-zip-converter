@@ -58,6 +58,32 @@ describe('自定义包名模板解析器 (resolveFilename)', () => {
     expect(clean).not.toContain('>');
     expect(clean).not.toContain('|');
   });
+
+  it('支持占位符别名 {name}, {platform}, {user}, {username}, {timestamp}', () => {
+    const filename1 = resolveFilename('{name}_for_{platform}_by_{user}_{timestamp}.zip', {
+      sourceName: 'MyBackup.zip',
+      target: 'tt',
+      handle: 'bob',
+      date: '2026-09-06',
+    });
+    expect(filename1).toBe('MyBackup_for_tt_by_bob_2026-09-06.zip');
+
+    const filename2 = resolveFilename('{filename}-{layout}-{username}.zip', {
+      sourceName: 'CustomData.zip',
+      target: 'pt',
+      handle: 'charlie',
+    });
+    expect(filename2).toBe('CustomData-pt-charlie.zip');
+  });
+
+  it('安全处理包含 $ 等特殊符号的源文件名与用户名，防止正则替换逃逸', () => {
+    const filename = resolveFilename('{source}_{handle}.zip', {
+      sourceName: 'price$100$2.zip',
+      handle: 'user$name',
+      target: 'st',
+    });
+    expect(filename).toBe('price$100$2_user$name.zip');
+  });
 });
 
 describe('多级 Zip 压缩率支持 (Store 0 vs Deflate 9)', () => {

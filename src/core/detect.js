@@ -20,6 +20,7 @@ export async function detectFromReader(reader) {
   let hasCharactersRoot = false;
   let hasSettingsRoot = false;
   let manifestBuffer = null;
+  let detectedHandle = null;
 
   for await (const entry of reader.entries()) {
     const name = entry.fileName;
@@ -29,6 +30,13 @@ export async function detectFromReader(reader) {
     }
     if (name.startsWith('data/default-user/') || name.startsWith('data/_tauritavern/')) {
       hasDataRoot = true;
+      if (!detectedHandle) detectedHandle = 'default-user';
+    } else if (name.startsWith('data/')) {
+      const match = name.match(/^data\/([^/]+)\//);
+      if (match && match[1] && match[1] !== '_tauritavern' && match[1] !== 'extensions') {
+        hasDataRoot = true;
+        if (!detectedHandle) detectedHandle = match[1];
+      }
     } else if (name.startsWith('characters/') || name === 'characters') {
       hasCharactersRoot = true;
     } else if (name === 'settings.json') {
@@ -37,27 +45,30 @@ export async function detectFromReader(reader) {
     entry.skip();
   }
 
-  if (hasDataRoot) {
-    return { layout: LAYOUTS.TT, evidence: 'entries under data/default-user or data/_tauritavern' };
-  }
-
   const manifest = manifestBuffer ? parseJson(manifestBuffer) : null;
   if (manifest && typeof manifest === 'object') {
+    if (manifest.handle) {
+      detectedHandle = manifest.handle;
+    }
     const perFileManifest = Array.isArray(manifest.files)
       && manifest.files.some((file) => file && typeof file === 'object' && 'moduleId' in file);
     if (manifest.format || perFileManifest) {
-      return { layout: LAYOUTS.PT_NATIVE, evidence: 'manifest carries per-file moduleId list' };
+      return { layout: LAYOUTS.PT_NATIVE, evidence: 'manifest carries per-file moduleId list', handle: detectedHandle };
     }
     if ('schemaVersion' in manifest && 'selection' in manifest) {
-      return { layout: LAYOUTS.L, evidence: 'manifest.json has schemaVersion+selection' };
+      return { layout: LAYOUTS.L, evidence: 'manifest.json has schemaVersion+selection', handle: detectedHandle };
     }
+  }
+
+  if (hasDataRoot) {
+    return { layout: LAYOUTS.TT, evidence: 'entries under data/default-user or data/_tauritavern', handle: detectedHandle };
   }
 
   if (hasCharactersRoot || hasSettingsRoot) {
-    return { layout: LAYOUTS.ST, evidence: 'flat user directory entries (characters/ or settings.json)' };
+    return { layout: LAYOUTS.ST, evidence: 'flat user directory entries (characters/ or settings.json)', handle: detectedHandle };
   }
 
-  return { layout: LAYOUTS.UNKNOWN, evidence: 'no recognizable layout marker' };
+  return { layout: LAYOUTS.UNKNOWN, evidence: 'no recognizable layout marker', handle: detectedHandle };
 }
 
 const JSON_DECODER = new TextDecoder();
