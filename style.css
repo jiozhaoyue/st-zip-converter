@@ -1,4 +1,11 @@
-:root {
+/* ==========================================================================
+   变量定义域说明：
+   独立 Web 模式挂载于 body > .app-container；插件模式挂载于宿主扩展抽屉内
+   .st-converter-drawer-app。变量与全局 reset 一律定义在这两个容器上，
+   严禁泄漏到宿主页面（:root / body / 通配符选择器会覆盖宿主主题导致 Luker UI 异常）。
+   ========================================================================== */
+.app-container,
+.st-converter-drawer-app {
   /* ==========================================================================
      SillyTavern 酒馆原生变量继承体系 (带高保真酒馆独立回退)
      ========================================================================== */
@@ -62,16 +69,18 @@
   --shadow-glow: 0 0 14px rgba(245, 158, 11, 0.25);
 }
 
-* {
+.app-container *,
+.st-converter-drawer-app * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-body {
+/* 独立 Web 模式专属页面骨架（插件模式下宿主 body 严禁被改动） */
+body:has(> .app-container) {
   font-family: var(--font-sans);
   background: var(--bg-primary);
-  background-image: 
+  background-image:
     radial-gradient(ellipse at 50% 0%, rgba(245, 158, 11, 0.07) 0%, transparent 65%),
     radial-gradient(circle at 100% 100%, rgba(192, 132, 252, 0.04) 0%, transparent 50%),
     linear-gradient(180deg, rgba(13, 16, 23, 0.98) 0%, rgba(9, 11, 16, 1) 100%);
@@ -85,24 +94,38 @@ body {
   accent-color: var(--tavern-gold);
 }
 
-/* 自定义酒馆复古滚动条 */
-::-webkit-scrollbar {
+/* 插件模式：容器自身承接独立模式 body 的排版职责（背景/字体/行高），
+   但不改动宿主 body 与页面布局 */
+.st-converter-drawer-app {
+  font-family: var(--font-sans);
+  color: var(--text-main);
+  line-height: 1.5;
+  accent-color: var(--tavern-gold);
+}
+
+/* 自定义酒馆复古滚动条：仅作用于插件容器内部
+   （:host 页面级滚动条规则会改写宿主全站滚动条外观） */
+.app-container ::-webkit-scrollbar,
+.st-converter-drawer-app ::-webkit-scrollbar {
   width: 7px;
   height: 7px;
 }
 
-::-webkit-scrollbar-track {
+.app-container ::-webkit-scrollbar-track,
+.st-converter-drawer-app ::-webkit-scrollbar-track {
   background: rgba(11, 14, 20, 0.6);
 }
 
-::-webkit-scrollbar-thumb {
+.app-container ::-webkit-scrollbar-thumb,
+.st-converter-drawer-app ::-webkit-scrollbar-thumb {
   background: rgba(245, 158, 11, 0.25);
   border-radius: 4px;
   border: 1px solid transparent;
   background-clip: padding-box;
 }
 
-::-webkit-scrollbar-thumb:hover {
+.app-container ::-webkit-scrollbar-thumb:hover,
+.st-converter-drawer-app ::-webkit-scrollbar-thumb:hover {
   background: rgba(245, 158, 11, 0.55);
 }
 
