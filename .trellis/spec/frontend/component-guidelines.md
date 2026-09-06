@@ -109,3 +109,23 @@ Luker 前端**同时暴露** `globalThis.SillyTavern`（script.js:360 `= lukerAp
 2. **服务端校验（verifyHostPlatform）**：`GET /version`。Luker 形状 `{agent:"Luker:2.7.0:...", stCompatVersion, pkgVersion}`；ST 形状 `{version}` 或 `{agent:"SillyTavern:..."}`。`agent` 前缀或 `stCompatVersion` 字段存在 → luker。不一致以服务端为准并 logger.warn。
 3. **导出后软校验（validateBackupShape）**：Luker 导出含 manifest.json，ST 导出不含；不一致仅告警不阻断。
 4. **ST 宿主 selection 限制**：ST `/api/users/backup` 全量 glob 导出忽略 selection 参数——ST 宿主必须请求 `FULL_SELECTION`，类目勾选由插件内 transform 过滤生效；Luker 直接透传 selection。
+
+---
+
+## Dual-Template Sync Mandate (2026-09-07)
+
+The standalone web page (`index.html`) and the plugin drawer template (`src/ui/workbench-template.js`) are **two separately maintained copies** of the same UI structure. `index.html` is static — Vite does not process it through the template module. Any structural change (new element IDs, section reorganization) MUST be applied to **both** files in the same commit, or the standalone mode breaks (verified failure mode: archive-manager renders into a missing `#workspace-archive-list`, workspace drawer keeps the old dual-list markup).
+
+Checklist for template changes:
+1. Edit `src/ui/workbench-template.js`
+2. Mirror the change in `index.html`
+3. Grep both for the touched IDs: `grep -c "<new-id>" index.html src/ui/workbench-template.js` must both be ≥1
+4. Playwright-verify standalone mode (`vite preview` + check the new ID exists in DOM)
+
+## Export Queue Pattern (统一待导出区 · 2026-09-07)
+
+All artifacts (host exports, conversions, delta patches, split volumes) flow into the in-memory `ExportQueue` (`src/ui/export-queue.js`) instead of directly saving to IndexedDB or triggering downloads:
+- `enqueue({ blob, name, targetLayout, origin, ephemeral, autoDownload })` — ephemeral items only persist when stashed or downloaded (avoids duplicate storage);
+- `stash()` writes to files store with the item's `origin` so the unified workspace list can badge it;
+- Split-volume paths must enqueue with `origin: 'split-part'` (NOT call `saveFile` directly);
+- `renderSplitDeliveryModal` is retained for compatibility but no longer wired to conversion flows.
