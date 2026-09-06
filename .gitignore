@@ -1,14 +1,47 @@
+# Dependencies
 node_modules/
-*.log
 
-# 真实数据样本(体积大且含真实用户数据,永不入库)
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 真实数据样本与本地大文件 (严禁入库)
 *.zip
 !fixtures/*.zip
+data-zip/
+data-*/
 samples/
 
-# 运行产物
+# 运行与测试产物
 dist/
 out/
 tmp/
+coverage/
+.nyc_output/
+
+# 环境配置与凭据安全
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+
+# Trellis 运行时本地数据
+.trellis/.developer
+.trellis/.current-task
 .trellis/.runtime/
 .history/
+
+# 编辑器与操作系统私有文件
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
