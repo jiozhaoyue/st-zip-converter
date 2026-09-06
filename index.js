@@ -31,6 +31,8 @@ import {
 } from './src/storage/db.js';
 import { generateDeltaArchive } from './src/core/delta.js';
 import { renderArchiveManager } from './src/ui/archive-manager.js';
+import { ExportQueue, renderExportQueue } from './src/ui/export-queue.js';
+import { renderUsageDashboard } from './src/ui/usage-dashboard.js';
 import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
 import {
   detectHost,
@@ -129,7 +131,9 @@ async function main(appRoot = document.getElementById('app')) {
   const workspaceBar = document.getElementById('workspace-bar');
   const workspaceStatusText = document.getElementById('workspace-status-text');
   const btnClearWorkspace = document.getElementById('btn-clear-workspace');
-  const workspacePanel = document.getElementById('workspace-panel');
+  const workspacePanel = document.getElementById('workspace-archive-list');
+  const usageDashboardEl = document.getElementById('usage-dashboard');
+  const exportQueuePanel = document.getElementById('export-queue-panel');
 
   const includeBackupsCheck = document.getElementById('include-backups-check');
   const includeCacheCheck = document.getElementById('include-cache-check');
@@ -245,12 +249,14 @@ async function main(appRoot = document.getElementById('app')) {
     await updateWorkspaceUI();
   }
 
-  // 挂载工作区双列表管理器
+  // 挂载工作区统一单列表管理器 + 待导出区 + 用量看板
+  let workspaceOriginFilter = '';
   async function refreshArchiveManagerUI() {
     if (!workspacePanel) return;
     await renderArchiveManager({
       containerEl: workspacePanel,
       activeFileId: currentFileId,
+      originFilter: workspaceOriginFilter,
       isHostAvailable: host.isPlugin,
       onLoadFile: async (fileRecord) => {
         if (!fileRecord || !fileRecord.blob) return;
@@ -272,11 +278,38 @@ async function main(appRoot = document.getElementById('app')) {
       onListChanged: async () => {
         await updateWorkspaceUI();
       },
+      onFilterChanged: (origin) => {
+        workspaceOriginFilter = origin;
+        refreshArchiveManagerUI();
+      },
       onBatchConvert: async (sources) => {
         await runBatchConversion(sources);
       },
       onRestoreToHost: (fileRecord) => {
         openRestoreModal(fileRecord);
+      },
+    });
+  }
+
+  // 用量看板（配额条 + 来源统计 + 包体积列表）
+  async function refreshUsageDashboard() {
+    if (!usageDashboardEl) return;
+    await renderUsageDashboard({ containerEl: usageDashboardEl });
+  }
+
+  // 待导出区（所有产物统一出口）
+  const exportQueue = new ExportQueue();
+  function refreshExportQueueUI() {
+    if (!exportQueuePanel) return;
+    renderExportQueue({
+      containerEl: exportQueuePanel,
+      queue: exportQueue,
+      isHostAvailable: host.isPlugin,
+      onRestoreToHost: (item) => {
+        openRestoreModal({ name: item.name, blob: item.blob, size: item.blob.size });
+      },
+      onWorkspaceChanged: async () => {
+        await updateWorkspaceUI();
       },
     });
   }
@@ -337,17 +370,19 @@ async function main(appRoot = document.getElementById('app')) {
     });
   });
 
-  // 1. 更新工作区状态栏
+  // 1. 更新工作区状态栏（去重：状态条只显示一句汇总，列表/看板在抽屉内渲染）
   async function updateWorkspaceUI() {
     if (!isStorageSupported()) return;
     try {
       const usage = await getStorageUsage();
       if (workspaceStatusText) {
         workspaceStatusText.textContent = usage.count > 0
-          ? `IndexedDB 工作区：已暂存 ${usage.count} 个数据包 (${formatBytes(usage.totalBytes)})`
-          : 'IndexedDB 工作区：暂存 0 个数据包';
+          ? `工作区 ${usage.count} 个数据包 · ${formatBytes(usage.totalBytes)}`
+          : '工作区就绪';
       }
       await refreshArchiveManagerUI();
+      await refreshUsageDashboard();
+      refreshExportQueueUI();
     } catch (err) {
       console.warn('获取工作区用量失败:', err);
     }
@@ -759,46 +794,40 @@ async function main(appRoot = document.getElementById('app')) {
           filenameTemplate: template,
         });
 
+        // 分卷统一进待导出区（来源=分卷），供统一处置
         for (const p of splitResult.parts) {
-          await saveFile({
+          exportQueue.enqueue({
             name: p.partName,
-            size: p.sizeBytes,
             blob: p.blob,
-            layout: targetLayout,
-            role: targetDestination === 'workspace' ? 'source' : 'output',
+            targetLayout: targetLayout,
+            origin: 'split-part',
+            ephemeral: true,
           });
         }
-        await updateWorkspaceUI();
-
-        if (targetDestination === 'download') {
-          renderSplitDeliveryModal(splitResult);
-          view.setProgress(100, `宿主数据已成功切分为 ${splitResult.totalParts} 个独立压缩包！`);
-          logger.success(`宿主导出分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})`);
-          return;
-        } else {
-          view.setProgress(100, `宿主数据 ${splitResult.totalParts} 个分卷已存入本地工作区！`);
-          logger.success(`宿主导出分卷已存入工作区完成: 共 ${splitResult.totalParts} 卷`);
-          return;
-        }
+        refreshExportQueueUI();
+        view.setProgress(100, `宿主数据已切分为 ${splitResult.totalParts} 个分卷，已进入待导出区统一处置！`);
+        logger.success(`宿主导出分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})，可在待导出区批量下载或存入工作区`);
+        return;
       }
 
-      // 单包模式：暂存到工作区
-      await saveFile({
+      // 单包模式：统一进待导出区（增量补丁产物标记 delta 来源）
+      const isDeltaPatch = /_delta_patch\.zip$/i.test(finalFilename);
+      exportQueue.enqueue({
         name: finalFilename,
-        size: finalBlob.size,
         blob: finalBlob,
-        layout: targetLayout,
-        role: targetDestination === 'workspace' ? 'source' : 'output',
+        targetLayout: targetLayout,
+        origin: isDeltaPatch ? 'delta' : 'host-export',
+        ephemeral: true,
+        autoDownload: targetDestination === 'download',
       });
-      await updateWorkspaceUI();
+      refreshExportQueueUI();
 
       if (targetDestination === 'download') {
-        view.triggerDownload(finalBlob, finalFilename);
-        view.setProgress(100, `宿主数据包导出成功！已开始下载: ${finalFilename}`);
+        view.setProgress(100, `宿主数据包导出成功！已开始下载并进入待导出区: ${finalFilename}`);
         logger.success(`宿主导出并下载完成: ${finalFilename} (${formatBytes(finalBlob.size)})`);
       } else {
-        view.setProgress(100, `宿主数据包已存入本地工作区双列表！`);
-        logger.success(`宿主导出并存入工作区完成: ${finalFilename}`);
+        view.setProgress(100, `宿主数据包已进入待导出区！`);
+        logger.success(`宿主导出完成: ${finalFilename} —— 可在待导出区存入工作区或写回宿主`);
       }
     } catch (err) {
       view.setProgress(100, `导出失败: ${err.message}`);
@@ -1052,21 +1081,21 @@ async function main(appRoot = document.getElementById('app')) {
           filenameTemplate: template,
         });
 
+        // 分卷统一进待导出区（来源=分卷）
         for (const p of splitResult.parts) {
-          await saveFile({
+          exportQueue.enqueue({
             name: p.partName,
-            size: p.sizeBytes,
             blob: p.blob,
-            layout: target,
-            role: 'output',
+            targetLayout: target,
+            origin: 'split-part',
+            ephemeral: true,
           });
         }
-        await updateWorkspaceUI();
+        refreshExportQueueUI();
         view.renderReport(report);
 
-        renderSplitDeliveryModal(splitResult);
-        view.setProgress(100, `外部数据已成功切分为 ${splitResult.totalParts} 个独立压缩包！`);
-        logger.success(`外部 Zip 分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})`);
+        view.setProgress(100, `外部数据已切分为 ${splitResult.totalParts} 个分卷，进入待导出区统一处置！`);
+        logger.success(`外部 Zip 分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})，可在待导出区批量下载或存入工作区`);
         return;
       }
 
@@ -1080,20 +1109,16 @@ async function main(appRoot = document.getElementById('app')) {
         handle: currentHandle,
       });
 
-      try {
-        await saveFile({
-          name: outputFilename,
-          size: resultBlob.size,
-          blob: resultBlob,
-          layout: target,
-          role: 'output',
-        });
-        await updateWorkspaceUI();
-      } catch (e) {
-        console.warn('暂存产物失败:', e);
-      }
-
-      view.triggerDownload(resultBlob, outputFilename);
+      // 统一出口：产物进入待导出区，由用户在待导出区执行 下载/存工作区/写回宿主
+      exportQueue.enqueue({
+        name: outputFilename,
+        blob: resultBlob,
+        targetLayout: target,
+        origin: 'converted',
+        ephemeral: true,
+        autoDownload: true,
+      });
+      refreshExportQueueUI();
       view.renderReport(report);
 
       if (btnRestoreLuker && host.platform === 'luker') {

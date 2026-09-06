@@ -148,15 +148,28 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false } = {}) {
       </div>
     </div>
 
-    <!-- Workspace Dual List Panel Sub-Drawer -->
+    <!-- Workspace Unified Panel Sub-Drawer (唯一工作区：用量看板 + 待导出区 + 单列表) -->
     <div class="inline-drawer" id="workspace-panel-drawer" style="margin-bottom: 10px;">
       <div class="inline-drawer-toggle inline-drawer-header">
-        <b><i class="fa-solid fa-boxes-stacked"></i> 工作区数据包管理</b>
+        <b><i class="fa-solid fa-boxes-stacked"></i> 工作区</b>
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
       </div>
       <div class="inline-drawer-content">
         <div class="workspace-panel" id="workspace-panel">
-          <!-- 由 archive-manager.js 动态挂载已上传与已转换双列表 -->
+          <!-- 用量看板：配额条 + 来源统计 -->
+          <div id="usage-dashboard" style="margin-bottom: 8px;"></div>
+          <!-- 待导出区：所有产物统一出口 -->
+          <div class="inline-drawer" id="export-queue-drawer" style="margin-bottom: 8px;">
+            <div class="inline-drawer-toggle inline-drawer-header" style="font-size: 0.85rem;">
+              <b><i class="fa-solid fa-export"></i> 待导出区</b>
+              <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+              <div id="export-queue-panel"></div>
+            </div>
+          </div>
+          <!-- 统一单列表（archive-manager.js 动态挂载） -->
+          <div id="workspace-archive-list"></div>
         </div>
       </div>
     </div>
