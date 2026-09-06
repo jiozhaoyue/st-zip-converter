@@ -493,3 +493,25 @@ detectHost改为lukerContext优先协议(实测Luker同时暴露SillyTavern与lu
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: 并发管线重写与实例卡顿诊断(perf-overhaul)
+<!-- trellis-session: v=2 fp=bb351655bdc595a5 -->
+
+**Date**: 2026-09-07
+**Task**: 并发管线重写与实例卡顿诊断(perf-overhaul)
+**Branch**: `main`
+
+### Summary
+
+重写zip-io写入管线:移除自建串行队列改为并发滑动窗口(vendor add原生支持并发,实测50条目字节级一致);浏览器基准2.8x提速、主线程阻塞降65%;宿主导出三段式进度(流式body读取+百分比);日志帧合并洪泛折叠;大Blob IDB串行队列;实例诊断:real实例空闲期19%主线程占用来自11个第三方扩展,本插件未加载;123测试全绿
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9f2bbe1` | chore(task): perf-overhaul artifacts (worker decision, benchmarks, instance lag report) |
+
+### Status
+
+[OK] **Completed**
