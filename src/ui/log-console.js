@@ -48,9 +48,9 @@ export function setupLogConsole(containerElement) {
           <button type="button" class="btn-log-filter" data-level="ERROR">错误</button>
         </div>
         <div class="log-action-group">
-          <button type="button" class="btn-log-action" id="btn-copy-log" title="复制所有日志到剪贴板">📋 复制</button>
-          <button type="button" class="btn-log-action" id="btn-download-log" title="下载为 .log 文件">💾 导出</button>
-          <button type="button" class="btn-log-action" id="btn-clear-log" title="清空日志">🗑️ 清空</button>
+          <button type="button" class="btn-log-action" id="btn-copy-log" title="复制所有日志到剪贴板"><i class="fa-solid fa-copy"></i> 复制</button>
+          <button type="button" class="btn-log-action" id="btn-download-log" title="下载为 .log 文件"><i class="fa-solid fa-download"></i> 导出</button>
+          <button type="button" class="btn-log-action" id="btn-clear-log" title="清空日志"><i class="fa-solid fa-trash-can"></i> 清空</button>
         </div>
       </div>
       <div class="log-stream-container" id="log-stream-container">
@@ -206,9 +206,9 @@ export function setupLogConsole(containerElement) {
       if (!text) return;
       try {
         await navigator.clipboard.writeText(text);
-        const orig = btnCopy.textContent;
-        btnCopy.textContent = '✅ 已复制!';
-        setTimeout(() => { btnCopy.textContent = orig; }, 1800);
+        const origHtml = btnCopy.innerHTML;
+        btnCopy.innerHTML = '<i class="fa-solid fa-check"></i> 已复制!';
+        setTimeout(() => { btnCopy.innerHTML = origHtml; }, 1800);
       } catch {
         alert('复制失败，请手动在控制台选取');
       }

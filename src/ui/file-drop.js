@@ -75,7 +75,7 @@ export function setupFileDrop({
       const file = zipFiles[0];
       selectedFile = file;
       const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
-      mainTextEl.textContent = `📁 ${file.name} (${sizeMb} MB)`;
+      mainTextEl.innerHTML = `<i class="fa-solid fa-file-zipper"></i> ${file.name} (${sizeMb} MB)`;
       subTextEl.textContent = '正在分析包结构并自动嗅探源平台...';
 
       try {
@@ -100,7 +100,7 @@ export function setupFileDrop({
         if (onError) onError(err);
       }
     } else {
-      mainTextEl.textContent = `📁 已选择 ${zipFiles.length} 个数据包`;
+      mainTextEl.innerHTML = `<i class="fa-solid fa-boxes-stacked"></i> 已选择 ${zipFiles.length} 个数据包`;
       subTextEl.textContent = '正在批量分析并存入工作区...';
 
       const results = [];
@@ -133,7 +133,7 @@ export function setupFileDrop({
   return {
     getSelectedFile: () => selectedFile,
     setFilename: (name) => {
-      if (mainTextEl) mainTextEl.textContent = `📁 ${name}`;
+      if (mainTextEl) mainTextEl.innerHTML = `<i class="fa-solid fa-file-zipper"></i> ${name}`;
     },
     clear: () => {
       selectedFile = null;

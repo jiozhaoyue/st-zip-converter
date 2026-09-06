@@ -1898,3 +1898,182 @@ body {
   margin-bottom: 12px;
 }
 
+/* ==========================================================================
+   SillyTavern 原生扩展标准控件与抽屉样式体系 (Native ST Drawer & Controls)
+   ========================================================================== */
+
+/* 抽屉体系 */
+.inline-drawer {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--SmartThemeBorderColor, rgba(245, 158, 11, 0.22));
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+  margin-bottom: 10px;
+  transition: border-color 0.2s;
+}
+
+.inline-drawer:hover {
+  border-color: var(--SmartThemeQuoteColor, #f59e0b);
+}
+
+.inline-drawer-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-main, #f8fafc);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.inline-drawer-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.inline-drawer-icon {
+  transition: transform 0.2s ease;
+}
+
+.inline-drawer-icon.up {
+  transform: rotate(180deg);
+}
+
+.inline-drawer-content {
+  padding: 12px 14px;
+  border-top: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.08));
+}
+
+/* 扩展分组块 */
+.extension_block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Flex 容器体系 */
+.flex-container {
+  display: flex;
+}
+
+.flexFlowColumn {
+  flex-direction: column;
+}
+
+.justifySpaceBetween {
+  justify-content: space-between;
+}
+
+.alignItemsCenter {
+  align-items: center;
+}
+
+.flex1 {
+  flex: 1;
+}
+
+/* 酒馆原生表单输入控件 */
+.text_pole {
+  background: var(--text_pole_background, rgba(13, 16, 24, 0.78));
+  color: var(--text-main, #f8fafc);
+  border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15));
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.text_pole:focus {
+  border-color: var(--SmartThemeQuoteColor, #f59e0b);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+/* 酒馆原生按钮体系 */
+.menu_button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--bg-card, rgba(30, 37, 54, 0.94));
+  color: var(--text-main, #f8fafc);
+  border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15));
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.menu_button:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: var(--SmartThemeQuoteColor, #f59e0b);
+  color: var(--SmartThemeQuoteColor, #f59e0b);
+}
+
+.menu_button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.menu_button_icon i {
+  font-size: 0.9em;
+}
+
+/* 酒馆原生复选框标签 */
+.checkbox_label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-main, #e2e8f0);
+}
+
+.checkbox_label input[type="checkbox"],
+.checkbox_label input[type="radio"] {
+  cursor: pointer;
+  accent-color: var(--SmartThemeQuoteColor, #f59e0b);
+}
+
+/* 分隔线与小标题 */
+.section-divider {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--SmartThemeQuoteColor, #f59e0b);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.sysHR {
+  border: 0;
+  height: 1px;
+  background: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.1));
+  margin: 6px 0 10px 0;
+}
+
+/* 抽屉内部样式微调 */
+.st-converter-drawer-wrapper {
+  width: 100%;
+}
+
+.st-converter-drawer-app {
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  box-shadow: none;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+

@@ -57,14 +57,14 @@ export async function renderArchiveManager({
   const sourceHeader = document.createElement('div');
   sourceHeader.className = 'archive-col-header';
   sourceHeader.innerHTML = `
-    <span class="col-title">📥 已上传源包 (${sources.length})</span>
+    <span class="col-title"><i class="fa-solid fa-cloud-arrow-up"></i> 已上传源包 (${sources.length})</span>
   `;
 
   if (sources.length > 1 && typeof onBatchConvert === 'function') {
     const btnBatch = document.createElement('button');
     btnBatch.type = 'button';
     btnBatch.className = 'btn-batch-convert';
-    btnBatch.textContent = '⚡ 批量转换全部';
+    btnBatch.innerHTML = '<i class="fa-solid fa-bolt"></i> 批量转换全部';
     btnBatch.title = '按当前配置依次转换所有已上传源包';
     btnBatch.addEventListener('click', () => {
       onBatchConvert(sources);
@@ -156,7 +156,7 @@ export async function renderArchiveManager({
   const outputHeader = document.createElement('div');
   outputHeader.className = 'archive-col-header';
   outputHeader.innerHTML = `
-    <span class="col-title">📤 已转换生成包 (${outputs.length})</span>
+    <span class="col-title"><i class="fa-solid fa-box-archive"></i> 已转换生成包 (${outputs.length})</span>
   `;
   outputCol.appendChild(outputHeader);
 
@@ -231,7 +231,7 @@ export async function renderArchiveManager({
         const btnRestore = document.createElement('button');
         btnRestore.type = 'button';
         btnRestore.className = 'btn-archive-action restore';
-        btnRestore.textContent = '🔄 写入宿主';
+        btnRestore.innerHTML = '<i class="fa-solid fa-rotate"></i> 写入宿主';
         btnRestore.title = '将该包一键恢复/写入到当前酒馆宿主';
         btnRestore.addEventListener('click', async () => {
           const full = await getFile(file.id);

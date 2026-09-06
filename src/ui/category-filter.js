@@ -3,19 +3,19 @@ import { ACTION_LABELS, SPECIAL_CATEGORIES, SPECIAL_LABELS } from '../core/plan-
 import { createCategoryDetailList } from './file-tree-picker.js';
 
 const CATEGORY_ICONS = {
-  [CATEGORIES.CHARACTERS]: '🎭',
-  [CATEGORIES.CHATS]: '💬',
-  [CATEGORIES.LOREBOOKS]: '📖',
-  [CATEGORIES.PRESETS]: '⚙️',
-  [CATEGORIES.SETTINGS]: '🛠️',
-  [CATEGORIES.SECRETS]: '🔑',
-  [CATEGORIES.ASSETS]: '🖼️',
-  [CATEGORIES.EXTENSIONS]: '🧩',
-  [CATEGORIES.GLOBAL_EXTENSIONS]: '🌐',
-  [CATEGORIES.VECTORS]: '🧠',
-  [SPECIAL_CATEGORIES.BACKUPS]: '📦',
-  [SPECIAL_CATEGORIES.CACHE]: '⚡',
-  [SPECIAL_CATEGORIES.APP_PRIVATE]: '🔒',
+  [CATEGORIES.CHARACTERS]: 'fa-solid fa-user-ninja',
+  [CATEGORIES.CHATS]: 'fa-solid fa-comments',
+  [CATEGORIES.LOREBOOKS]: 'fa-solid fa-book-bookmark',
+  [CATEGORIES.PRESETS]: 'fa-solid fa-sliders',
+  [CATEGORIES.SETTINGS]: 'fa-solid fa-gear',
+  [CATEGORIES.SECRETS]: 'fa-solid fa-key',
+  [CATEGORIES.ASSETS]: 'fa-solid fa-image',
+  [CATEGORIES.EXTENSIONS]: 'fa-solid fa-puzzle-piece',
+  [CATEGORIES.GLOBAL_EXTENSIONS]: 'fa-solid fa-globe',
+  [CATEGORIES.VECTORS]: 'fa-solid fa-brain',
+  [SPECIAL_CATEGORIES.BACKUPS]: 'fa-solid fa-box-archive',
+  [SPECIAL_CATEGORIES.CACHE]: 'fa-solid fa-bolt',
+  [SPECIAL_CATEGORIES.APP_PRIVATE]: 'fa-solid fa-lock',
 };
 
 let currentSelection = {
@@ -160,7 +160,7 @@ export function renderCategoryStats(planOrInspectResult) {
         const btnClearFilter = document.createElement('button');
         btnClearFilter.type = 'button';
         btnClearFilter.className = 'btn-clear-action-filter';
-        btnClearFilter.textContent = '重置动作筛选 ✕';
+        btnClearFilter.innerHTML = '<i class="fa-solid fa-rotate-left"></i> 重置动作筛选';
         btnClearFilter.addEventListener('click', (e) => {
           e.preventDefault();
           activeActionFilter = null;
@@ -254,9 +254,8 @@ export function renderCategoryStats(planOrInspectResult) {
       notifySelectionChanged();
     });
 
-    const icon = document.createElement('span');
-    icon.className = 'cat-icon';
-    icon.textContent = CATEGORY_ICONS[key] || '📁';
+    const icon = document.createElement('i');
+    icon.className = `cat-icon ${CATEGORY_ICONS[key] || 'fa-solid fa-folder'}`;
 
     const text = document.createElement('span');
     text.className = 'cat-text';

@@ -37,6 +37,7 @@ import {
   getHandle,
   registerMenuButton,
   mountSettingsDrawer,
+  setupDrawerToggles,
 } from './src/ui/host-bridge.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
@@ -62,6 +63,7 @@ async function main(appRoot = document.getElementById('app')) {
 
   const host = detectHost();
   const view = createViewController();
+  setupDrawerToggles(root);
 
   // 初始化底部实时日志抽屉
   const logConsole = setupLogConsole(root);
@@ -1045,11 +1047,14 @@ function bootstrap() {
     }
   } else {
     // 宿主扩展模式 (SillyTavern / Luker)
-    // 1. 注入扩展设置抽屉 (#extensions_settings2 / #extensions_settings)
-    mountSettingsDrawer(openConverterModal);
-    // 2. 注入魔棒快捷菜单 (#extensionsMenu / #options)
-    registerMenuButton(openConverterModal);
-    logger.info(`st-zip-converter 扩展面板已就绪 (${host.platform.toUpperCase()} 模式)`);
+    // 仅在扩展设置抽屉中展开工作台，遵循“只在插件页面做，不在魔法棒做”
+    mountSettingsDrawer((drawerApp) => {
+      if (!isWorkbenchInitialized && drawerApp) {
+        isWorkbenchInitialized = true;
+        main(drawerApp);
+      }
+    });
+    logger.info(`st-zip-converter 扩展设置抽屉已就绪 (${host.platform.toUpperCase()} 模式)`);
   }
 }
 

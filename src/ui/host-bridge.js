@@ -6,6 +6,7 @@
 import { logger } from '../core/logger.js';
 import { zipIo } from '../core/zip-io.js';
 import * as zip from '../vendor/zip.js';
+import { getWorkbenchHtml } from './workbench-template.js';
 
 export const FULL_SELECTION = Object.freeze({
   settings: true,
@@ -313,7 +314,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
       <div>
         <h3 style="margin: 0; font-size: 1.15rem; color: #89b4fa; display: flex; align-items: center; gap: 8px;">
-          <span>📦</span> 扩展安装器 (轻量清单模式)
+          <i class="fa-solid fa-puzzle-piece"></i> 扩展安装器 (轻量清单模式)
         </h3>
         <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #a6adc8;">
           数据包已恢复。以下是包内记录的扩展，酒馆将以 <strong>depth: 1</strong> 浅克隆自动拉取，杜绝 408 并保留一键更新能力。
@@ -323,11 +324,11 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     </div>
 
     <div style="padding: 10px 20px; background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; gap: 12px; align-items: center; font-size: 0.85rem;">
-      <button id="ext-select-missing" class="btn" style="padding: 4px 10px; font-size: 0.8rem; background: #313244; color: #89b4fa; border: 1px solid #45475a; border-radius: 4px; cursor: pointer;">仅选未安装</button>
-      <button id="ext-select-all" class="btn" style="padding: 4px 10px; font-size: 0.8rem; background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; cursor: pointer;">全选</button>
-      <button id="ext-deselect-all" class="btn" style="padding: 4px 10px; font-size: 0.8rem; background: #313244; color: #a6adc8; border: 1px solid #45475a; border-radius: 4px; cursor: pointer;">全不选</button>
+      <button id="ext-select-missing" class="menu_button" style="padding: 4px 10px; font-size: 0.8rem; cursor: pointer;">仅选未安装</button>
+      <button id="ext-select-all" class="menu_button" style="padding: 4px 10px; font-size: 0.8rem; cursor: pointer;">全选</button>
+      <button id="ext-deselect-all" class="menu_button" style="padding: 4px 10px; font-size: 0.8rem; cursor: pointer;">全不选</button>
       <div style="flex: 1;"></div>
-      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #f38ba8;">
+      <label class="checkbox_label flex-container" style="cursor: pointer; color: #f38ba8;">
         <input type="checkbox" id="ext-force-replace" />
         <span>强制覆盖已有扩展</span>
       </label>
@@ -336,9 +337,9 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     ${anomaly.hasAnomaly ? `
     <div id="ext-anomaly-banner" style="margin: 12px 20px 0 20px; padding: 10px 14px; background: rgba(243, 139, 168, 0.15); border: 1px solid #f38ba8; border-radius: 6px; font-size: 0.82rem; color: #f38ba8; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
       <div>
-        <strong>⚠️ 检测到错误目录残留：</strong> 本地存在旧版/错误的 <code>data/&lt;user&gt;/extensions/third-party/</code> 文件夹，会导致插件识别失效。
+        <strong><i class="fa-solid fa-triangle-exclamation"></i> 检测到错误目录残留：</strong> 本地存在旧版/错误的 <code>data/&lt;user&gt;/extensions/third-party/</code> 文件夹，会导致插件识别失效。
       </div>
-      <button id="ext-btn-clean-anomaly" style="padding: 4px 10px; font-size: 0.78rem; background: #f38ba8; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">一键清理残留 third-party</button>
+      <button id="ext-btn-clean-anomaly" class="menu_button" style="padding: 4px 10px; font-size: 0.78rem; background: #f38ba8; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">一键清理残留 third-party</button>
     </div>` : ''}
 
     <div id="ext-list-container" style="padding: 12px 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px;">
@@ -355,9 +356,13 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     </div>
 
     <div style="padding: 14px 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: flex-end; gap: 10px; align-items: center;">
-      <button id="ext-btn-cancel" style="padding: 8px 16px; background: #313244; border: 1px solid #45475a; color: #cdd6f4; border-radius: 6px; cursor: pointer;">暂不安装</button>
-      <button id="ext-btn-start" style="padding: 8px 20px; background: #89b4fa; border: none; color: #11111b; font-weight: bold; border-radius: 6px; cursor: pointer;">开始安装勾选项</button>
-      <button id="ext-btn-reload" style="display: none; padding: 8px 20px; background: #a6e3a1; border: none; color: #11111b; font-weight: bold; border-radius: 6px; cursor: pointer;">🔄 刷新酒馆生效</button>
+      <button id="ext-btn-cancel" class="menu_button" style="padding: 8px 16px; cursor: pointer;">暂不安装</button>
+      <button id="ext-btn-start" class="menu_button menu_button_icon" style="padding: 8px 20px; background: #89b4fa; border: none; color: #11111b; font-weight: bold; cursor: pointer;">
+        <i class="fa-solid fa-play"></i> <span>开始安装勾选项</span>
+      </button>
+      <button id="ext-btn-reload" class="menu_button menu_button_icon" style="display: none; padding: 8px 20px; background: #a6e3a1; border: none; color: #11111b; font-weight: bold; cursor: pointer;">
+        <i class="fa-solid fa-rotate"></i> <span>刷新酒馆生效</span>
+      </button>
     </div>
   `;
 
@@ -433,7 +438,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
           banner.style.background = 'rgba(166, 227, 161, 0.15)';
           banner.style.borderColor = '#a6e3a1';
           banner.style.color = '#a6e3a1';
-          banner.innerHTML = '✅ <strong>已成功清理残留 third-party 目录！</strong>';
+          banner.innerHTML = '<i class="fa-solid fa-circle-check"></i> <strong>已成功清理残留 third-party 目录！</strong>';
         } else {
           cleanAnomalyBtn.disabled = false;
           cleanAnomalyBtn.textContent = '重试清理';
@@ -490,7 +495,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       progressNum.textContent = progressText;
       progressFill.style.width = `${Math.round(((i + 1) / selected.length) * 100)}%`;
       progressStatus.textContent = `正在浅克隆: ${ext.displayName || ext.name} (${ext.url})...`;
-      statusEl.textContent = '⏳ 克隆中...';
+      statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 克隆中...';
       statusEl.style.color = '#89b4fa';
 
       try {
@@ -502,11 +507,11 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
           branch: ext.branch || 'main',
           replace: forceReplaceChk.checked,
         });
-        statusEl.textContent = '✅ 已安装';
+        statusEl.innerHTML = '<i class="fa-solid fa-circle-check" style="color: #a6e3a1;"></i> 已安装';
         statusEl.style.color = '#a6e3a1';
         successCount++;
       } catch (err) {
-        statusEl.textContent = `❌ ${err.message || '安装失败'}`;
+        statusEl.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: #f38ba8;"></i> ${err.message || '安装失败'}`;
         statusEl.style.color = '#f38ba8';
         failedItems.push(item);
         logger.error(`扩展 ${ext.name} 安装失败:`, err);
@@ -527,7 +532,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       });
       reloadBtn.style.display = 'inline-block';
     } else {
-      progressStatus.textContent = `🎉 全部 ${successCount} 个扩展安装成功！`;
+      progressStatus.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #a6e3a1;"></i> 全部 ${successCount} 个扩展安装成功！`;
       progressStatus.style.color = '#a6e3a1';
       startBtn.style.display = 'none';
       cancelBtn.style.display = 'none';
@@ -617,10 +622,37 @@ export async function incrementalMergeArchives(baseArchive, incomingArchive, { o
 }
 
 /**
- * 宿主扩展设置抽屉注入 (#extensions_settings2 / #extensions_settings)
- * @param {() => void} onOpenModal 呼出模态工作台回调
+ * 递归为容器内的所有 .inline-drawer 绑定展开与折叠交互
+ * @param {HTMLElement} root
  */
-export function mountSettingsDrawer(onOpenModal) {
+export function setupDrawerToggles(root) {
+  if (!root) return;
+  const drawers = root.querySelectorAll('.inline-drawer');
+  drawers.forEach((drawer) => {
+    const toggle = drawer.querySelector(':scope > .inline-drawer-toggle');
+    const content = drawer.querySelector(':scope > .inline-drawer-content');
+    const icon = toggle ? toggle.querySelector('.inline-drawer-icon') : null;
+    if (toggle && content && !toggle.dataset.toggleBound) {
+      toggle.dataset.toggleBound = 'true';
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = content.style.display === 'none' || getComputedStyle(content).display === 'none';
+        content.style.display = isHidden ? 'block' : 'none';
+        if (icon) {
+          icon.classList.toggle('down', !isHidden);
+          icon.classList.toggle('up', isHidden);
+        }
+      });
+    }
+  });
+}
+
+/**
+ * 宿主扩展设置抽屉注入 (#extensions_settings2 / #extensions_settings)
+ * 直接在酒馆原生设置侧栏展开工作台，无需多余模态弹窗
+ * @param {(appEl: HTMLElement) => void} [onInit] 抽屉初次挂载后初始化控制器的回调
+ */
+export function mountSettingsDrawer(onInit) {
   if (typeof document === 'undefined') return;
   const PANEL_ID = 'st-zip-converter-settings-panel';
 
@@ -632,49 +664,30 @@ export function mountSettingsDrawer(onOpenModal) {
 
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
-    panel.className = 'st-converter-ext-settings';
+    panel.className = 'st-converter-drawer-wrapper';
     panel.innerHTML = `
-      <div class="inline-drawer" style="margin-bottom: 12px;">
-        <div class="inline-drawer-toggle inline-drawer-header" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(255,255,255,0.04); border-radius: 6px;">
-          <b style="color: #f59e0b; display: flex; align-items: center; gap: 8px;">
-            <span>📦</span> 酒馆数据包互转工坊 (ST Zip Converter)
-          </b>
+      <div class="inline-drawer" id="st_zip_converter_settings" style="margin-bottom: 12px;">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b><i class="fa-solid fa-file-zipper" style="color: var(--SmartThemeQuoteColor, #f59e0b);"></i> <span data-i18n="ST Zip Converter">酒馆数据包互转工坊</span></b>
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
-        <div class="inline-drawer-content" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
-          <div style="font-size: 0.85rem; color: #a6adc8; line-height: 1.45;">
-            全能跨平台酒馆数据包互转工作站：支持在 SillyTavern、Luker、PureTavern 与 TauriTavern 之间自由转换；支持细粒度类目勾选、轻量清单模式（防 408 超时）、增量恢复与本地垃圾深度清理。
+        <div class="inline-drawer-content" style="display: none;">
+          <div class="st-converter-drawer-app" id="app">
+            ${getWorkbenchHtml({ isDrawer: true })}
           </div>
-          <button type="button" id="btn-open-st-converter-modal" class="menu_button" style="width: 100%; padding: 10px; font-weight: bold; background: #f59e0b; color: #11111b; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.92rem;">
-            <span>🚀</span> 打开数据包互转与管理工作台
-          </button>
         </div>
       </div>
     `;
 
-    const openBtn = panel.querySelector('#btn-open-st-converter-modal');
-    if (openBtn) {
-      openBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        onOpenModal();
-      });
-    }
-
-    const toggle = panel.querySelector('.inline-drawer-toggle');
-    const content = panel.querySelector('.inline-drawer-content');
-    const icon = panel.querySelector('.inline-drawer-icon');
-    if (toggle && content) {
-      toggle.addEventListener('click', () => {
-        const isHidden = content.style.display === 'none';
-        content.style.display = isHidden ? 'flex' : 'none';
-        if (icon) {
-          icon.classList.toggle('down', isHidden);
-          icon.classList.toggle('up', !isHidden);
-        }
-      });
-    }
-
     container.appendChild(panel);
+
+    // 绑定抽屉及内部子抽屉展开折叠
+    setupDrawerToggles(panel);
+
+    if (typeof onInit === 'function') {
+      const appEl = panel.querySelector('#app');
+      onInit(appEl);
+    }
   };
 
   mount();
@@ -688,11 +701,10 @@ export function mountSettingsDrawer(onOpenModal) {
 }
 
 /**
- * 宿主扩展菜单按钮注入 (SillyTavern / Luker)
- * 自动注入到魔棒菜单 (#extensionsMenu / #options)
- * @param {() => void} onOpenModal 呼出模态工作台回调
+ * 宿主扩展菜单按钮注入 (保留向下兼容)
+ * @param {() => void} [onOpen]
  */
-export function registerMenuButton(onOpenModal) {
+export function registerMenuButton(onOpen) {
   if (typeof document === 'undefined') return;
 
   const addBtn = () => {
@@ -706,12 +718,30 @@ export function registerMenuButton(onOpenModal) {
     item.id = 'st-zip-converter-menu-item';
     item.className = 'list-group-item flexify-horizontal interactable';
     item.style.cursor = 'pointer';
-    item.innerHTML = '<div class="fa-solid fa-box-archive extensionsMenuExtensionButton" style="margin-right: 8px; color: #f59e0b;"></div><span style="font-weight: 500;">📦 数据包互转工坊</span>';
+    item.innerHTML = '<i class="fa-solid fa-file-zipper extensionsMenuExtensionButton" style="margin-right: 8px; color: var(--SmartThemeQuoteColor, #f59e0b);"></i><span style="font-weight: 500;">数据包互转工坊</span>';
 
     item.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      onOpenModal();
+
+      // 展开并平滑滚动到抽屉
+      const drawer = document.getElementById('st_zip_converter_settings');
+      if (drawer) {
+        const content = drawer.querySelector(':scope > .inline-drawer-content');
+        const icon = drawer.querySelector(':scope > .inline-drawer-toggle .inline-drawer-icon');
+        if (content) {
+          content.style.display = 'block';
+          if (icon) {
+            icon.classList.remove('down');
+            icon.classList.add('up');
+          }
+        }
+        drawer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      if (typeof onOpen === 'function') {
+        onOpen();
+      }
     });
 
     menuList.appendChild(item);

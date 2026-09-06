@@ -163,13 +163,14 @@ export function createCategoryDetailList({ categoryKey, items, excludedPaths, ac
       if (isLargeHeavy) {
         const heavyBadge = document.createElement('span');
         heavyBadge.className = 'badge-large-file heavy';
-        heavyBadge.textContent = '🔥 >5MB';
+        heavyBadge.innerHTML = '<i class="fa-solid fa-fire"></i> >5MB';
         heavyBadge.title = '超大文件：请注意备份包总下载体积';
         metaWrap.appendChild(heavyBadge);
       } else if (isLargeWarn) {
         const warnBadge = document.createElement('span');
         warnBadge.className = 'badge-large-file warn';
-        warnBadge.textContent = '⚠️ >1MB';
+        warnBadge.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> >1MB';
+        warnBadge.title = '较大文件';
         metaWrap.appendChild(warnBadge);
       }
 

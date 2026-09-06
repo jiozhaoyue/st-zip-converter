@@ -66,7 +66,7 @@ export function renderSplitDeliveryModal(splitResult, { onRestoreHost } = {}) {
     <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: rgba(245, 158, 11, 0.05);">
       <div>
         <h3 style="margin: 0; font-size: 1.15rem; color: #f59e0b; display: flex; align-items: center; gap: 8px;">
-          <span>📦</span> 智能增量分卷导出完成
+          <i class="fa-solid fa-box-archive"></i> 智能增量分卷导出完成
         </h3>
         <p style="margin: 4px 0 0 0; font-size: 0.83rem; color: #a6adc8;">
           已切分为 <strong>${totalParts}</strong> 个标准独立 Zip 压缩包（共 ${totalFiles} 个文件，${formatBytes(totalBytes)}）。
@@ -77,7 +77,7 @@ export function renderSplitDeliveryModal(splitResult, { onRestoreHost } = {}) {
 
     <!-- 导入操作引导提示卡 -->
     <div style="margin: 12px 20px 0 20px; padding: 10px 14px; background: rgba(137, 180, 250, 0.1); border: 1px solid rgba(137, 180, 250, 0.3); border-radius: 6px; font-size: 0.82rem; color: #cdd6f4; line-height: 1.45;">
-      💡 <strong>云酒馆免解压增量导入指南：</strong><br>
+      <i class="fa-solid fa-lightbulb" style="color: #f59e0b; margin-right: 4px;"></i> <strong>云酒馆免解压增量导入指南：</strong><br>
       每个压缩包均为合法的独立 Zip。在目标云酒馆恢复页面中，直接按 <strong>Part 1 &rarr; Part 2 &rarr; Part 3</strong> 顺序依次上传，云酒馆原生增量合并机制将自动原地融合出完整数据，无需本地二次解压或拼接！
     </div>
 
@@ -89,9 +89,9 @@ export function renderSplitDeliveryModal(splitResult, { onRestoreHost } = {}) {
     <div style="padding: 14px 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2);">
       <span id="split-download-status" style="font-size: 0.82rem; color: #a6adc8;"></span>
       <div style="display: flex; gap: 10px;">
-        <button type="button" id="split-btn-cancel" style="padding: 8px 16px; background: #313244; border: 1px solid #45475a; color: #cdd6f4; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">完成并关闭</button>
-        <button type="button" id="split-btn-download-all" class="btn-primary" style="padding: 8px 20px; font-size: 0.88rem; font-weight: bold; cursor: pointer;">
-          📥 一键按序下载全部 (${totalParts} 卷)
+        <button type="button" id="split-btn-cancel" class="menu_button" style="padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;">完成并关闭</button>
+        <button type="button" id="split-btn-download-all" class="menu_button menu_button_icon" style="padding: 8px 20px; font-size: 0.88rem; font-weight: bold; cursor: pointer; background: #f59e0b; color: #11111b;">
+          <i class="fa-solid fa-download"></i> <span>一键按序下载全部 (${totalParts} 卷)</span>
         </button>
       </div>
     </div>
@@ -116,7 +116,7 @@ export function renderSplitDeliveryModal(splitResult, { onRestoreHost } = {}) {
         <div style="min-width: 0; flex: 1;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-weight: 600; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 0.88rem;">${part.partName}</span>
-            ${part.isOversized ? '<span style="font-size: 0.72rem; padding: 1px 6px; background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; border-radius: 4px;">⚠️ 超大单文件独占</span>' : ''}
+            ${part.isOversized ? '<span style="font-size: 0.72rem; padding: 1px 6px; background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; border-radius: 4px;"><i class="fa-solid fa-triangle-exclamation"></i> 超大单文件独占</span>' : ''}
           </div>
           <div style="font-size: 0.78rem; color: #7f849c; margin-top: 3px;">
             <span>大小: <strong style="color: #a6e3a1;">${formatBytes(part.sizeBytes)}</strong></span>
@@ -124,8 +124,8 @@ export function renderSplitDeliveryModal(splitResult, { onRestoreHost } = {}) {
           </div>
         </div>
       </div>
-      <button type="button" class="btn-secondary split-btn-single" data-idx="${idx}" style="padding: 5px 12px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
-        📥 下载本卷
+      <button type="button" class="menu_button split-btn-single" data-idx="${idx}" style="padding: 5px 12px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
+        <i class="fa-solid fa-download"></i> 下载本卷
       </button>
     `;
 
@@ -164,7 +164,7 @@ export function renderSplitDeliveryModal(splitResult, { onRestoreHost } = {}) {
       }
     }
 
-    statusEl.textContent = `🎉 全部 ${parts.length} 个分卷已开始下载！`;
+    statusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #a6e3a1;"></i> 全部 ${parts.length} 个分卷已开始下载！`;
     downloadAllBtn.disabled = false;
     downloadAllBtn.style.opacity = '1';
   });
