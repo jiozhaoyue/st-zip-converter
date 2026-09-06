@@ -127,6 +127,53 @@ export function categoryOfHubPath(hubPath) {
 }
 
 /**
+ * 判断指定路径是否属于历史备份快照或聊天备份文件
+ * 涵盖：
+ * 1. backups/ 或包含 backups/ 目录
+ * 2. chats/ 或 group chats/ 下带备份特征的文件 (_backup, backup_, .bak, (backup), [backup])
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+export function isBackupChatOrSnapshot(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  const norm = filePath.replace(/\\/g, '/');
+
+  // 1. 系统/用户级 backups 快照目录
+  if (
+    norm.startsWith('backups/')
+    || norm === 'backups'
+    || norm.includes('/backups/')
+  ) {
+    return true;
+  }
+
+  // 2. 聊天目录内的备份文件
+  const isChatPath = norm.startsWith('chats/')
+    || norm.includes('/chats/')
+    || norm.startsWith('groups/')
+    || norm.includes('/groups/')
+    || norm.startsWith('group chats/')
+    || norm.includes('/group chats/');
+
+  if (isChatPath) {
+    const filename = norm.split('/').pop() || '';
+    if (
+      /(?:^|[._\-\s])backup(?:[._\-\s]|$)/i.test(filename)
+      || /_backup/i.test(filename)
+      || /backup_/i.test(filename)
+      || /\.bak$/i.test(filename)
+      || /\.backup$/i.test(filename)
+      || /\(backup\)/i.test(filename)
+      || /\[backup\]/i.test(filename)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * 从原始 zip 条目名与所属布局识别类目
  * @param {string} entryName
  * @param {string} layout

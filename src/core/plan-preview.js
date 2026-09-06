@@ -5,7 +5,7 @@
 
 import { zipIo } from './zip-io.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
-import { CATEGORIES, CATEGORY_LABELS, categoryOfHubPath } from './inspect.js';
+import { CATEGORIES, CATEGORY_LABELS, categoryOfHubPath, isBackupChatOrSnapshot } from './inspect.js';
 import { routeSource, targetEntryPath, TARGETS, isJunkOrDevFile, EXTENSION_MODES } from './transform.js';
 import { isTavernBuiltinAsset } from './builtin-assets.js';
 
@@ -36,7 +36,7 @@ export const SPECIAL_CATEGORIES = Object.freeze({
 
 export const SPECIAL_LABELS = Object.freeze({
   [SPECIAL_CATEGORIES.CACHE]: '派生缓存 (Thumbnails & Cache)',
-  [SPECIAL_CATEGORIES.BACKUPS]: '历史备份 (Snapshot Backups)',
+  [SPECIAL_CATEGORIES.BACKUPS]: '历史备份与聊天备份 (Backups & Snapshots)',
   [SPECIAL_CATEGORIES.APP_PRIVATE]: '应用私有配置 (App Private)',
 });
 
@@ -50,7 +50,7 @@ export function classifyItemCategory(hubPath, kind) {
   if (hubPath.startsWith('thumbnails/') || hubPath.startsWith('_cache/') || hubPath.startsWith('_css/') || hubPath.startsWith('_errors/')) {
     return SPECIAL_CATEGORIES.CACHE;
   }
-  if (hubPath.startsWith('backups/') || hubPath === 'backups') {
+  if (isBackupChatOrSnapshot(hubPath)) {
     return SPECIAL_CATEGORIES.BACKUPS;
   }
   if (kind === 'tt-app-private' || kind === 'engine-dump' || hubPath.startsWith('_tauritavern/')) {
@@ -80,7 +80,7 @@ export async function generatePlan(source, target, {
   selection = {},
   excludedPaths = new Set(),
   includeCache = false,
-  includeBackups = true,
+  includeBackups = false,
   includeAppPrivate = false,
   keepAll = false,
   extensionMode = EXTENSION_MODES.FULL,
@@ -199,10 +199,10 @@ export async function generatePlan(source, target, {
         if (includeBackups || keepAll) {
           targetPath = targetEntryPath(routed.hubPath, target);
           action = targetPath === entry.fileName ? ACTIONS.COPY : ACTIONS.ROUTE;
-          reason = '用户历史备份快照';
+          reason = '备份聊天记录与历史快照';
         } else {
           action = ACTIONS.DROP;
-          reason = '用户选择不包含历史备份快照';
+          reason = '备份聊天记录与快照(默认不包含)';
         }
       } else if (category === SPECIAL_CATEGORIES.APP_PRIVATE) {
         if (target === TARGETS.TT || keepAll || includeAppPrivate) {

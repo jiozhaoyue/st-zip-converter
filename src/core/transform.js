@@ -2,7 +2,7 @@ import { NullZipWriter } from './null-writer.js';
 import { Report } from './report.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
 import { zipIo } from './zip-io.js';
-import { categoryOfHubPath } from './inspect.js';
+import { categoryOfHubPath, isBackupChatOrSnapshot } from './inspect.js';
 import { isTavernBuiltinAsset } from './builtin-assets.js';
 
 /**
@@ -34,7 +34,7 @@ const TT_THIRD_PARTY_PREFIX = 'data/extensions/third-party/';
 const TT_SOURCES_PREFIX = 'data/_tauritavern/extension-sources/';
 const TT_PRIVATE_PREFIXES = ['data/_cache/', 'data/_css/', 'data/_errors/'];
 const TT_PRIVATE_FILES = ['data/content.log', 'data/content.log.1'];
-const DERIVED_DIRS = ['thumbnails/', 'backups/', 'vectors/'];
+const DERIVED_DIRS = ['thumbnails/', 'vectors/'];
 const ENGINE_DUMP_ENTRIES = ['_engine_dump.bin', '_engine_meta.json'];
 const THIRD_PARTY_PREFIX = 'extensions/third-party/';
 const DATA_PREFIX = 'data/';
@@ -192,7 +192,7 @@ export async function convert(sourcePath, targetPath, {
   selection,
   excludedPaths,
   includeCache = false,
-  includeBackups = true,
+  includeBackups = false,
   includeAppPrivate = false,
   compressionLevel = 5,
   extensionMode = EXTENSION_MODES.FULL,
@@ -293,11 +293,11 @@ export async function convert(sourcePath, targetPath, {
         continue;
       }
 
-      // 按历史备份快照开关过滤
-      if (routed.hubPath.startsWith('backups/')) {
+      // 按历史备份快照与备份聊天记录过滤 (默认不包含)
+      if (isBackupChatOrSnapshot(routed.hubPath)) {
         if (!includeBackups && !keepAll) {
           entry.skip();
-          report.dropped(routed.hubPath, '历史备份快照(用户选择不包含)');
+          report.dropped(routed.hubPath, '备份聊天记录与快照(默认不包含)');
           continue;
         }
       }

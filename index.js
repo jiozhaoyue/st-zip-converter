@@ -27,7 +27,9 @@ import {
   loadWorkspaceState,
   clearAll,
   isStorageSupported,
+  listStoredFiles,
 } from './src/storage/db.js';
+import { generateDeltaArchive } from './src/core/delta.js';
 import { renderArchiveManager } from './src/ui/archive-manager.js';
 import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
 import {
@@ -76,6 +78,7 @@ async function main(appRoot = document.getElementById('app')) {
   let lastConvertedBlob = null;
   let isPlanning = false;
   let pendingRestoreFile = null;
+  let currentBaseZip = null; // { name: string, blob: Blob, size: number }
 
   // 实时生成文件名预览
   function updateFilenamePreview() {
@@ -208,7 +211,7 @@ async function main(appRoot = document.getElementById('app')) {
           source: currentBlob,
           target,
           options: {
-            includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : true,
+            includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : false,
             includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
             includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
             compressionLevel,
@@ -357,7 +360,7 @@ async function main(appRoot = document.getElementById('app')) {
       const target = targetSelect ? targetSelect.value : 'l';
       const selection = getSelectionState();
       const excludedPaths = getExcludedPaths();
-      const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : true;
+      const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : false;
       const includeCache = includeCacheCheck ? includeCacheCheck.checked : false;
       const includeAppPrivate = includePrivateCheck ? includePrivateCheck.checked : false;
 
@@ -452,6 +455,96 @@ async function main(appRoot = document.getElementById('app')) {
   const hostCatBoxes = document.querySelectorAll('input[name="host-cat"]');
   const hostLinkCharChatsCheck = document.getElementById('host-link-char-chats');
   const hostIncrementalCheck = document.getElementById('host-incremental-export');
+  const hostIncludeBackupsCheck = document.getElementById('host-include-backups-check');
+  const hostBaseZipSection = document.getElementById('host-base-zip-section');
+  const hostBaseZipInput = document.getElementById('host-base-zip-input');
+  const btnSelectBaseZip = document.getElementById('btn-select-base-zip');
+  const hostBaseArchiveSelect = document.getElementById('host-base-archive-select');
+  const hostBaseZipStatus = document.getElementById('host-base-zip-status');
+
+  async function refreshBaseArchiveOptions() {
+    if (!hostBaseArchiveSelect) return;
+    try {
+      const storedFiles = await listStoredFiles();
+      const currentVal = hostBaseArchiveSelect.value;
+      hostBaseArchiveSelect.innerHTML = '<option value="">或从本地历史存档选取...</option>';
+      if (storedFiles && storedFiles.length > 0) {
+        storedFiles.forEach((f) => {
+          const opt = document.createElement('option');
+          opt.value = f.id;
+          opt.textContent = `${f.name} (${formatBytes(f.size)})`;
+          hostBaseArchiveSelect.appendChild(opt);
+        });
+      }
+      if (currentVal) hostBaseArchiveSelect.value = currentVal;
+    } catch {
+      // 忽略
+    }
+  }
+
+  function updateBaseZipStatusUI() {
+    if (!hostBaseZipStatus) return;
+    if (currentBaseZip) {
+      hostBaseZipStatus.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #10b981;"></i> 已就绪基准包: <b>${currentBaseZip.name}</b> (${formatBytes(currentBaseZip.size)})`;
+      hostBaseZipStatus.style.color = 'var(--SmartThemeQuoteColor, #93c5fd)';
+    } else {
+      hostBaseZipStatus.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> 请先选择已有基准包，否则无法生成增量差量补丁';
+      hostBaseZipStatus.style.color = '#f87171';
+    }
+  }
+
+  if (hostIncrementalCheck) {
+    hostIncrementalCheck.addEventListener('change', () => {
+      const isInc = hostIncrementalCheck.checked;
+      if (hostBaseZipSection) {
+        hostBaseZipSection.style.display = isInc ? 'block' : 'none';
+      }
+      if (isInc) {
+        refreshBaseArchiveOptions();
+        updateBaseZipStatusUI();
+      }
+    });
+  }
+
+  if (btnSelectBaseZip && hostBaseZipInput) {
+    btnSelectBaseZip.addEventListener('click', () => {
+      hostBaseZipInput.click();
+    });
+
+    hostBaseZipInput.addEventListener('change', () => {
+      const file = hostBaseZipInput.files?.[0];
+      if (file) {
+        currentBaseZip = {
+          name: file.name,
+          blob: file,
+          size: file.size,
+        };
+        updateBaseZipStatusUI();
+        logger.info(`已设定外部基准 ZIP: ${file.name} (${formatBytes(file.size)})`);
+      }
+    });
+  }
+
+  if (hostBaseArchiveSelect) {
+    hostBaseArchiveSelect.addEventListener('change', async () => {
+      const id = hostBaseArchiveSelect.value;
+      if (!id) return;
+      try {
+        const fileRecord = await getFile(id);
+        if (fileRecord && fileRecord.blob) {
+          currentBaseZip = {
+            name: fileRecord.name,
+            blob: fileRecord.blob,
+            size: fileRecord.size || fileRecord.blob.size,
+          };
+          updateBaseZipStatusUI();
+          logger.info(`已从历史存档载入基准 ZIP: ${fileRecord.name}`);
+        }
+      } catch (err) {
+        logger.error('载入基准包失败:', err);
+      }
+    });
+  }
 
   function updateHostCategorySummary() {
     const summaryEl = document.getElementById('host-category-summary');
@@ -490,6 +583,17 @@ async function main(appRoot = document.getElementById('app')) {
   async function handleHostExport(targetDestination = 'download') {
     const btnDownload = document.getElementById('btn-host-export-download');
     const btnWorkspace = document.getElementById('btn-host-export-workspace');
+
+    // 检查增量导出模式是否已指定基准包
+    const isIncremental = hostIncrementalCheck ? hostIncrementalCheck.checked : false;
+    if (isIncremental && !currentBaseZip) {
+      logger.error('增量导出模式开启，必须先在外部选择一个已有基准 ZIP！');
+      alert('【增量导出提示】\n增量导出必须在外部选择一个已有 ZIP 作为基准包！\n请在面板中点击“选择本地基准 ZIP”或从历史存档中选取基准包。');
+      if (hostBaseZipSection) hostBaseZipSection.style.display = 'block';
+      updateBaseZipStatusUI();
+      return;
+    }
+
     if (btnDownload) btnDownload.disabled = true;
     if (btnWorkspace) btnWorkspace.disabled = true;
 
@@ -526,12 +630,17 @@ async function main(appRoot = document.getElementById('app')) {
       const shouldSplit = splitVal !== 'none';
       const hostPruneBuiltin = document.getElementById('host-prune-builtin');
       const pruneBuiltinAssets = hostPruneBuiltin ? hostPruneBuiltin.checked : true;
+      const hostIncludeBackups = hostIncludeBackupsCheck ? hostIncludeBackupsCheck.checked : false;
 
-      // 如果指定了跨平台直出格式 (非 native) 或启用了原生资产过滤
-      if ((selectedTarget !== 'native' && selectedTarget !== host.platform) || pruneBuiltinAssets) {
+      // 如果指定了跨平台直出格式 (非 native) 或启用了原生资产过滤 或 不包含备份聊天与快照
+      const needsTransform = (selectedTarget !== 'native' && selectedTarget !== host.platform)
+        || pruneBuiltinAssets
+        || !hostIncludeBackups;
+
+      if (needsTransform) {
         targetLayout = selectedTarget === 'native' ? host.platform : selectedTarget;
         view.setProgress(40, `数据已拉取，正在转换处理数据包 (${targetLayout.toUpperCase()})...`);
-        logger.info(`进行直出格式与资产过滤处理: ${host.platform.toUpperCase()} -> ${targetLayout.toUpperCase()}`);
+        logger.info(`进行直出格式与资产过滤处理: ${host.platform.toUpperCase()} -> ${targetLayout.toUpperCase()} (包含备份聊天: ${hostIncludeBackups})`);
 
         const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
         const { report, resultBlob } = await runConversionTask({
@@ -539,7 +648,7 @@ async function main(appRoot = document.getElementById('app')) {
           target: targetLayout,
           options: {
             selection,
-            includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : true,
+            includeBackups: hostIncludeBackups,
             includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
             includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
             compressionLevel,
@@ -555,6 +664,21 @@ async function main(appRoot = document.getElementById('app')) {
 
         finalBlob = resultBlob;
         view.renderReport(report);
+      }
+
+      // 执行外部基准增量导出比对 (生成仅包含新增与修改项的纯增量补丁包)
+      if (isIncremental && currentBaseZip) {
+        view.setProgress(88, `正在与外部基准包比对差异并生成增量补丁 (基准: ${currentBaseZip.name})...`);
+        logger.info(`启动外部基准增量比对: [${currentBaseZip.name}] vs 最新宿主数据`);
+
+        const deltaResult = await generateDeltaArchive(currentBaseZip.blob, finalBlob, {
+          baseName: currentBaseZip.name,
+          level: compressionSelect ? parseInt(compressionSelect.value, 10) : 5,
+        });
+
+        finalBlob = deltaResult.deltaBlob;
+        finalFilename = finalFilename.replace(/\.zip$/i, '') + '_delta_patch.zip';
+        logger.success(`纯增量补丁包构建成功: 新增 ${deltaResult.stats.addedCount} 项, 修改 ${deltaResult.stats.modifiedCount} 项, 保持不变 ${deltaResult.stats.unchangedCount} 项 (补丁体积: ${formatBytes(finalBlob.size)})`);
       }
 
       // 执行智能增量分卷 (若开启)
@@ -808,7 +932,7 @@ async function main(appRoot = document.getElementById('app')) {
     const target = targetSelect.value;
     const selection = getSelectionState();
     const excludedPaths = getExcludedPaths();
-    const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : true;
+    const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : false;
     const includeCache = includeCacheCheck ? includeCacheCheck.checked : false;
     const includeAppPrivate = includePrivateCheck ? includePrivateCheck.checked : false;
     const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;

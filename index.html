@@ -70,10 +70,33 @@
               <input type="checkbox" id="host-link-char-chats" checked>
               <span>角色与聊天智能联动</span>
             </label>
-            <label class="checkbox_label flex-container" title="增量导出模式：按变更状态或指定条件仅导出更新数据">
-              <input type="checkbox" id="host-incremental-export">
-              <span>增量导出模式</span>
+            <label class="checkbox_label flex-container" title="包含 backups/ 历史快照目录与各角色聊天中的历史备份文件 (默认不包含)">
+              <input type="checkbox" id="host-include-backups-check">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              <span>备份聊天记录与快照 (backups/)</span>
             </label>
+            <label class="checkbox_label flex-container" title="增量导出模式：在外部选择已有基准 ZIP，仅导出相比该基准包新增或被修改的文件">
+              <input type="checkbox" id="host-incremental-export">
+              <i class="fa-solid fa-code-compare"></i>
+              <span>增量导出模式 (基于外部基准 ZIP)</span>
+            </label>
+            <div id="host-base-zip-section" class="extension_block" style="display: none; margin-top: 2px; padding: 8px 10px; background: rgba(0,0,0,0.15); border: 1px dashed var(--SmartThemeBorderColor, rgba(255,255,255,0.2)); border-radius: 6px;">
+              <div style="font-size: 0.8rem; font-weight: bold; margin-bottom: 6px; color: var(--SmartThemeQuoteColor, #93c5fd);">
+                <i class="fa-solid fa-file-zipper"></i> 指定外部基准 ZIP 数据包 (Base Archive)
+              </div>
+              <div class="flex-container" style="gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
+                <input type="file" id="host-base-zip-input" accept=".zip" style="display: none;">
+                <button type="button" class="menu_button" id="btn-select-base-zip" style="font-size: 0.8rem; padding: 4px 10px;">
+                  <i class="fa-solid fa-folder-open"></i> 选择本地基准 ZIP
+                </button>
+                <select id="host-base-archive-select" class="text_pole" style="font-size: 0.8rem; padding: 3px 8px; max-width: 220px;">
+                  <option value="">或从本地历史存档选取...</option>
+                </select>
+              </div>
+              <div id="host-base-zip-status" style="font-size: 0.78rem; color: #f87171;">
+                <i class="fa-solid fa-triangle-exclamation"></i> 请先选择已有基准包，否则无法生成增量差量补丁
+              </div>
+            </div>
             <label class="checkbox_label flex-container" title="自动过滤酒馆原生默认背景图、默认主题等静态资源，仅打包用户个人导入的增量资产">
               <input type="checkbox" id="host-prune-builtin" checked>
               <span>剔除酒馆原生重复资产</span>
@@ -271,9 +294,10 @@
             </div>
 
             <div class="flex-container flexFlowColumn" style="gap: 6px; margin-bottom: 10px;">
-              <label class="checkbox_label flex-container" title="包含 backups/ 历史快照备份包">
-                <input type="checkbox" id="include-backups-check" checked>
-                <span>历史备份 (backups/)</span>
+              <label class="checkbox_label flex-container" title="包含 backups/ 历史快照目录与各角色聊天中的备份文件 (默认不包含)">
+                <input type="checkbox" id="include-backups-check">
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                <span>备份聊天记录与快照 (backups/)</span>
               </label>
               <label class="checkbox_label flex-container" title="包含缩略图与派生缓存 (thumbnails/, _cache/)">
                 <input type="checkbox" id="include-cache-check">
