@@ -471,3 +471,25 @@
 - 跟踪社区在不同云酒馆与本地酒馆实例环境中的增量导出与浅克隆使用体验
 - 持续完善自动化测试与多语言国际化支持
 
+
+
+## Session 15: 宿主识别修复与Luker UI异常根治(host-detect)
+<!-- trellis-session: v=2 fp=1776e6b6df547ff2 -->
+
+**Date**: 2026-09-07
+**Task**: 宿主识别修复与Luker UI异常根治(host-detect)
+**Branch**: `main`
+
+### Summary
+
+detectHost改为lukerContext优先协议(实测Luker同时暴露SillyTavern与lukerContext,旧信号全死);新增/version服务端校验与导出包形状软校验;ST宿主全量拉取+插件内selection过滤,Luker透传;根治Luker UI异常:style.css全局选择器(:root/*/body/scrollbar)污染宿主页面被实测证实并作用域化修复,Luker真机零污染+独立模式完好;118测试全绿;4组commit推送
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ffaa110` | chore(task): add workstation-overhaul parent task and child task artifacts (host-detect done, perf/ui planned) |
+
+### Status
+
+[OK] **Completed**

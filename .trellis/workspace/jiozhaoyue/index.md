@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 14
-- **Last Active**: 2026-09-06
+- **Total Sessions**: 15
+- **Last Active**: 2026-09-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~470 | Active |
+| `journal-1.md` | ~495 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-09-07 | 宿主识别修复与Luker UI异常根治(host-detect) | `ffaa110` | `main` |
 | 14 | 2026-09-06 | 100% 酒馆原生抽屉展开 UI、全站 0 Emoji 矢量化、外部基准增量导出与备份聊天过滤 | `adf9bab`, `0212345` | `main` |
 | 13 | 2026-09-06 | 智能独立分包、扩展轻量清单防408与Git浅层精简架构 | `0135650`, `c166524` | `main` |
 | 12 | 2026-09-06 | 开源发布就绪：安全审计加固、开源合规与多平台部署体系构建 | `6c1664d`, `4e9e859`, `cfbacef` | `main` |
