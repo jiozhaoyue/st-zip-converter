@@ -1,10 +1,11 @@
 /**
- * 工作区用量看板 (Usage Dashboard)
- * 可视化展示：IndexedDB 配额条 + 按来源分组的包统计 + 包体积列表。
+ * 块一顶部两行配额条：
+ * ①插件 IndexedDB 用量/配额（getStorageUsage + getStorageQuota）
+ * ②页面整体存储 usage/quota（navigator.storage.estimate，与 Luker 原生存储查看同源；
+ *   不支持 estimate 的环境整行隐藏）
  */
 
-import { getStorageUsage, getStorageQuota, listStoredFiles } from '../storage/db.js';
-import { ORIGINS } from '../storage/db.js';
+import { getStorageUsage, getStorageQuota } from '../storage/db.js';
 
 function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -13,91 +14,49 @@ function formatBytes(bytes) {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-const ORIGIN_LABELS = {
-  [ORIGINS.UPLOAD]: { text: '上传', cls: 'origin-upload' },
-  [ORIGINS.HOST_EXPORT]: { text: '宿主导出', cls: 'origin-host' },
-  [ORIGINS.CONVERTED]: { text: '转换生成', cls: 'origin-converted' },
-  [ORIGINS.DELTA]: { text: '增量补丁', cls: 'origin-delta' },
-  [ORIGINS.SPLIT_PART]: { text: '分卷', cls: 'origin-split' },
-};
-
 /**
- * 渲染用量看板（每次数据变化后重入调用）
+ * 渲染两行配额条（每次数据变化后重入调用）
  * @param {object} params
  * @param {HTMLElement} params.containerEl
  */
 export async function renderUsageDashboard({ containerEl }) {
   if (!containerEl) return;
+  containerEl.innerHTML = '';
 
   const [usage, quota] = await Promise.all([getStorageUsage(), getStorageQuota()]);
 
-  containerEl.innerHTML = '';
-
-  // 配额条
-  const quotaSection = document.createElement('div');
-  quotaSection.className = 'usage-quota-section';
-  const pct = quota.quota > 0 ? Math.min(100, (quota.usage / quota.quota) * 100) : 0;
-  quotaSection.innerHTML = `
+  // 行① 插件 IndexedDB
+  const pluginSection = document.createElement('div');
+  pluginSection.className = 'usage-quota-section';
+  const pluginPct = quota.quota > 0 ? Math.min(100, (usage.totalBytes / quota.quota) * 100) : 0;
+  pluginSection.innerHTML = `
     <div class="usage-quota-label">
-      <span><i class="fa-solid fa-database"></i> IndexedDB 用量</span>
-      <span>${formatBytes(quota.usage)}${quota.quota > 0 ? ` / ${formatBytes(quota.quota)} (${pct.toFixed(1)}%)` : ''}</span>
+      <span><i class="fa-solid fa-database"></i> 插件 IndexedDB (${usage.count} 包)</span>
+      <span>${formatBytes(usage.totalBytes)}${quota.quota > 0 ? ` / ${formatBytes(quota.quota)} (${pluginPct.toFixed(1)}%)` : ''}</span>
     </div>
-    <div class="usage-quota-bar"><div class="usage-quota-fill" style="width:${pct.toFixed(1)}%"></div></div>
+    <div class="usage-quota-bar"><div class="usage-quota-fill" style="width:${pluginPct.toFixed(1)}%"></div></div>
   `;
-  containerEl.appendChild(quotaSection);
+  containerEl.appendChild(pluginSection);
 
-  // 按来源分组统计
-  const originSection = document.createElement('div');
-  originSection.className = 'usage-origin-section';
-  const originEntries = Object.entries(usage.byOrigin || {});
-  if (originEntries.length > 0) {
-    const chips = document.createElement('div');
-    chips.className = 'usage-origin-chips';
-    for (const [origin, stat] of originEntries) {
-      const label = ORIGIN_LABELS[origin] || { text: origin, cls: 'origin-upload' };
-      const chip = document.createElement('span');
-      chip.className = `usage-origin-chip ${label.cls}`;
-      chip.innerHTML = `<span class="origin-badge ${label.cls}">${label.text}</span> ${stat.count} 个 · ${formatBytes(stat.totalBytes)}`;
-      chips.appendChild(chip);
+  // 行② 页面整体存储（不支持 estimate 的环境整行隐藏）
+  if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.estimate) {
+    try {
+      const est = await navigator.storage.estimate();
+      if (est && est.quota > 0) {
+        const pct = Math.min(100, ((est.usage || 0) / est.quota) * 100);
+        const pageSection = document.createElement('div');
+        pageSection.className = 'usage-quota-section';
+        pageSection.innerHTML = `
+          <div class="usage-quota-label">
+            <span><i class="fa-solid fa-hard-drive"></i> 页面整体存储</span>
+            <span>${formatBytes(est.usage || 0)} / ${formatBytes(est.quota)} (${pct.toFixed(1)}%)</span>
+          </div>
+          <div class="usage-quota-bar"><div class="usage-quota-fill usage-quota-fill-page" style="width:${pct.toFixed(1)}%"></div></div>
+        `;
+        containerEl.appendChild(pageSection);
+      }
+    } catch {
+      // estimate 失败静默跳过第二行
     }
-    originSection.appendChild(chips);
-  } else {
-    const empty = document.createElement('div');
-    empty.className = 'usage-empty';
-    empty.textContent = '工作区暂无数据包';
-    originSection.appendChild(empty);
   }
-  containerEl.appendChild(originSection);
-}
-
-/**
- * 渲染包体积列表（名字/大小/来源/时间，按体积降序）
- * @param {object} params
- * @param {HTMLElement} params.containerEl
- */
-export async function renderPackageSizeList({ containerEl }) {
-  if (!containerEl) return;
-  const files = await listStoredFiles();
-  const sorted = [...files].sort((a, b) => (b.size || 0) - (a.size || 0));
-
-  containerEl.innerHTML = '';
-  if (sorted.length === 0) {
-    containerEl.innerHTML = '<div class="usage-empty">暂无包体积数据</div>';
-    return;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'usage-size-list';
-  for (const file of sorted) {
-    const label = ORIGIN_LABELS[file.origin] || { text: file.origin, cls: 'origin-upload' };
-    const row = document.createElement('div');
-    row.className = 'usage-size-row';
-    row.innerHTML = `
-      <span class="usage-size-name" title="${file.name}">${file.name}</span>
-      <span class="origin-badge ${label.cls}">${label.text}</span>
-      <span class="usage-size-bytes">${formatBytes(file.size)}</span>
-    `;
-    list.appendChild(row);
-  }
-  containerEl.appendChild(list);
 }
