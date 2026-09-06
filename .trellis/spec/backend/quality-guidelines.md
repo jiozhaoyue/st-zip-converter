@@ -69,3 +69,16 @@ After code changes:
 - [ ] Run `npm test` and verify zero failures.
 - [ ] Check peak memory consumption with `--json`.
 - [ ] Verify `node test/verify-secrets.mjs` exits 0.
+
+---
+
+## Zip IO Concurrency Mandate (2026-09-07)
+
+**zip-io.js 写入管线禁止重新引入串行队列。** 实测结论（见 tasks/archive/2026-09/09-07-perf-overhaul/research/）：
+
+1. vendor zip.js `ZipWriter.add` 原生支持并发调用（内部自带互斥），并发 50 条目字节级校验一致。旧的 `queue.then(task)` 串行链是"一个一个文件处理"的根因（浏览器实测 2.8x 提速来自移除它）。
+2. 并发度 = `min(8, max(2, hardwareConcurrency))`，`waitForSlot()` 背压：在飞条目达上限时 `Promise.race(inflight)` 等任一完成。
+3. 首条目保序：第一个 add/addLazy 独占写入完成后才放开并发（恢复端 manifest 处理依赖包首条目）。
+4. **禁止预压缩注入**：手动 `deflate-raw` 后以 `compressionMethod:8 + level:0` 传入会产生损坏包；vendor 写端 `passThrough` 需要调用方提供 `uncompressedSize`+`crc32`，内存场景不值得。
+5. 大 Blob IndexedDB 写入（≥16MB）走 `saveFile` 内部串行队列，与转换热路径解耦。
+6. Node/Vitest 环境 Worker 不生效（基准不反映浏览器收益），性能验证必须用 Playwright 浏览器基准。
