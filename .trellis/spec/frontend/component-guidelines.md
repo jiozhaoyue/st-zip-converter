@@ -129,3 +129,16 @@ All artifacts (host exports, conversions, delta patches, split volumes) flow int
 - `stash()` writes to files store with the item's `origin` so the unified workspace list can badge it;
 - Split-volume paths must enqueue with `origin: 'split-part'` (NOT call `saveFile` directly);
 - `renderSplitDeliveryModal` is retained for compatibility but no longer wired to conversion flows.
+
+### Escalation (2026-09-07 第二次诊断): bare native-class selectors are ALSO pollution
+
+The CSS Scoping Mandate above was **incomplete** and the omission shipped to a real instance.
+Beyond `:root`/`body`/`*`/scrollbar rules, **bare tavern-native class selectors** pollute the host too:
+`.menu_button` (39 native rules), `.inline-drawer` (13), `.text_pole`, `.checkbox_label`, `.flex-container`, `.flex1`, `.badge`...
+A plugin `<style>` with unscoped `.menu_button { ... }` restyles EVERY button of the host UI
+(top bar included) — verified live: 5 computed-style diffs on host chrome from injected plugin CSS.
+
+**Absolute rule**: EVERY class selector in `style.css` must be prefixed with
+`.app-container ` (standalone ancestor) or `.st-converter-drawer-app ` (plugin mount).
+No exceptions for "plugin-only-looking" classes — the host uses the same design system.
+CI check: `grep '^\.' style.css | grep -vc 'app-container\|st-converter-drawer'` must print `0`.
