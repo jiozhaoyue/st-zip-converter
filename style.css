@@ -7,46 +7,34 @@
 .app-container,
 .st-converter-drawer-app {
   /* ==========================================================================
-     SillyTavern 酒馆原生变量继承体系 (带高保真酒馆独立回退)
+     宿主主题变量继承体系
+     插件模式：--SmartTheme* 变量直接继承宿主主题（严禁在此硬编码覆盖，09-07 教训）。
+     独立 Web 模式：宿主变量未定义时走回退值（中性深色，无品牌化金色）。
      ========================================================================== */
-  --SmartThemeBodyColor: #0d1017;
-  --SmartThemeChatTintColor: #161b26;
-  --SmartThemeBorderColor: rgba(245, 158, 11, 0.22);
-  --SmartThemeQuoteColor: #f59e0b;
-  --SmartThemeEmColor: #fbbf24;
 
   /* 基础背景层 */
-  --bg-primary: var(--SmartThemeBodyColor, #0d1017);
-  --bg-secondary: var(--SmartThemeChatTintColor, #161b26);
-  --bg-card: rgba(22, 27, 39, 0.84);
-  --bg-card-hover: rgba(30, 37, 54, 0.94);
-  --bg-input: rgba(13, 16, 24, 0.78);
-  --bg-input-focus: rgba(18, 23, 34, 0.95);
-
-  /* 酒馆标志性温暖琥珀金与微光色彩系统 */
-  --tavern-gold: #f59e0b;
-  --tavern-gold-hover: #d97706;
-  --tavern-gold-light: #fef08a;
-  --tavern-amber: #b45309;
-  --tavern-amber-dark: #78350f;
-  --tavern-glow: rgba(245, 158, 11, 0.25);
-  --tavern-glow-strong: rgba(245, 158, 11, 0.45);
-  --tavern-parchment: #fef3c7;
+  --bg-primary: var(--SmartThemeBodyColor, #14161c);
+  --bg-secondary: var(--SmartThemeChatTintColor, #1b1e27);
+  --bg-card: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+  --bg-card-hover: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+  --bg-input: color-mix(in srgb, var(--bg-primary) 80%, transparent);
+  --bg-input-focus: color-mix(in srgb, var(--bg-primary) 92%, transparent);
 
   /* 边框体系 */
-  --border-color: var(--SmartThemeBorderColor, rgba(245, 158, 11, 0.22));
-  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-color: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.14));
+  --border-subtle: color-mix(in srgb, var(--border-color) 50%, transparent);
   --border-focus: var(--SmartThemeQuoteColor, #f59e0b);
 
-  /* 文本色彩 */
-  --text-main: #f8fafc;
-  --text-gold: #fef3c7;
-  --text-muted: #94a3b8;
-  --text-sub: #64748b;
+  /* 文本色彩（全部跟随主题，无写死色） */
+  --text-main: var(--SmartThemeBodyColorInverted, #f2f4f8);
+  --text-em: var(--SmartThemeEmColor, #f5c542);
+  --text-gold: var(--text-em);
+  --text-muted: color-mix(in srgb, var(--text-main) 62%, transparent);
+  --text-sub: color-mix(in srgb, var(--text-main) 42%, transparent);
 
-  /* 核心强调色与各酒馆平台专属标识色 */
-  --accent: var(--tavern-gold);
-  --accent-hover: var(--tavern-gold-hover);
+  /* 强调色与各平台标识色 */
+  --accent: var(--SmartThemeQuoteColor, #f59e0b);
+  --accent-hover: color-mix(in srgb, var(--accent) 80%, #fff);
   --accent-st: #38bdf8;
   --accent-luker: #c084fc;
   --accent-tt: #fb7185;
@@ -64,9 +52,9 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
-  /* 深度阴影 */
-  --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.55), 0 0 15px -3px rgba(245, 158, 11, 0.08);
-  --shadow-glow: 0 0 14px rgba(245, 158, 11, 0.25);
+  /* 阴影 */
+  --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 14px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .app-container *,
@@ -81,7 +69,7 @@ body:has(> .app-container) {
   font-family: var(--font-sans);
   background: var(--bg-primary);
   background-image:
-    radial-gradient(ellipse at 50% 0%, rgba(245, 158, 11, 0.07) 0%, transparent 65%),
+    radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--accent) 7%, transparent) 0%, transparent 65%),
     radial-gradient(circle at 100% 100%, rgba(192, 132, 252, 0.04) 0%, transparent 50%),
     linear-gradient(180deg, rgba(13, 16, 23, 0.98) 0%, rgba(9, 11, 16, 1) 100%);
   background-attachment: fixed;
@@ -91,7 +79,7 @@ body:has(> .app-container) {
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  accent-color: var(--tavern-gold);
+  accent-color: var(--accent);
 }
 
 /* 插件模式：容器自身承接独立模式 body 的排版职责（背景/字体/行高），
@@ -100,7 +88,7 @@ body:has(> .app-container) {
   font-family: var(--font-sans);
   color: var(--text-main);
   line-height: 1.5;
-  accent-color: var(--tavern-gold);
+  accent-color: var(--accent);
 }
 
 /* 自定义酒馆复古滚动条：仅作用于插件容器内部
@@ -118,7 +106,7 @@ body:has(> .app-container) {
 
 .app-container ::-webkit-scrollbar-thumb,
 .st-converter-drawer-app ::-webkit-scrollbar-thumb {
-  background: rgba(245, 158, 11, 0.25);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: 4px;
   border: 1px solid transparent;
   background-clip: padding-box;
@@ -126,7 +114,7 @@ body:has(> .app-container) {
 
 .app-container ::-webkit-scrollbar-thumb:hover,
 .st-converter-drawer-app ::-webkit-scrollbar-thumb:hover {
-  background: rgba(245, 158, 11, 0.55);
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .app-container {
@@ -162,7 +150,7 @@ body:has(> .app-container) {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--tavern-gold), transparent);
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
   pointer-events: none;
 }
 
@@ -173,7 +161,7 @@ body:has(> .app-container) {
   display: flex;
   align-items: center;
   gap: 8px;
-  text-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .app-container .title-group p, .st-converter-drawer-app .title-group p {
@@ -186,9 +174,9 @@ body:has(> .app-container) {
   font-size: 0.7rem;
   font-weight: 600;
   padding: 2px 7px;
-  background: rgba(245, 158, 11, 0.15);
-  color: var(--tavern-gold);
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 9999px;
   vertical-align: middle;
   margin-left: 4px;
@@ -205,10 +193,10 @@ body:has(> .app-container) {
   font-weight: 600;
   padding: 4px 11px;
   border-radius: 9999px;
-  background: rgba(245, 158, 11, 0.12);
-  color: var(--tavern-gold);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.1);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .app-container .badge-user, .st-converter-drawer-app .badge-user {
@@ -240,7 +228,7 @@ body:has(> .app-container) {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 40%, transparent), transparent);
   pointer-events: none;
 }
 
@@ -276,7 +264,7 @@ body:has(> .app-container) {
 
 .app-container .host-category-box, .st-converter-drawer-app .host-category-box {
   background: rgba(12, 15, 22, 0.6);
-  border: 1px solid rgba(245, 158, 11, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-bottom: 12px;
@@ -295,7 +283,7 @@ body:has(> .app-container) {
   gap: 6px;
   padding: 6px 10px;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(245, 158, 11, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: var(--radius-sm);
   font-size: 0.8rem;
   color: var(--text-main);
@@ -305,13 +293,13 @@ body:has(> .app-container) {
 }
 
 .app-container .category-chip-label:hover, .st-converter-drawer-app .category-chip-label:hover {
-  background: rgba(245, 158, 11, 0.1);
-  border-color: var(--tavern-gold);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: var(--accent);
   color: var(--text-gold);
 }
 
 .app-container .category-chip-label input[type="checkbox"], .st-converter-drawer-app .category-chip-label input[type="checkbox"] {
-  accent-color: var(--tavern-gold);
+  accent-color: var(--accent);
 }
 
 .app-container .host-options-row, .st-converter-drawer-app .host-options-row {
@@ -327,7 +315,7 @@ body:has(> .app-container) {
   flex-direction: column;
   gap: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(245, 158, 11, 0.18);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .app-container .host-export-top-line, .st-converter-drawer-app .host-export-top-line {
@@ -348,7 +336,7 @@ body:has(> .app-container) {
    Dropzone 上传拖拽区 (Tavern Scroll / Inventory Chest)
    ========================================================================== */
 .app-container .dropzone, .st-converter-drawer-app .dropzone {
-  border: 2px dashed rgba(245, 158, 11, 0.35);
+  border: 2px dashed color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: var(--radius-md);
   padding: 30px 16px;
   text-align: center;
@@ -360,9 +348,9 @@ body:has(> .app-container) {
 
 .app-container .dropzone.dragover, .st-converter-drawer-app .dropzone.dragover,
 .app-container .dropzone:hover, .st-converter-drawer-app .dropzone:hover {
-  border-color: var(--tavern-gold);
-  background: rgba(245, 158, 11, 0.08);
-  box-shadow: 0 0 20px rgba(245, 158, 11, 0.2), inset 0 0 30px rgba(245, 158, 11, 0.05);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 20%, transparent), inset 0 0 30px color-mix(in srgb, var(--accent) 5%, transparent);
   transform: scale(1.002);
 }
 
@@ -434,8 +422,8 @@ body:has(> .app-container) {
 
 .app-container .btn-chip, .st-converter-drawer-app .btn-chip {
   background: rgba(28, 34, 50, 0.85);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #fbbf24;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--text-em, #fbbf24);
   padding: 2px 9px;
   border-radius: 9999px;
   font-size: 0.72rem;
@@ -447,10 +435,10 @@ body:has(> .app-container) {
 }
 
 .app-container .btn-chip:hover, .st-converter-drawer-app .btn-chip:hover {
-  background: rgba(245, 158, 11, 0.22);
-  border-color: var(--tavern-gold);
-  color: #fef08a;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.35);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: var(--accent);
+  color: var(--text-em, #fef08a);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
   transform: translateY(-1px);
 }
 
@@ -465,21 +453,21 @@ body:has(> .app-container) {
   gap: 8px;
   padding: 6px 12px;
   background: rgba(10, 13, 19, 0.7);
-  border: 1px solid rgba(245, 158, 11, 0.22);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: var(--radius-sm);
   font-size: 0.8rem;
   margin-top: 3px;
 }
 
 .app-container .preview-label, .st-converter-drawer-app .preview-label {
-  color: var(--tavern-gold);
+  color: var(--accent);
   font-weight: 600;
   flex-shrink: 0;
   font-size: 0.78rem;
 }
 
 .app-container .preview-code, .st-converter-drawer-app .preview-code {
-  color: #fef08a;
+  color: var(--text-em, #fef08a);
   font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -495,7 +483,7 @@ body:has(> .app-container) {
 
 .app-container .text-input, .st-converter-drawer-app .text-input {
   background: var(--bg-input);
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   color: var(--text-main);
   padding: 7px 11px;
   border-radius: var(--radius-sm);
@@ -508,13 +496,13 @@ body:has(> .app-container) {
 
 .app-container .text-input:focus, .st-converter-drawer-app .text-input:focus {
   background: var(--bg-input-focus);
-  border-color: var(--tavern-gold);
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .app-container .select-input, .st-converter-drawer-app .select-input {
   background: var(--bg-input);
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   color: var(--text-main);
   padding: 6px 12px;
   border-radius: var(--radius-sm);
@@ -526,8 +514,8 @@ body:has(> .app-container) {
 
 .app-container .select-input:focus, .st-converter-drawer-app .select-input:focus {
   background: var(--bg-input-focus);
-  border-color: var(--tavern-gold);
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .app-container .checkbox-group, .st-converter-drawer-app .checkbox-group {
@@ -541,7 +529,7 @@ body:has(> .app-container) {
 }
 
 .app-container .checkbox-group input[type="checkbox"], .st-converter-drawer-app .checkbox-group input[type="checkbox"] {
-  accent-color: var(--tavern-gold);
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
@@ -550,19 +538,19 @@ body:has(> .app-container) {
 }
 
 /* ==========================================================================
-   按钮系统 (SillyTavern Amber/Gold Buttons)
+   按钮系统（对比安全：强调色半透明底 + 强调色文字，跟随主题）
    ========================================================================== */
-.app-container .btn-primary, .st-converter-drawer-app .btn-primary {
-  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
-  color: #fff;
-  border: 1px solid rgba(251, 191, 36, 0.45);
+.app-container .btn-primary, .st-converter-drawer-app .btn-primary,
+.app-container .btn-accent, .st-converter-drawer-app .btn-accent {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-md);
   padding: 10px 18px;
   font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 2px 10px rgba(217, 119, 6, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 20%, transparent);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   display: inline-flex;
   align-items: center;
@@ -570,29 +558,39 @@ body:has(> .app-container) {
   gap: 6px;
 }
 
-.app-container .btn-primary:hover:not(:disabled), .st-converter-drawer-app .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  border-color: rgba(251, 191, 36, 0.7);
-  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+.app-container .btn-primary:hover:not(:disabled), .st-converter-drawer-app .btn-primary:hover:not(:disabled),
+.app-container .btn-accent:hover:not(:disabled), .st-converter-drawer-app .btn-accent:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 35%, transparent);
   transform: translateY(-1px);
 }
 
-.app-container .btn-primary:active:not(:disabled), .st-converter-drawer-app .btn-primary:active:not(:disabled) {
+.app-container .btn-primary:active:not(:disabled), .st-converter-drawer-app .btn-primary:active:not(:disabled),
+.app-container .btn-accent:active:not(:disabled), .st-converter-drawer-app .btn-accent:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 1px 4px rgba(217, 119, 6, 0.4);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-.app-container .btn-primary:disabled, .st-converter-drawer-app .btn-primary:disabled {
+.app-container .btn-primary:disabled, .st-converter-drawer-app .btn-primary:disabled,
+.app-container .btn-accent:disabled, .st-converter-drawer-app .btn-accent:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   filter: grayscale(0.6);
   box-shadow: none;
 }
 
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .app-container .btn-primary, .st-converter-drawer-app .btn-primary,
+  .app-container .btn-accent, .st-converter-drawer-app .btn-accent {
+    background: rgba(245, 158, 11, 0.24);
+    color: #f59e0b;
+  }
+}
+
 .app-container .btn-secondary, .st-converter-drawer-app .btn-secondary {
   background: rgba(26, 32, 48, 0.85);
   color: var(--text-gold);
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: var(--radius-md);
   padding: 9px 16px;
   font-size: 0.85rem;
@@ -607,9 +605,9 @@ body:has(> .app-container) {
 
 .app-container .btn-secondary:hover:not(:disabled), .st-converter-drawer-app .btn-secondary:hover:not(:disabled) {
   background: rgba(36, 44, 66, 0.95);
-  border-color: var(--tavern-gold);
+  border-color: var(--accent);
   color: #fff;
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
   transform: translateY(-1px);
 }
 
@@ -635,15 +633,15 @@ body:has(> .app-container) {
   height: 6px;
   background: rgba(13, 16, 24, 0.8);
   border-radius: 9999px;
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   overflow: hidden;
 }
 
 .app-container .progress-bar-fill, .st-converter-drawer-app .progress-bar-fill {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #b45309, #f59e0b, #fbbf24);
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
   transition: width 0.3s ease;
 }
 
@@ -678,7 +676,7 @@ body:has(> .app-container) {
 
 .app-container .module-item, .st-converter-drawer-app .module-item {
   background: rgba(14, 18, 26, 0.75);
-  border: 1px solid rgba(245, 158, 11, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   text-align: center;
@@ -686,7 +684,7 @@ body:has(> .app-container) {
 }
 
 .app-container .module-item:hover, .st-converter-drawer-app .module-item:hover {
-  border-color: rgba(245, 158, 11, 0.4);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   background: rgba(20, 26, 38, 0.85);
 }
 
@@ -694,7 +692,7 @@ body:has(> .app-container) {
   display: block;
   font-size: 1.15rem;
   font-weight: 700;
-  color: var(--tavern-gold);
+  color: var(--accent);
 }
 
 .app-container .module-item span.label, .st-converter-drawer-app .module-item span.label {
@@ -704,7 +702,7 @@ body:has(> .app-container) {
 
 .app-container .log-accordion, .st-converter-drawer-app .log-accordion {
   margin-top: 12px;
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
@@ -736,7 +734,7 @@ body:has(> .app-container) {
 .app-container .category-panel, .st-converter-drawer-app .category-panel {
   margin-top: 14px;
   background: rgba(14, 18, 26, 0.75);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: var(--radius-md);
   padding: 12px 14px;
 }
@@ -767,12 +765,12 @@ body:has(> .app-container) {
 
 .app-container .category-sub-summary, .st-converter-drawer-app .category-sub-summary {
   font-size: 0.75rem;
-  color: var(--tavern-gold);
-  background: rgba(245, 158, 11, 0.12);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   padding: 2px 8px;
   border-radius: 9999px;
   font-weight: 500;
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .app-container .category-actions, .st-converter-drawer-app .category-actions {
@@ -790,7 +788,7 @@ body:has(> .app-container) {
 
 .app-container .btn-tool, .st-converter-drawer-app .btn-tool {
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   color: var(--text-main);
   padding: 4px 10px;
   border-radius: var(--radius-sm);
@@ -802,10 +800,10 @@ body:has(> .app-container) {
 }
 
 .app-container .btn-tool:hover, .st-converter-drawer-app .btn-tool:hover {
-  background: rgba(245, 158, 11, 0.2);
-  border-color: var(--tavern-gold);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
   color: var(--text-gold);
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.2);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .app-container .btn-tool.btn-quick, .st-converter-drawer-app .btn-tool.btn-quick {
@@ -815,9 +813,9 @@ body:has(> .app-container) {
 }
 
 .app-container .btn-tool.btn-quick:hover, .st-converter-drawer-app .btn-tool.btn-quick:hover {
-  background: rgba(245, 158, 11, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--text-gold);
-  border-color: var(--tavern-gold);
+  border-color: var(--accent);
 }
 
 .app-container .link-option-row, .st-converter-drawer-app .link-option-row {
@@ -859,7 +857,7 @@ body:has(> .app-container) {
 
 .app-container .btn-batch-convert, .st-converter-drawer-app .btn-batch-convert {
   background: linear-gradient(135deg, rgba(217, 119, 6, 0.3) 0%, rgba(180, 83, 9, 0.4) 100%);
-  border: 1px solid var(--tavern-gold);
+  border: 1px solid var(--accent);
   color: var(--text-gold);
   padding: 3px 10px;
   border-radius: var(--radius-sm);
@@ -871,9 +869,9 @@ body:has(> .app-container) {
 }
 
 .app-container .btn-batch-convert:hover, .st-converter-drawer-app .btn-batch-convert:hover {
-  background: var(--tavern-gold);
-  color: #000;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+  background: var(--accent);
+  color: var(--bg-primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .app-container .btn-workspace-clear, .st-converter-drawer-app .btn-workspace-clear {
@@ -911,7 +909,7 @@ body:has(> .app-container) {
   flex-direction: column;
   gap: 8px;
   background: rgba(12, 15, 22, 0.65);
-  border: 1px solid rgba(245, 158, 11, 0.15);
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: var(--radius-md);
   padding: 12px;
 }
@@ -951,7 +949,7 @@ body:has(> .app-container) {
   align-items: center;
   justify-content: space-between;
   background: rgba(18, 22, 33, 0.85);
-  border: 1px solid rgba(245, 158, 11, 0.15);
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   gap: 8px;
@@ -960,14 +958,14 @@ body:has(> .app-container) {
 
 .app-container .archive-card:hover, .st-converter-drawer-app .archive-card:hover {
   background: rgba(26, 33, 50, 0.95);
-  border-color: rgba(245, 158, 11, 0.4);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
 }
 
 .app-container .archive-card.active, .st-converter-drawer-app .archive-card.active {
-  border-color: var(--tavern-gold);
-  background: rgba(245, 158, 11, 0.08);
-  box-shadow: 0 0 14px rgba(245, 158, 11, 0.2);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .app-container .archive-info, .st-converter-drawer-app .archive-info {
@@ -1019,7 +1017,7 @@ body:has(> .app-container) {
 
 .app-container .btn-archive-action, .st-converter-drawer-app .btn-archive-action {
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--text-main);
   font-size: 0.72rem;
   padding: 3px 8px;
@@ -1029,8 +1027,8 @@ body:has(> .app-container) {
 }
 
 .app-container .btn-archive-action:hover, .st-converter-drawer-app .btn-archive-action:hover {
-  background: rgba(245, 158, 11, 0.2);
-  border-color: var(--tavern-gold);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
   color: var(--text-gold);
 }
 
@@ -1058,12 +1056,12 @@ body:has(> .app-container) {
 
 .app-container .badge-active-file, .st-converter-drawer-app .badge-active-file {
   font-size: 0.7rem;
-  color: var(--tavern-gold);
-  background: rgba(245, 158, 11, 0.15);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   padding: 2px 6px;
   border-radius: 4px;
   font-weight: 600;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* ==========================================================================
@@ -1077,7 +1075,7 @@ body:has(> .app-container) {
   gap: 10px;
   padding: 8px 12px;
   background: rgba(10, 13, 19, 0.7);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: var(--radius-sm);
   margin-bottom: 12px;
   font-size: 0.76rem;
@@ -1099,7 +1097,7 @@ body:has(> .app-container) {
 }
 
 .app-container .output-estimate, .st-converter-drawer-app .output-estimate {
-  color: var(--tavern-gold);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -1116,13 +1114,13 @@ body:has(> .app-container) {
   display: flex;
   flex-direction: column;
   background: rgba(18, 22, 33, 0.7);
-  border: 1px solid rgba(245, 158, 11, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: var(--radius-sm);
   transition: all 0.15s ease;
 }
 
 .app-container .category-card:hover:not(.disabled), .st-converter-drawer-app .category-card:hover:not(.disabled) {
-  border-color: rgba(245, 158, 11, 0.4);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   background: rgba(24, 30, 45, 0.85);
 }
 
@@ -1146,7 +1144,7 @@ body:has(> .app-container) {
 
 .app-container .btn-expand-detail, .st-converter-drawer-app .btn-expand-detail {
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--text-muted);
   font-size: 0.72rem;
   padding: 2px 7px;
@@ -1156,13 +1154,13 @@ body:has(> .app-container) {
 }
 
 .app-container .btn-expand-detail:hover, .st-converter-drawer-app .btn-expand-detail:hover {
-  background: var(--tavern-gold);
-  color: #000;
-  border-color: var(--tavern-gold);
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
 }
 
 .app-container .category-detail-container, .st-converter-drawer-app .category-detail-container {
-  border-top: 1px solid rgba(245, 158, 11, 0.15);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
   background: rgba(10, 13, 19, 0.7);
   padding: 8px 12px;
   display: flex;
@@ -1179,7 +1177,7 @@ body:has(> .app-container) {
 
 .app-container .detail-sort-select, .st-converter-drawer-app .detail-sort-select {
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: 0.74rem;
@@ -1190,13 +1188,13 @@ body:has(> .app-container) {
 
 .app-container .detail-sort-select:focus, .st-converter-drawer-app .detail-sort-select:focus {
   outline: none;
-  border-color: var(--tavern-gold);
+  border-color: var(--accent);
 }
 
 .app-container .detail-search-input, .st-converter-drawer-app .detail-search-input {
   width: 100%;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: var(--radius-sm);
   color: var(--text-main);
   padding: 4px 8px;
@@ -1205,8 +1203,8 @@ body:has(> .app-container) {
 
 .app-container .detail-search-input:focus, .st-converter-drawer-app .detail-search-input:focus {
   outline: none;
-  border-color: var(--tavern-gold);
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .app-container .detail-file-list, .st-converter-drawer-app .detail-file-list {
@@ -1231,7 +1229,7 @@ body:has(> .app-container) {
 }
 
 .app-container .file-detail-row.large-warn, .st-converter-drawer-app .file-detail-row.large-warn {
-  border-left: 2px solid #fbbf24;
+  border-left: 2px solid var(--text-em, #fbbf24);
 }
 
 .app-container .file-detail-row.large-heavy, .st-converter-drawer-app .file-detail-row.large-heavy {
@@ -1240,7 +1238,7 @@ body:has(> .app-container) {
 }
 
 .app-container .file-detail-row:hover, .st-converter-drawer-app .file-detail-row:hover {
-  background: rgba(245, 158, 11, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .app-container .file-detail-row.drop, .st-converter-drawer-app .file-detail-row.drop {
@@ -1270,7 +1268,7 @@ body:has(> .app-container) {
 }
 
 .app-container .file-tgt-path, .st-converter-drawer-app .file-tgt-path {
-  color: var(--tavern-gold);
+  color: var(--accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1300,9 +1298,9 @@ body:has(> .app-container) {
 }
 
 .app-container .badge-large-file.warn, .st-converter-drawer-app .badge-large-file.warn {
-  background: rgba(245, 158, 11, 0.15);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #fbbf24;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--text-em, #fbbf24);
 }
 
 .app-container .badge-large-file.heavy, .st-converter-drawer-app .badge-large-file.heavy {
@@ -1349,7 +1347,7 @@ body:has(> .app-container) {
 
 .app-container .category-item-label input[type="checkbox"], .st-converter-drawer-app .category-item-label input[type="checkbox"] {
   cursor: pointer;
-  accent-color: var(--tavern-gold);
+  accent-color: var(--accent);
   width: 14px;
   height: 14px;
 }
@@ -1412,7 +1410,7 @@ body:has(> .app-container) {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--tavern-gold), transparent);
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
 }
 
 .app-container .modal-title, .st-converter-drawer-app .modal-title {
@@ -1441,15 +1439,15 @@ body:has(> .app-container) {
   gap: 10px;
   padding: 10px 12px;
   background: rgba(14, 18, 26, 0.7);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .app-container .radio-label:hover, .st-converter-drawer-app .radio-label:hover {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: var(--tavern-gold);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: var(--accent);
 }
 
 .app-container .radio-text, .st-converter-drawer-app .radio-text {
@@ -1559,12 +1557,12 @@ body:has(> .app-container) {
 }
 
 .app-container .badge-info, .st-converter-drawer-app .badge-info {
-  background: rgba(245, 158, 11, 0.15);
-  color: var(--tavern-gold);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
 }
 
 .app-container .badge-warn, .st-converter-drawer-app .badge-warn {
-  background: rgba(245, 158, 11, 0.2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--warning);
 }
 
@@ -1586,8 +1584,8 @@ body:has(> .app-container) {
 
 .app-container .btn-toggle-log:hover, .st-converter-drawer-app .btn-toggle-log:hover {
   color: var(--text-gold);
-  background: rgba(245, 158, 11, 0.15);
-  border-color: var(--tavern-gold);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--accent);
 }
 
 .app-container .log-console-body, .st-converter-drawer-app .log-console-body {
@@ -1622,8 +1620,8 @@ body:has(> .app-container) {
 }
 
 .app-container .btn-log-filter.active, .st-converter-drawer-app .btn-log-filter.active {
-  background: rgba(245, 158, 11, 0.2);
-  border-color: var(--tavern-gold);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
   color: var(--text-gold);
 }
 
@@ -1643,8 +1641,8 @@ body:has(> .app-container) {
 }
 
 .app-container .btn-log-action:hover, .st-converter-drawer-app .btn-log-action:hover {
-  background: rgba(245, 158, 11, 0.15);
-  border-color: var(--tavern-gold);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--accent);
   color: var(--text-gold);
 }
 
@@ -1683,7 +1681,7 @@ body:has(> .app-container) {
 }
 
 .app-container .tag-info, .st-converter-drawer-app .tag-info { color: #38bdf8; }
-.app-container .tag-warn, .st-converter-drawer-app .tag-warn { color: #fbbf24; }
+.app-container .tag-warn, .st-converter-drawer-app .tag-warn { color: var(--text-em, #fbbf24); }
 .app-container .tag-error, .st-converter-drawer-app .tag-error { color: #f87171; }
 .app-container .tag-success, .st-converter-drawer-app .tag-success { color: #34d399; }
 
@@ -1692,7 +1690,7 @@ body:has(> .app-container) {
   margin-top: 4px;
   padding: 6px 10px;
   background: rgba(0, 0, 0, 0.4);
-  border-left: 2px solid var(--tavern-gold);
+  border-left: 2px solid var(--accent);
   border-radius: 3px;
   color: #94a3b8;
   font-size: 0.72rem;
@@ -1715,7 +1713,7 @@ body:has(> .app-container) {
 }
 
 .app-container .app-footer a:hover, .st-converter-drawer-app .app-footer a:hover {
-  color: var(--tavern-gold);
+  color: var(--accent);
 }
 
 /* ==========================================================================
@@ -1892,7 +1890,7 @@ body:has(> .app-container) {
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85), 0 0 30px var(--tavern-glow);
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85), 0 0 30px var(--shadow-glow);
   background: var(--bg-primary);
   margin: 0 auto;
 }
@@ -1928,7 +1926,7 @@ body:has(> .app-container) {
 /* 抽屉体系 */
 .app-container .inline-drawer, .st-converter-drawer-app .inline-drawer {
   background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--SmartThemeBorderColor, rgba(245, 158, 11, 0.22));
+  border: 1px solid var(--SmartThemeBorderColor, color-mix(in srgb, var(--accent) 22%, transparent));
   border-radius: var(--radius-md, 8px);
   overflow: hidden;
   margin-bottom: 10px;
@@ -2012,7 +2010,7 @@ body:has(> .app-container) {
 
 .app-container .text_pole:focus, .st-converter-drawer-app .text_pole:focus {
   border-color: var(--SmartThemeQuoteColor, #f59e0b);
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 /* 酒馆原生按钮体系 */
@@ -2035,7 +2033,7 @@ body:has(> .app-container) {
 }
 
 .app-container .menu_button:hover:not(:disabled), .st-converter-drawer-app .menu_button:hover:not(:disabled) {
-  background: rgba(245, 158, 11, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: var(--SmartThemeQuoteColor, #f59e0b);
   color: var(--SmartThemeQuoteColor, #f59e0b);
 }
@@ -2170,16 +2168,16 @@ body:has(> .app-container) {
   border-radius: 8px;
   font-size: 0.75rem;
   background: var(--bg-card, rgba(22, 27, 39, 0.84));
-  border: 1px solid var(--border-color, rgba(245, 158, 11, 0.22));
+  border: 1px solid var(--border-color, color-mix(in srgb, var(--accent) 22%, transparent));
   color: var(--text-main, #f8fafc);
   cursor: pointer;
 }
 
 .app-container .archive-filter-chip.active,
 .st-converter-drawer-app .archive-filter-chip.active {
-  background: var(--tavern-glow, rgba(245, 158, 11, 0.25));
-  border-color: var(--tavern-gold, #f59e0b);
-  color: var(--tavern-gold-light, #fef08a);
+  background: var(--shadow-glow);
+  border-color: var(--accent);
+  color: var(--text-em);
 }
 
 /* 用量看板 */
@@ -2209,7 +2207,7 @@ body:has(> .app-container) {
 .app-container .usage-quota-fill,
 .st-converter-drawer-app .usage-quota-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--tavern-gold, #f59e0b), var(--tavern-gold-hover, #d97706));
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
   transition: width 0.4s ease;
 }
 
@@ -2270,7 +2268,7 @@ body:has(> .app-container) {
 
 .app-container .usage-size-bytes,
 .st-converter-drawer-app .usage-size-bytes {
-  color: var(--tavern-gold, #f59e0b);
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2289,7 +2287,7 @@ body:has(> .app-container) {
 .st-converter-drawer-app .eq-title {
   font-weight: bold;
   font-size: 0.8rem;
-  color: var(--text-gold, #fef3c7);
+  color: var(--text-gold, var(--text-em, #fef3c7));
 }
 
 .app-container .eq-batch-bar,
@@ -2304,7 +2302,7 @@ body:has(> .app-container) {
   font-size: 0.75rem;
   color: var(--text-sub, #64748b);
   padding: 8px;
-  border: 1px dashed var(--border-color, rgba(245, 158, 11, 0.22));
+  border: 1px dashed var(--border-color, color-mix(in srgb, var(--accent) 22%, transparent));
   border-radius: 8px;
   text-align: center;
 }
@@ -2379,4 +2377,151 @@ body:has(> .app-container) {
   color: var(--text-sub, #64748b);
   font-style: italic;
   padding: 2px 8px;
+}
+
+/* ==========================================================================
+   两块式布局 (two-block)：块一 状态+数据包区 / 块二 进度+选项+执行
+   ========================================================================== */
+.app-container .wb-block, .st-converter-drawer-app .wb-block {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-container .status-row, .st-converter-drawer-app .status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 进度条：块二顶部 sticky 吸顶，任务运行时始终可见 */
+.app-container .wb-block-controls .progress-container.active, .st-converter-drawer-app .wb-block-controls .progress-container.active {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--bg-card);
+  padding: 8px 4px;
+  margin: -8px -4px;
+  border-radius: var(--radius-sm);
+}
+
+.app-container .zone-card, .st-converter-drawer-app .zone-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--bg-primary) 45%, transparent);
+}
+
+.app-container .zone-title, .st-converter-drawer-app .zone-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-em);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-container .zone-hint, .st-converter-drawer-app .zone-hint {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text-sub);
+  margin-left: 6px;
+}
+
+.app-container .dropzone-inline, .st-converter-drawer-app .dropzone-inline {
+  padding: 16px 12px;
+}
+
+.app-container .eq-name-row, .st-converter-drawer-app .eq-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-container .eq-selected-bar, .st-converter-drawer-app .eq-selected-bar {
+  padding: 6px 8px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-sm);
+  align-items: center;
+}
+
+.app-container .eq-selected-label, .st-converter-drawer-app .eq-selected-label {
+  font-size: 0.76rem;
+  color: var(--text-em);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.app-container .base-zip-section, .st-converter-drawer-app .base-zip-section {
+  padding: 8px 10px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-primary) 40%, transparent);
+}
+
+.app-container .base-zip-title, .st-converter-drawer-app .base-zip-title {
+  font-size: 0.8rem;
+  font-weight: bold;
+  margin-bottom: 6px;
+  color: var(--accent);
+}
+
+.app-container .base-zip-status, .st-converter-drawer-app .base-zip-status {
+  font-size: 0.78rem;
+  color: var(--danger);
+}
+
+.app-container .ext-mode-card, .st-converter-drawer-app .ext-mode-card {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--bg-primary) 40%, transparent);
+}
+
+.app-container .ext-mode-card:has(input:checked), .st-converter-drawer-app .ext-mode-card:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.app-container .ext-mode-title, .st-converter-drawer-app .ext-mode-title {
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.app-container .ext-mode-desc, .st-converter-drawer-app .ext-mode-desc {
+  margin: 2px 0 0 0;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.app-container .btn-tpl-preset, .st-converter-drawer-app .btn-tpl-preset {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.app-container .action-row, .st-converter-drawer-app .action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 页面整体存储配额条用次级透明度区分 */
+.app-container .usage-quota-fill-page, .st-converter-drawer-app .usage-quota-fill-page {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
 }

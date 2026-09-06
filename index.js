@@ -83,36 +83,20 @@ async function main(appRoot = document.getElementById('app')) {
   let pendingRestoreFile = null;
   let currentBaseZip = null; // { name: string, blob: Blob, size: number }
 
-  // 实时生成文件名预览
+  // 实时生成文件名预览（统一目标格式选择器；native 选项经 hostLayoutCode 归一）
   function updateFilenamePreview() {
     const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
 
     const extPreviewEl = document.getElementById('filename-preview');
     if (extPreviewEl) {
       const srcName = currentFile?.name || 'archive.zip';
-      const target = targetSelect ? targetSelect.value : 'pt';
+      const rawTarget = targetSelect ? targetSelect.value : 'pt';
+      const target = rawTarget === 'native' ? hostLayoutCode(host.platform || 'st') : rawTarget;
       const handle = currentFileHandle || currentHostHandle || 'default-user';
       extPreviewEl.textContent = previewFilename(template, {
         sourceName: srcName,
         target,
         handle,
-        part: 'part1',
-        category: 'all',
-        mode: 'split',
-      });
-    }
-
-    const hostPreviewEl = document.getElementById('host-filename-preview');
-    if (hostPreviewEl) {
-      const hostTargetSelect = document.getElementById('host-target-select');
-      const selectedTarget = hostTargetSelect ? hostTargetSelect.value : 'native';
-      const effectiveTarget = selectedTarget === 'native'
-        ? hostLayoutCode(host.platform || 'st')
-        : selectedTarget;
-      hostPreviewEl.textContent = previewFilename(template, {
-        sourceName: `${host.platform || 'st'}-${currentHostHandle}`,
-        target: effectiveTarget,
-        handle: currentHostHandle,
         part: 'part1',
         category: 'all',
         mode: 'split',
@@ -915,12 +899,6 @@ async function main(appRoot = document.getElementById('app')) {
     targetSelect.addEventListener('change', () => {
       updateFilenamePreview();
       refreshPlan();
-    });
-  }
-  const hostTargetSelect = document.getElementById('host-target-select');
-  if (hostTargetSelect) {
-    hostTargetSelect.addEventListener('change', () => {
-      updateFilenamePreview();
     });
   }
   if (compressionSelect) {
