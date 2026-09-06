@@ -30,3 +30,8 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
   - **强制使用 diff 工具**: 修改任何现有文件时，**必须且只能**调用 `replace_file_content` 进行精准的局部块级替换（diff）。严禁大面积重写或无意义整文件覆盖。
   - **严禁通过命令写文件**: **绝对禁止**使用终端命令行（包括 `run_command`、PowerShell、bash、`node -e`、`python -c`、`echo`、`cat <<EOF`、重定向符 `>` / `>>`、文件系统 API 脚本等）直接修改、创建或写入项目源码、配置与数据文件。
   - **透明可审查**: 所有代码变动必须具备明确的 diff 记录，以便用户随时审查与回滚。
+
+- **禁止直接写入本地酒馆实例目录 (Strict Prohibit Modifying Local Instances Mandate)**:
+  - **严格隔离代码库与运行实例**: 一切开发、修复与单测必须且只能在代码库（`ST-zip-converter`）工作区内进行。
+  - **绝对禁止手动复制/写入本地实例**: 严禁向酒馆本地实例目录（如 `Instance/Real/Luker/...`）直接复制、同步或写入代码文件。
+  - **必须且只能通过 Git 交付与拉取**: 实例插件的安装与更新必须完全交由 Git（`git clone` / `git pull`）或酒馆原生扩展安装器进行，保持实例目录完全受控于 Git 版本管理。
