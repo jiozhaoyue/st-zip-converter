@@ -95,6 +95,15 @@ async function runTransaction(storeName, mode, operation) {
  * @param {object} [item.metadata] 附加元数据
  * @returns {Promise<string|null>}
  */
+/**
+ * 大 Blob 写入序列化队列：
+ * 大包 put 会占据 IndexedDB 事务与磁盘 IO，多个大包同时写会造成写入抖动与
+ * 事件循环长任务。所有 saveFile 请求进入单队列串行执行，调用方 promise 语义
+ * 不变（await 到自己那条写完），但避免与压缩/转换热路径同时争抢 IO。
+ */
+let writeQueue = Promise.resolve();
+const LARGE_BLOB_THRESHOLD = 16 * 1024 * 1024; // 16MB 以上视为大包，走队列
+
 export async function saveFile({ id, name, size, blob, layout, role = 'source', metadata = {} }) {
   if (!isStorageSupported()) return null;
   const fileId = id || `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -109,7 +118,16 @@ export async function saveFile({ id, name, size, blob, layout, role = 'source', 
     createdAt: Date.now(),
   };
 
-  await runTransaction(STORES.FILES, 'readwrite', (store) => store.put(record));
+  const doPut = () => runTransaction(STORES.FILES, 'readwrite', (store) => store.put(record));
+
+  if (record.size >= LARGE_BLOB_THRESHOLD) {
+    // 大包串行排队：前一个大包写完再写下一个，IO 与转换管线解耦
+    const task = writeQueue.then(doPut, doPut);
+    writeQueue = task.catch(() => {});
+    await task;
+  } else {
+    await doPut();
+  }
   return fileId;
 }
 

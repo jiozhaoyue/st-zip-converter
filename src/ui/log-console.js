@@ -242,30 +242,63 @@ export function setupLogConsole(containerElement) {
     });
   }
 
-  // 订阅日志单例事件
+  // 订阅日志单例事件（帧合并批量渲染：高吞吐日志洪泛不再逐条 DOM 追加卡 UI）
+  let pendingEntries = [];
+  let renderScheduled = false;
+  const MAX_LINES_PER_FRAME = 50;
+
+  function flushPendingEntries() {
+    renderScheduled = false;
+    if (pendingEntries.length === 0) return;
+    const batch = pendingEntries;
+    pendingEntries = [];
+
+    // 最新动态与徽标取最后一条
+    const last = batch[batch.length - 1];
+    if (latestText) {
+      latestText.textContent = last.message;
+      latestText.title = last.message;
+    }
+    updateBadges();
+
+    if (!isExpanded || !streamContainer) return;
+
+    const matched = batch.filter((e) => currentFilter === 'ALL' || currentFilter === e.level);
+    if (matched.length === 0) return;
+
+    if (emptyState && emptyState.parentElement === streamContainer) {
+      emptyState.remove();
+    }
+
+    const fragment = document.createDocumentFragment();
+    const visible = matched.slice(-MAX_LINES_PER_FRAME);
+    for (const entry of visible) {
+      fragment.appendChild(createLogLineElement(entry));
+    }
+    // 一帧内超出上限时折叠提示
+    const overflow = matched.length - visible.length;
+    if (overflow > 0) {
+      const note = document.createElement('div');
+      note.className = 'log-line log-overflow-note';
+      note.textContent = `… 本帧另有 ${overflow} 条日志已折叠（完整内容请导出日志文件）`;
+      fragment.appendChild(note);
+    }
+    streamContainer.appendChild(fragment);
+    scrollToBottom();
+  }
+
   logger.subscribe((entry) => {
     if (entry.type === 'CLEAR') {
+      pendingEntries = [];
       renderLogStream();
       updateBadges();
       return;
     }
 
-    // 更新底部单行最新动态
-    if (latestText) {
-      latestText.textContent = entry.message;
-      latestText.title = entry.message;
-    }
-    updateBadges();
-
-    // 如果控制台已展开且匹配当前过滤器，动态追加 DOM
-    if (isExpanded && streamContainer) {
-      if (currentFilter === 'ALL' || currentFilter === entry.level) {
-        if (emptyState && emptyState.parentElement === streamContainer) {
-          emptyState.remove();
-        }
-        streamContainer.appendChild(createLogLineElement(entry));
-        scrollToBottom();
-      }
+    pendingEntries.push(entry);
+    if (!renderScheduled) {
+      renderScheduled = true;
+      requestAnimationFrame(flushPendingEntries);
     }
   });
 
