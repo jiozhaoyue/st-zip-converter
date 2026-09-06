@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { detectHost, verifyHostPlatform } from '../src/ui/host-bridge.js';
+import { detectHost, verifyHostPlatform, hostLayoutCode } from '../src/ui/host-bridge.js';
 
 // 模拟浏览器全局环境的可写快照
 const g = globalThis;
@@ -165,5 +165,25 @@ describe('verifyHostPlatform 服务端校验', () => {
     mockFetch({ agent: 'Luker:2.7.0:Cohee#1207', stCompatVersion: '1.18.0', pkgVersion: '2.7.0' });
     const result = await verifyHostPlatform('st');
     expect(result.platform).toBe('luker');
+  });
+});
+
+describe('hostLayoutCode 宿主平台→转换器布局代码映射', () => {
+  it('luker → l (Luker 清单布局代码)', () => {
+    expect(hostLayoutCode('luker')).toBe('l');
+  });
+
+  it('st → st (ST 摊平布局代码，同名直通)', () => {
+    expect(hostLayoutCode('st')).toBe('st');
+  });
+
+  it('standalone 原样透传 (调用方负责兜底)', () => {
+    expect(hostLayoutCode('standalone')).toBe('standalone');
+  });
+
+  it('未知值原样透传 (不抛错，纯映射)', () => {
+    expect(hostLayoutCode('tt')).toBe('tt');
+    expect(hostLayoutCode('pt')).toBe('pt');
+    expect(hostLayoutCode('')).toBe('');
   });
 });

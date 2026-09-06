@@ -8,6 +8,20 @@ import { zipIo } from '../core/zip-io.js';
 import * as zip from '../vendor/zip.js';
 import { getWorkbenchHtml } from './workbench-template.js';
 
+/**
+ * 宿主平台代码 → 转换器布局代码映射。
+ * convert() 只接受 st|l|tt|pt (src/core/transform.js TARGETS)，
+ * 而 detectHost() 返回 st|luker|standalone —— 'luker' 必须映射为 'l'，
+ * 否则宿主导出直出路径把 'luker' 传给 convert() 会抛
+ * "convert: target 必须是 st|l|tt|pt 之一"。
+ * @param {'st'|'luker'|'standalone'|string} platform detectHost() 平台代码
+ * @returns {string} 转换器布局代码 (st|l) 或原样透传
+ */
+export function hostLayoutCode(platform) {
+  if (platform === 'luker') return 'l';
+  return platform;
+}
+
 export const FULL_SELECTION = Object.freeze({
   settings: true,
   secrets: true,

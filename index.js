@@ -43,6 +43,7 @@ import {
   registerMenuButton,
   mountSettingsDrawer,
   setupDrawerToggles,
+  hostLayoutCode,
   FULL_SELECTION,
 } from './src/ui/host-bridge.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
@@ -107,7 +108,9 @@ async function main(appRoot = document.getElementById('app')) {
     if (hostPreviewEl) {
       const hostTargetSelect = document.getElementById('host-target-select');
       const selectedTarget = hostTargetSelect ? hostTargetSelect.value : 'native';
-      const effectiveTarget = selectedTarget === 'native' ? (host.platform || 'st') : selectedTarget;
+      const effectiveTarget = selectedTarget === 'native'
+        ? hostLayoutCode(host.platform || 'st')
+        : selectedTarget;
       hostPreviewEl.textContent = previewFilename(template, {
         sourceName: `${host.platform || 'st'}-${currentHostHandle}`,
         target: effectiveTarget,
@@ -474,7 +477,7 @@ async function main(appRoot = document.getElementById('app')) {
       btnRestoreLuker.style.display = 'inline-block';
     }
     if (targetSelect) {
-      targetSelect.value = platform === 'luker' ? 'l' : 'st';
+      targetSelect.value = hostLayoutCode(platform);
     }
     registerMenuButton(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -700,9 +703,11 @@ async function main(appRoot = document.getElementById('app')) {
       });
       
       const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
-      const effectiveTarget = selectedTarget === 'native' ? host.platform : selectedTarget;
+      const effectiveTarget = selectedTarget === 'native'
+        ? hostLayoutCode(host.platform)
+        : selectedTarget;
       let finalBlob = rawBackupBlob;
-      let targetLayout = host.platform;
+      let targetLayout = effectiveTarget;
 
       // 无论原生直出还是跨格式直出，统一通过 resolveFilename 依据模板解析文件名并贯通 handle
       let finalFilename = resolveFilename(template, {
@@ -724,13 +729,15 @@ async function main(appRoot = document.getElementById('app')) {
       const hasPartialSelection = hostSupportsSelection
         ? false
         : Object.keys(FULL_SELECTION).some((k) => !selection[k]);
-      const needsTransform = (selectedTarget !== 'native' && selectedTarget !== host.platform)
+      const needsTransform = (selectedTarget !== 'native' && selectedTarget !== effectiveTarget)
         || pruneBuiltinAssets
         || !hostIncludeBackups
         || hasPartialSelection;
 
       if (needsTransform) {
-        targetLayout = selectedTarget === 'native' ? host.platform : selectedTarget;
+        targetLayout = selectedTarget === 'native'
+          ? hostLayoutCode(host.platform)
+          : selectedTarget;
         view.setProgress(40, `数据已拉取，正在转换处理数据包 (${targetLayout.toUpperCase()})...`);
         logger.info(`进行直出格式与资产过滤处理: ${host.platform.toUpperCase()} -> ${targetLayout.toUpperCase()} (包含备份聊天: ${hostIncludeBackups})`);
 
