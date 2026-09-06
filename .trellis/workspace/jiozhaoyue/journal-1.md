@@ -300,3 +300,43 @@
 
 [OK] **Completed**
 
+
+
+## Session 11: SillyTavern 酒馆风格 UI 重构与导出名占位符解析缺陷修复
+<!-- trellis-session: v=2 fp=71505269807ccff5 -->
+
+**Date**: 2026-09-06
+**Task**: SillyTavern 酒馆风格 UI 重构与导出名占位符解析缺陷修复
+**Branch**: `main`
+
+### Summary
+
+1. 深入排查并修复导出文件名占位符失效的 6 大根因（宿主原生导出绕过解析、handle 未透传、芯片点击失焦错位、缺乏实时预览、别名未识别、特殊字符转义风险）。2. 全面重构 UI 为正统 SillyTavern 酒馆风格，继承 SmartTheme 系统变量体系，采用黑曜底色、琥珀金、毛玻璃质感、羊皮纸拖拽区与勋章占位符。3. 自动化测试 (75/75 passed) 与生产打包验证全绿。
+
+### Main Changes
+
+- 修复宿主导出原生分支与跨格式分支的导出文件名模板解析断流
+- 贯通 handle 管道，从 /api/users/me 或 Zip manifest 动态提取并注入
+- 重构文件名占位符引擎，支持更多别名映射与安全防转义函数式替换
+- 药丸芯片绑定 mousedown 阻止失焦并实现智能插入与补全
+- 增加导出文件名实时响应式效果预览
+- 全面升级为正统 SillyTavern 酒馆视觉风格，绑定 SmartTheme 变量并重塑组件质感
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `971300f` | feat(ui): 全面重构为 SillyTavern 酒馆风格并彻底修复导出名占位符解析失效缺陷 |
+
+### Testing
+
+- [OK] npm test -- --run (75 passed, 2 skipped)
+- [OK] npm run build (Vite 718ms clean build)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 根据酒馆社区反馈持续迭代更多主题细节与扩展功能
