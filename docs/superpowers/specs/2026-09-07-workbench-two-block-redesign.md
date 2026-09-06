@@ -68,8 +68,8 @@ Error: convert: target 必须是 st|l|tt|pt 之一
 │ 目标格式(插件模式含"宿主原生") / 压缩率 / 智能分包      │
 │ 文件名模板 + 占位符芯片 + 预设                       │
 │ 扩展打包模式 (轻量清单/完整离线) + 保留构建配置         │
-│ 开关组: 备份快照/派生缓存/私有配置/增量差量/剔原生资产   │
-│   └ 增量差量子区(基准包选择) 仅勾选时展开              │
+│ 开关组: 备份快照/派生缓存/私有配置/增量合并/差量补丁/剔原生资产 │
+│   └ 差量补丁子区(基准包选择) 仅勾选时展开              │
 │ [从宿主拉取](仅插件)  [开始转换]                      │
 │ ── 日志控制台 (块二底部) ──                          │
 └────────────────────────────────────────────────────┘
@@ -77,6 +77,8 @@ Error: convert: target 必须是 st|l|tt|pt 之一
 
 - 原"宿主酒馆数据导出"抽屉、"外部数据包互转"抽屉外壳、报告抽屉外壳（报告内容保留，
   挂块二进度条下方）全部取消独立外壳。
+- 保留但合并：`host-link-char-chats`（宿主侧联动）与 `link-char-chats-check`（外部侧联动）
+  两个勾选框合一为 `#link-char-chats-check`，置于类目勾选组件旁，两条路径共用。
 - 转换报告（module-grid + 丢弃/脱敏/警告手风琴）由 `view.renderReport` 填充，
   DOM 保留，默认隐藏、有报告时显示，位于进度条与选项之间。
 
@@ -145,10 +147,11 @@ export function hostLayoutCode(platform) {
 - 目标格式：唯一 `#target-select`；插件模式 JS 动态插入 `<option value="native">宿主原生格式</option>`
   并默认选中；独立模式无此选项。执行时 `native` → `hostLayoutCode(host.platform)`。
 - 压缩率 / 智能分包 / 文件名模板 / 扩展模式 / 开关组：沿用现有控件 id，位置迁入统一选项区。
-- 增量差量：`#incremental-mode-check`（外部路径，已有的增量合并语义保留）与
-  `#host-incremental-export`（差量基准包子区）**合并为一个开关** `#delta-mode-check`：
-  勾选后展开基准包子区（本地文件 / 暂存列表二选一）；宿主拉取与外部转换两条路径都执行
-  `generateDeltaArchive`（通用差量，天然两路径通用）。产物名追加 `_delta_patch.zip`。
+- 差量基准模式：原 `#incremental-mode-check`（外部路径"增量合并"：包内同名文件仅更新较新者，
+  转换器内生效）与 `#host-incremental-export`（差量补丁：与外部基准 ZIP 比对仅保留新增/修改项，
+  `generateDeltaArchive` 生成 `_delta_patch.zip`）是**两种不同语义**，不合并：
+  两个开关都保留并迁入统一开关组；差量补丁开关勾选后展开基准包子区（本地文件 / 暂存列表
+  二选一），宿主拉取与外部转换两条路径都执行差量比对（`generateDeltaArchive` 本就通用）。
 - 暂存列表（新 `src/ui/stash-list.js`）：渲染 `origin in {upload, host-export}` 的源包，
   行 = 复选框 + 名称 + 来源徽标 + 布局徽标 + 大小 + [载入为源][下载][写回宿主][删除]；
   批操作条在勾选 ≥1 时出现。载入为源沿用 `onLoadFile` 语义（取选中第一个）。
