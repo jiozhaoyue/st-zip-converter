@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "插件前端规范入口"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "DOM 挂载与组件规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "工作区/待导出区状态管理规范"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "解耦复用思维指南（用户核心要求）"}
+{"file": ".trellis/tasks/09-07-workstation-overhaul/research/ui-current-state-and-target.md", "reason": "UI 现状结构与目标形态、数据模型与交互流"}
