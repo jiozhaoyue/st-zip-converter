@@ -33,6 +33,47 @@ function triggerBlobDownload(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/**
+ * 通过 File System Access API 选择位置写出文件；不支持或用户取消时回退普通下载。
+ * @param {Blob} blob
+ * @param {string} name
+ */
+export async function exportToLocation(blob, name) {
+  if (typeof window === 'undefined' || !window.showSaveFilePicker) {
+    triggerBlobDownload(blob, name);
+    return;
+  }
+  try {
+    const handle = await window.showSaveFilePicker({ suggestedName: name });
+    const writable = await handle.createWritable();
+    await blob.stream().pipeTo(writable);
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // 用户取消
+    triggerBlobDownload(blob, name); // FS Access 写入异常兜底
+  }
+}
+
+/**
+ * 供拖出 (drag-out) 使用：Chromium 支持 DownloadURL 数据类型。
+ * @param {DataTransfer} dataTransfer
+ * @param {Blob} blob
+ * @param {string} name
+ * @returns {boolean} 是否注册成功
+ */
+export function setDragOutPayload(dataTransfer, blob, name) {
+  if (typeof DataTransfer === 'undefined' || typeof URL === 'undefined') return false;
+  try {
+    const probe = new DataTransfer();
+    if (!probe.types || !probe.types.includes('DownloadURL')) return false;
+  } catch {
+    return false;
+  }
+  const url = URL.createObjectURL(blob);
+  dataTransfer.setData('DownloadURL', `application/zip:${name}:${url}`);
+  setTimeout(() => URL.revokeObjectURL(url), 120_000); // 拖放过程可能很长
+  return true;
+}
+
 const ORIGIN_LABELS = {
   [ORIGINS.UPLOAD]: { text: '上传', cls: 'origin-upload' },
   [ORIGINS.HOST_EXPORT]: { text: '宿主导出', cls: 'origin-host' },
@@ -176,6 +217,7 @@ export class ExportQueue {
  */
 export function renderExportQueue({ containerEl, queue, isHostAvailable = false, onRestoreToHost, onWorkspaceChanged }) {
   if (!containerEl) return;
+  const selected = new Set();
 
   const render = () => {
     containerEl.innerHTML = '';
@@ -187,31 +229,23 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
     if (queue.items.length > 0) {
       const batchBar = document.createElement('div');
       batchBar.className = 'eq-batch-bar';
-      const btnAll = document.createElement('button');
-      btnAll.type = 'button';
-      btnAll.className = 'menu_button btn-tool';
-      btnAll.innerHTML = '<i class="fa-solid fa-download"></i> 全部下载';
-      btnAll.addEventListener('click', () => queue.downloadAll());
-      batchBar.appendChild(btnAll);
-
-      const btnStash = document.createElement('button');
-      btnStash.type = 'button';
-      btnStash.className = 'menu_button btn-tool';
-      btnStash.innerHTML = '<i class="fa-solid fa-box-archive"></i> 全部存入工作区';
-      btnStash.addEventListener('click', async () => {
+      const mkBtn = (html, title, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'menu_button btn-tool';
+        b.innerHTML = html;
+        if (title) b.title = title;
+        b.addEventListener('click', onClick);
+        return b;
+      };
+      batchBar.appendChild(mkBtn('<i class="fa-solid fa-download"></i> 全部下载', '', () => queue.downloadAll()));
+      batchBar.appendChild(mkBtn('<i class="fa-solid fa-box-archive"></i> 全部存入工作区', '', async () => {
         await queue.stashAll();
         if (typeof onWorkspaceChanged === 'function') onWorkspaceChanged();
-      });
-      batchBar.appendChild(btnStash);
-
-      const btnClear = document.createElement('button');
-      btnClear.type = 'button';
-      btnClear.className = 'menu_button btn-tool';
-      btnClear.innerHTML = '<i class="fa-solid fa-trash"></i> 清空';
-      btnClear.addEventListener('click', () => {
+      }));
+      batchBar.appendChild(mkBtn('<i class="fa-solid fa-trash"></i> 清空', '', () => {
         if (confirm('确定清空待导出区吗？临时产物将一并丢弃。')) queue.clear();
-      });
-      batchBar.appendChild(btnClear);
+      }));
       header.appendChild(batchBar);
     }
     containerEl.appendChild(header);
@@ -219,22 +253,75 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
     if (queue.items.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'export-queue-empty';
-      empty.textContent = '暂无待导出产物：完成宿主导出或转换后，产物会出现在这里统一处置';
+      empty.textContent = '暂无待导出产物：完成宿主拉取或转换后，产物会出现在这里统一处置';
       containerEl.appendChild(empty);
       return;
     }
+
+    // 选中批操作条（勾选 ≥1 时出现）
+    const selBar = document.createElement('div');
+    selBar.className = 'eq-batch-bar eq-selected-bar';
+    const refreshSelBar = () => {
+      selBar.innerHTML = '';
+      if (selected.size === 0) return;
+      const mkSelBtn = (html, title, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'menu_button btn-tool';
+        b.innerHTML = html;
+        if (title) b.title = title;
+        b.addEventListener('click', onClick);
+        return b;
+      };
+      const label = document.createElement('span');
+      label.className = 'eq-selected-label';
+      label.textContent = `已选 ${selected.size} 项:`;
+      selBar.appendChild(label);
+      selBar.appendChild(mkSelBtn('<i class="fa-solid fa-download"></i> 下载', '', () => {
+        for (const id of selected) queue.download(id);
+      }));
+      selBar.appendChild(mkSelBtn('<i class="fa-solid fa-folder-open"></i> 选位置导出', '逐个弹出保存位置 (浏览器不支持时普通下载)', async () => {
+        for (const id of selected) {
+          const item = queue.items.find((it) => it.id === id);
+          if (item) await exportToLocation(item.blob, item.name);
+        }
+      }));
+      selBar.appendChild(mkSelBtn('<i class="fa-solid fa-box-archive"></i> 存工作区', '', async () => {
+        for (const id of selected) await queue.stash(id);
+        if (typeof onWorkspaceChanged === 'function') onWorkspaceChanged();
+      }));
+      if (isHostAvailable && typeof onRestoreToHost === 'function') {
+        selBar.appendChild(mkSelBtn('<i class="fa-solid fa-rotate"></i> 写回宿主', '', () => {
+          const first = [...selected][0];
+          const item = queue.items.find((it) => it.id === first);
+          if (item) onRestoreToHost(item);
+        }));
+      }
+      selBar.appendChild(mkSelBtn('<i class="fa-solid fa-trash"></i> 移除', '', () => {
+        for (const id of [...selected]) { selected.delete(id); queue.remove(id); }
+      }));
+    };
+    refreshSelBar();
+    containerEl.appendChild(selBar);
 
     const list = document.createElement('div');
     list.className = 'export-queue-list';
     for (const item of queue.items) {
       const row = document.createElement('div');
       row.className = 'export-queue-item';
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => {
+        setDragOutPayload(e.dataTransfer, item.blob, item.name);
+      });
 
       const info = document.createElement('div');
       info.className = 'eq-info';
       const originLabel = ORIGIN_LABELS[item.origin] || ORIGIN_LABELS[ORIGINS.CONVERTED];
       info.innerHTML = `
-        <div class="eq-name">${item.name}</div>
+        <div class="eq-name-row">
+          <input type="checkbox" class="eq-select-box" data-id="${item.id}" ${selected.has(item.id) ? 'checked' : ''}>
+          <span class="eq-name">${item.name}</span>
+        </div>
         <div class="eq-meta">
           <span class="origin-badge ${originLabel.cls}">${originLabel.text}</span>
           ${item.targetLayout ? `<span class="meta-badge">${String(item.targetLayout).toUpperCase()}</span>` : ''}
@@ -246,45 +333,40 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
 
       const btns = document.createElement('div');
       btns.className = 'eq-buttons';
-
-      const btnDl = document.createElement('button');
-      btnDl.type = 'button';
-      btnDl.className = 'btn-archive-action download';
-      btnDl.textContent = '下载';
-      btnDl.addEventListener('click', () => queue.download(item.id));
-      btns.appendChild(btnDl);
-
-      const btnStash = document.createElement('button');
-      btnStash.type = 'button';
-      btnStash.className = 'btn-archive-action load-source';
-      btnStash.textContent = '存工作区';
-      btnStash.disabled = Boolean(item.storedId);
-      btnStash.addEventListener('click', async () => {
+      const mkBtn = (cls, html, title, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = `btn-archive-action ${cls}`;
+        b.innerHTML = html;
+        if (title) b.title = title;
+        b.addEventListener('click', onClick);
+        return b;
+      };
+      btns.appendChild(mkBtn('download', '下载', '', () => queue.download(item.id)));
+      btns.appendChild(mkBtn('load-source', '选位置导出', '选择保存位置写出该文件', () => exportToLocation(item.blob, item.name)));
+      const btnStash = mkBtn('load-source', '存工作区', '', async () => {
         await queue.stash(item.id);
         if (typeof onWorkspaceChanged === 'function') onWorkspaceChanged();
       });
+      btnStash.disabled = Boolean(item.storedId);
       btns.appendChild(btnStash);
-
       if (isHostAvailable && typeof onRestoreToHost === 'function') {
-        const btnRestore = document.createElement('button');
-        btnRestore.type = 'button';
-        btnRestore.className = 'btn-archive-action restore';
-        btnRestore.innerHTML = '<i class="fa-solid fa-rotate"></i> 写回宿主';
-        btnRestore.addEventListener('click', () => onRestoreToHost(item));
-        btns.appendChild(btnRestore);
+        btns.appendChild(mkBtn('restore', '<i class="fa-solid fa-rotate"></i> 写回宿主', '', () => onRestoreToHost(item)));
       }
-
-      const btnRemove = document.createElement('button');
-      btnRemove.type = 'button';
-      btnRemove.className = 'btn-archive-action delete';
-      btnRemove.textContent = '移除';
-      btnRemove.addEventListener('click', () => queue.remove(item.id));
-      btns.appendChild(btnRemove);
-
+      btns.appendChild(mkBtn('delete', '移除', '', () => { selected.delete(item.id); queue.remove(item.id); }));
       row.appendChild(btns);
       list.appendChild(row);
     }
     containerEl.appendChild(list);
+
+    // 复选框事件委托（列表重渲染后仍生效）
+    list.addEventListener('change', (e) => {
+      const box = e.target.closest('.eq-select-box');
+      if (!box) return;
+      if (box.checked) selected.add(box.dataset.id);
+      else selected.delete(box.dataset.id);
+      refreshSelBar();
+    });
   };
 
   queue.subscribe(render);
