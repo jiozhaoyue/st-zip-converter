@@ -123,10 +123,10 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false } = {}) {
             <div class="flex-container alignItemsCenter" style="gap: 8px;">
               <small style="white-space: nowrap;">智能分包限制:</small>
               <select id="host-split-select" class="text_pole flex1">
-                <option value="none">不分卷 (单包完整导出)</option>
-                <option value="100" selected>100 MB (云酒馆推荐 / 独立分卷)</option>
-                <option value="50">50 MB (高限制容器环境)</option>
-                <option value="200">200 MB (宽松上限)</option>
+                <option value="none" selected>不分卷 (单包完整导出)</option>
+                <option value="100">100 MB</option>
+                <option value="50">50 MB</option>
+                <option value="200">200 MB</option>
               </select>
             </div>
           </div>
@@ -245,10 +245,10 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false } = {}) {
             <div class="flex-container alignItemsCenter" style="gap: 8px;">
               <small style="white-space: nowrap;">智能分包:</small>
               <select id="split-select" class="text_pole flex1">
-                <option value="none">不分卷 (单包导出)</option>
-                <option value="100" selected>100 MB (云酒馆推荐 / 独立分卷)</option>
-                <option value="50">50 MB (高限制容器环境)</option>
-                <option value="200">200 MB (宽松上限)</option>
+                <option value="none" selected>不分卷 (单包导出)</option>
+                <option value="100">100 MB</option>
+                <option value="50">50 MB</option>
+                <option value="200">200 MB</option>
               </select>
             </div>
 
