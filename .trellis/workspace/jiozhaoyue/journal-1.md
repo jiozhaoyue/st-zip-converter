@@ -340,3 +340,134 @@
 ### Next Steps
 
 - 根据酒馆社区反馈持续迭代更多主题细节与扩展功能
+
+
+## Session 12: 开源发布就绪：安全审计加固、开源合规与多平台部署体系构建
+<!-- trellis-session: v=2 fp=8b4c27819e4a2d10 -->
+
+**Date**: 2026-09-06
+**Task**: 安全审计加固、开源合规与多平台部署体系构建
+**Branch**: `main`
+
+### Summary
+
+1. 展开开源发布前全量安全与质量审计：检查敏感信息防护，确认密码与 API 密钥过滤合规，清理临时调试脚本。
+2. 规范化开源合规协议，引入 MIT LICENSE 与标准 SECURITY.md 安全响应指引。
+3. 建立多平台云原生分发与一键部署体系：编写 GitHub Pages 自动化 Action 工作流、一键 Fork 部署指引以及 Vercel/Netlify 零配置部署文档。
+4. 固化核心技术调研与安全报告：`docs/research/filename-placeholders-root-cause.md` 与 `docs/research/security-audit-and-public-release.md`。
+
+### Main Changes
+
+- 补充正式开源 MIT 许可证与 SECURITY.md 漏洞披露机制
+- 清理冗余的临时单测脚本与构建残留，优化 CI 构建与发布管道
+- 编写完善的 GitHub Pages 一键部署与 Vercel/Netlify 快速托管文档
+- 固化文件名占位符排查报告与多平台安全审计专项报告
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6c1664d` | chore: 安全审计加固、清理冗余测试脚本并补充 MIT LICENSE 与 SECURITY 策略 |
+| `4e9e859` | docs(deploy): 增加 GitHub Pages 一键 Fork 部署与 Vercel/Netlify 部署指引并优化 CI 工作流 |
+| `cfbacef` | docs(research): 固化导出名占位符失效排查与敏感信息安全审计调研报告 |
+
+### Testing
+
+- [OK] npm test (75 passed, 2 skipped)
+- [OK] npm run build (Vite 生产构建成功，静态资源相对路径注入正常)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 13: 智能独立分包、扩展轻量清单防408与Git浅层精简架构
+<!-- trellis-session: v=2 fp=6a12de405bc781fa -->
+
+**Date**: 2026-09-06
+**Task**: 智能独立分包、扩展轻量清单防408与Git浅层精简架构
+**Branch**: `main`
+
+### Summary
+
+1. 深入调研 Luker / SillyTavern 扩展识别机制（`src/endpoints/extensions.js`）与 Git 历史包体膨胀根因。
+2. 研发智能独立增量分卷切片引擎 (`src/core/splitter.js`)，针对云酒馆 100MB 单包限制切分多包，每个包均为结构完备、可独立解压使用的合法数据包，彻底废弃不兼容的 `.z01` 分卷切片。
+3. 推出扩展轻量清单模式 (`extensionMode: 'manifest'`) 与 Git 浅层精简 (depth: 1 浅克隆)：数据包体积缩减 99%，彻底杜绝 408 导入超时并保留后续在线更新能力。
+4. 增强原生过滤支持：智能剔除酒馆原生默认背景与预设资产；识别并提供错误 `third-party/third-party` 嵌套目录的一键检测与清理。
+5. 修复宿主扩展设置抽屉面板挂载机制 (`mountSettingsDrawer`)，确立规范：禁止直接修改本地酒馆实例目录，强制采用 Git 标准工作流交付。
+
+### Main Changes
+
+- 新增 `src/core/splitter.js`：智能独立分包引擎，按大小阈值自动分组切分
+- 新增 `src/ui/split-deliver-modal.js`：优雅的分卷下载与本地批量交付模态框
+- 新增 `src/core/builtin-assets.js`：酒馆原生固定重复资产识别与清洗
+- 在 `src/core/transform.js` 中增加 `extensionMode` 与构建冗余文件清洗 (`isJunkOrDevFile`)
+- 在 `src/ui/host-bridge.js` 中新增 `discoverHostExtensions`、`installExtensionViaHost`、`checkHostThirdPartyAnomaly` 与 `deleteExtensionViaHost`
+- 确立本地实例严格隔离规范，杜绝文件系统直接拷入，保持 Git 受控
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0135650` | feat: 支持智能增量独立分包、剔除原生重复资产、轻量清单防408与修复宿主扩展面板 |
+| `c166524` | docs: 规范化禁止直接操作本地酒馆实例目录，强制采用 Git 标准工作流 |
+
+### Testing
+
+- [OK] npm test (86 passed, 2 skipped)
+- [OK] test/splitter.test.js (智能分包规则全过)
+- [OK] test/builtin-assets.test.js (原生资产剔除校验全过)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 14: 100% 酒馆原生抽屉展开 UI、全站 0 Emoji 矢量化、外部基准增量导出与备份聊天过滤
+<!-- trellis-session: v=2 fp=4c718b5219ae03d4 -->
+
+**Date**: 2026-09-06
+**Task**: 100% 酒馆原生抽屉展开 UI、全站 0 Emoji 矢量化、外部基准增量导出与备份聊天过滤
+**Branch**: `main`
+
+### Summary
+
+1. 彻底废弃以往需要点击弹窗的设计，全面重塑为 100% 酒馆原生 UI 体系：直接在 SillyTavern / Luker 扩展设置抽屉中完整平铺展开工作台，采用子抽屉 (`.inline-drawer`) 分组承载，全面绑定原生类名（`.text_pole`、`.menu_button`、`.checkbox_label` 等）与主题变量。
+2. 遵循“只在插件页面做，不在魔法棒做”的明确决策，不在魔法棒菜单插入多余图标。
+3. 全站 0 Emoji 彻底清理：将所有组件、模板、按钮、标签中的 Emoji 表情符号全部转换为 Font Awesome 6 标准矢量图标。
+4. 增加“备份聊天记录与快照 (backups/)”选项，宿主导出与外部转换均默认不勾选，精准剔除 `backups/` 目录与各角色聊天中的备份与分支文件。
+5. 研发基于外部基准 ZIP 的增量导出差量引擎 (`src/core/delta.js`)：必须在外部选择一个已有基准 ZIP 作为比对基准，提取新增与被修改文件生成体积极小、带 `_delta_manifest.json` 的纯增量补丁包 (Delta Zip)，并支持与基准包无损合并还原。
+6. 自动化测试套件扩充至 19 个测试套件、105 项测试全部通过。
+
+### Main Changes
+
+- 全面重构 `src/ui/workbench-template.js`、`src/ui/host-bridge.js`、`style.css`、`index.html` 为 100% 原生 `.inline-drawer` 体系
+- 清理所有 Emoji，全面替换为 Font Awesome 6 语义类名 (`fa-solid fa-...`)
+- 新增 `src/core/delta.js`：实现 `compareArchives` 与 `generateDeltaArchive`
+- 新增 `src/core/inspect.js` `isBackupChatOrSnapshot` 工具函数，贯通 `transform.js` 与 `plan-preview.js`，默认剔除备份聊天
+- `index.js` 绑定基准 ZIP 外部选择器、状态条及增量补丁生成链路
+- 新增 `test/delta.test.js` 与 `test/backup-chats.test.js` 自动化测试
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `adf9bab` | feat(ui): overhaul to 100% native SillyTavern in-drawer UI without emojis |
+| `0212345` | feat(export): add backup chats option (default unchecked) and base-zip incremental export |
+
+### Testing
+
+- [OK] npm test (19 passed, 1 skipped, 105 tests passed, 100% green)
+- [OK] test/delta.test.js (基准比对、差量补丁提取与合并往返还原测试全过)
+- [OK] test/backup-chats.test.js (快照与聊天备份识别、默认排除与显式包含测试全过)
+- [OK] 全项目 0 Emoji 正则扫描验证通过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 跟踪社区在不同云酒馆与本地酒馆实例环境中的增量导出与浅克隆使用体验
+- 持续完善自动化测试与多语言国际化支持
+
