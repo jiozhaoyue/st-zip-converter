@@ -64,7 +64,12 @@ export function resolveFilename(template, {
     .replace(/\.zip$/i, '')
     .trim();
 
-  const formattedDate = date || formatDate();
+  // date 可能是 Date 对象（splitter 等调用方直传 new Date()）——
+  // 必须统一格式化为 YYYY-MM-DD，否则 Date.toString() 会产生
+  // "Mon_Sep_07_2026_02_06_38_GMT+0800_(中国标准时间)" 这类冗长文件名
+  const formattedDate = date
+    ? (date instanceof Date ? formatDate(date) : String(date))
+    : formatDate();
   const targetCode = (target || 'backup').toLowerCase();
   const userHandle = (handle && handle.trim()) ? handle.trim() : 'default-user';
   const partCode = part || 'part1';
