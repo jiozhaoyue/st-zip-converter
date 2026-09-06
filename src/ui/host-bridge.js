@@ -23,15 +23,113 @@ export const FULL_SELECTION = Object.freeze({
 
 /**
  * 检测当前运行环境
- * @returns {{ platform: 'st'|'luker'|'standalone', isPlugin: boolean }}
+ *
+ * 判定协议（顺序不可颠倒，Luker 前端同时暴露两个全局对象）：
+ * 1. Luker 专属信号 globalThis.lukerContext 存在 → luker
+ * 2. globalThis.SillyTavern 存在 → st（Luker script.js:360 也暴露它，故必须后判）
+ * 3. 都不存在 → standalone
+ *
+ * 注意 lukerContext 是惰性 getter（首次读取触发 getContext()），需 try/catch。
+ * @returns {{ platform: 'st'|'luker'|'standalone', isPlugin: boolean, confidence: 'frontend'|'none' }}
  */
 export function detectHost() {
-  const isLuker = typeof window !== 'undefined' && (typeof window.luker !== 'undefined' || Boolean(document.querySelector('#luker-app')));
-  const isST = typeof window !== 'undefined' && (typeof window.SillyTavern !== 'undefined' || Boolean(document.querySelector('#extensionsMenu')));
+  if (typeof window === 'undefined') {
+    return { platform: 'standalone', isPlugin: false, confidence: 'none' };
+  }
 
-  if (isLuker) return { platform: 'luker', isPlugin: true };
-  if (isST) return { platform: 'st', isPlugin: true };
-  return { platform: 'standalone', isPlugin: false };
+  let lukerContext = null;
+  try {
+    lukerContext = (typeof globalThis.lukerContext === 'object' && globalThis.lukerContext) || null;
+  } catch {
+    // lukerContext 惰性 getter 在宿主脚本未就绪时可能抛错，忽略并走后续判定
+  }
+  if (lukerContext) {
+    return { platform: 'luker', isPlugin: true, confidence: 'frontend' };
+  }
+
+  const hasSTGlobal = typeof globalThis.SillyTavern !== 'undefined'
+    || typeof window.SillyTavern !== 'undefined'
+    || Boolean(document.querySelector('#extensionsMenu'));
+  if (hasSTGlobal) {
+    return { platform: 'st', isPlugin: true, confidence: 'frontend' };
+  }
+
+  return { platform: 'standalone', isPlugin: false, confidence: 'none' };
+}
+
+/**
+ * 通过服务端 /version 端点二次校验宿主类型
+ *
+ * 实测响应形状（research/host-probe-results.md）：
+ * - Luker: { agent: "Luker:2.7.0:...", stCompatVersion, pkgVersion, ... }
+ * - ST:    { version: "1.18.0" }（老形状，无 agent 字段）
+ *
+ * @param {'st'|'luker'|'standalone'} frontendPlatform detectHost() 的前端判定结果
+ * @returns {Promise<{ platform: 'st'|'luker'|'standalone', verified: boolean, version?: string }>}
+ */
+export async function verifyHostPlatform(frontendPlatform) {
+  let data = null;
+  try {
+    const response = await fetch('/version', { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    data = await response.json();
+  } catch (err) {
+    logger.info(`服务端 /version 校验不可达 (${err.message})，保留前端判定: ${frontendPlatform}`);
+    return { platform: frontendPlatform, verified: false };
+  }
+
+  let endpointPlatform = 'standalone';
+  if (data && typeof data === 'object') {
+    const agent = typeof data.agent === 'string' ? data.agent : '';
+    if (agent.startsWith('Luker') || 'stCompatVersion' in data) {
+      endpointPlatform = 'luker';
+    } else if (agent.startsWith('SillyTavern') || ('version' in data && !('stCompatVersion' in data))) {
+      endpointPlatform = 'st';
+    } else if (typeof data.pkgVersion === 'string') {
+      // 有 pkgVersion 但 agent 不可识别：按版本主号兜底
+      endpointPlatform = data.pkgVersion.startsWith('1.') ? 'st' : 'luker';
+    }
+  }
+
+  const version = data?.agent ?? data?.version ?? data?.pkgVersion ?? null;
+  if (endpointPlatform !== frontendPlatform) {
+    logger.warn(`宿主类型前端判定 (${frontendPlatform}) 与服务端校验 (${endpointPlatform}) 不一致，以服务端为准。版本: ${version ?? '未知'}`);
+  } else {
+    logger.info(`宿主类型服务端校验一致: ${endpointPlatform} (版本: ${version ?? '未知'})`);
+  }
+  return { platform: endpointPlatform, verified: true, version: version || undefined };
+}
+
+/**
+ * 导出后软校验：按宿主类型检查数据包形状是否与预期一致
+ * - Luker 导出包含 manifest.json (schemaVersion+selection)
+ * - ST 导出为全量摊平包，不含 manifest.json
+ * 校验失败仅告警，不阻断流程。
+ * @param {Blob} blob 宿主导出的 Zip 数据包
+ * @param {'st'|'luker'} platform 宿主类型
+ */
+export async function validateBackupShape(blob, platform) {
+  try {
+    const reader = await zipIo.openReader(blob);
+    let hasManifest = false;
+    for await (const entry of reader.entries()) {
+      if (entry.fileName === 'manifest.json') {
+        hasManifest = true;
+        break;
+      }
+      // 只扫前几十个条目名即可判定，避免大包全量遍历
+      if (entry.fileName.startsWith('characters/') || entry.fileName.startsWith('settings')) break;
+    }
+    await reader.close();
+
+    if (platform === 'luker' && !hasManifest) {
+      logger.warn('宿主类型为 Luker，但导出数据包缺少 manifest.json —— 宿主识别可能有误，请检查宿主徽标');
+    } else if (platform === 'st' && hasManifest) {
+      logger.warn('宿主类型为 ST，但导出数据包含 manifest.json —— 宿主识别可能有误，请检查宿主徽标');
+    }
+  } catch (err) {
+    logger.info(`导出包形状软校验跳过: ${err.message}`);
+  }
 }
 
 /**
@@ -96,6 +194,7 @@ export async function fetchHostBackup(platform, selection = null) {
 
   const blob = await response.blob();
   logger.success(`成功从宿主拉取数据包，大小: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+  await validateBackupShape(blob, platform);
   return blob;
 }
 

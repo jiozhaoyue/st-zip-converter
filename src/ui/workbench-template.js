@@ -49,6 +49,7 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false } = {}) {
             <span class="category-title" style="font-weight: bold; font-size: 0.85rem;"><i class="fa-solid fa-list-check"></i> 细粒度导出类目勾选</span>
             <small class="category-sub-summary" id="host-category-summary" style="color: var(--SmartThemeEmColor, #fbbf24);">已勾选全部标准数据</small>
           </div>
+          <small id="host-selection-mode-hint" style="display: none; font-size: 0.72rem; color: var(--SmartThemeEmColor, #fbbf24); margin-bottom: 6px;"><i class="fa-solid fa-circle-info"></i> ST 宿主端点仅支持全量导出：勾选的类目将在导出后由插件内过滤生效，最终数据包与勾选一致</small>
           <div class="flex-container" style="gap: 4px; flex-wrap: wrap; margin-bottom: 8px;">
             <button type="button" class="menu_button btn-host-quick" data-preset="all">全选</button>
             <button type="button" class="menu_button btn-host-quick" data-preset="chars">仅角色卡</button>

@@ -34,12 +34,14 @@ import { renderArchiveManager } from './src/ui/archive-manager.js';
 import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
 import {
   detectHost,
+  verifyHostPlatform,
   fetchHostBackup,
   restoreToHost,
   getHandle,
   registerMenuButton,
   mountSettingsDrawer,
   setupDrawerToggles,
+  FULL_SELECTION,
 } from './src/ui/host-bridge.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
@@ -403,27 +405,63 @@ async function main(appRoot = document.getElementById('app')) {
   }
 
   // 3. 宿主环境识别与 Badge 标识
-  if (envBadge) {
-    if (host.platform === 'st') {
+  const applyHostBadge = (platform) => {
+    if (!envBadge) return;
+    if (platform === 'st') {
       envBadge.textContent = 'SillyTavern 插件模式';
       envBadge.style.color = 'var(--accent-st)';
       envBadge.style.borderColor = 'var(--accent-st)';
-    } else if (host.platform === 'luker') {
+    } else if (platform === 'luker') {
       envBadge.textContent = 'Luker 插件模式';
       envBadge.style.color = 'var(--accent-luker)';
       envBadge.style.borderColor = 'var(--accent-luker)';
     } else {
       envBadge.textContent = '独立 Web 模式';
     }
-  }
+  };
+  applyHostBadge(host.platform);
 
   // 4. 插件态界面激活与宿主工作台初始化
-  if (host.isPlugin) {
+  const applyPluginUi = (platform) => {
+    if (!host.isPlugin) return;
     if (hostExportCard) hostExportCard.style.display = 'block';
     if (hostTagPlatform) {
-      hostTagPlatform.textContent = `宿主环境: ${host.platform.toUpperCase()}`;
+      hostTagPlatform.textContent = `宿主环境: ${platform.toUpperCase()}`;
     }
 
+    // ST 宿主端点不支持 selection：展示"插件内过滤"说明
+    const selectionHint = document.getElementById('host-selection-mode-hint');
+    if (selectionHint) {
+      selectionHint.style.display = platform === 'st' ? 'block' : 'none';
+    }
+
+    if (platform === 'luker' && btnRestoreLuker) {
+      btnRestoreLuker.style.display = 'inline-block';
+    }
+    if (targetSelect) {
+      targetSelect.value = platform === 'luker' ? 'l' : 'st';
+    }
+    registerMenuButton(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  };
+  applyPluginUi(host.platform);
+
+  // 服务端 /version 二次校验：不一致时以服务端为准并刷新 UI
+  if (host.isPlugin) {
+    verifyHostPlatform(host.platform)
+      .then(({ platform: verifiedPlatform }) => {
+        if (verifiedPlatform !== host.platform && verifiedPlatform !== 'standalone') {
+          host.platform = verifiedPlatform;
+          applyHostBadge(verifiedPlatform);
+          applyPluginUi(verifiedPlatform);
+          logger.info(`宿主环境已按服务端校验结果刷新: ${verifiedPlatform.toUpperCase()}`);
+        }
+      })
+      .catch((err) => console.warn('宿主服务端校验失败:', err));
+  }
+
+  if (host.isPlugin) {
     // 获取当前用户句柄
     getHandle()
       .then((handle) => {
@@ -438,16 +476,6 @@ async function main(appRoot = document.getElementById('app')) {
       .catch((err) => {
         logger.warn('获取当前宿主用户信息提示:', err.message);
       });
-
-    if (host.platform === 'luker' && btnRestoreLuker) {
-      btnRestoreLuker.style.display = 'inline-block';
-    }
-    if (targetSelect) {
-      targetSelect.value = host.platform === 'luker' ? 'l' : 'st';
-    }
-    registerMenuButton(() => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
   }
 
   // 5. 宿主细粒度导出预设交互
@@ -610,7 +638,18 @@ async function main(appRoot = document.getElementById('app')) {
       view.setProgress(10, `正在向宿主 ${host.platform.toUpperCase()} 请求数据包...`);
       logger.info(`向宿主请求导出数据包，勾选类目: ${Object.keys(selection).filter((k) => selection[k]).join(', ')}`);
 
-      const rawBackupBlob = await fetchHostBackup(host.platform, selection);
+      // ST 宿主的 /api/users/backup 端点不支持 selection（全量 glob 导出）：
+      // 必须请求全量包，类目筛选由下方 needsTransform 分支在插件内过滤生效；
+      // Luker 宿主端点原生支持 selection，直接透传。
+      const hostSupportsSelection = host.platform === 'luker';
+      const endpointSelection = hostSupportsSelection
+        ? selection
+        : { ...FULL_SELECTION };
+      if (!hostSupportsSelection) {
+        logger.info('ST 宿主端点仅支持全量导出，类目筛选将在导出后由插件内过滤执行');
+      }
+
+      const rawBackupBlob = await fetchHostBackup(host.platform, endpointSelection);
       
       const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
       const effectiveTarget = selectedTarget === 'native' ? host.platform : selectedTarget;
@@ -633,9 +672,14 @@ async function main(appRoot = document.getElementById('app')) {
       const hostIncludeBackups = hostIncludeBackupsCheck ? hostIncludeBackupsCheck.checked : false;
 
       // 如果指定了跨平台直出格式 (非 native) 或启用了原生资产过滤 或 不包含备份聊天与快照
+      // ST 宿主下 selection 由插件内过滤生效，因此只要勾选不全量就必须走转换过滤
+      const hasPartialSelection = hostSupportsSelection
+        ? false
+        : Object.keys(FULL_SELECTION).some((k) => !selection[k]);
       const needsTransform = (selectedTarget !== 'native' && selectedTarget !== host.platform)
         || pruneBuiltinAssets
-        || !hostIncludeBackups;
+        || !hostIncludeBackups
+        || hasPartialSelection;
 
       if (needsTransform) {
         targetLayout = selectedTarget === 'native' ? host.platform : selectedTarget;
