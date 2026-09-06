@@ -72,8 +72,34 @@ npm start
 
 ### 场景 3: GitHub Pages 在线直接使用
 
-无需在本地安装任何 Node.js 环境或软件，直接访问静态部署页面：
+无需在本地安装任何 Node.js 环境或软件，直接访问官方静态部署页面：
 👉 **`https://jiozhaoyue.github.io/st-zip-converter/`**
+
+---
+
+### 场景 4: 🚀 一键部署到自己的专属站点 (GitHub Pages / Vercel / Netlify)
+
+如果您希望拥有完全属于自己的独立转换工作站，本仓库已完成自动化 CI/CD 与相对路径深度适配，支持零门槛一键部署：
+
+#### 方案 A: 部署到自己的 GitHub Pages (推荐，免费且自动跟随更新)
+
+[![Fork to Deploy](https://img.shields.io/badge/GitHub-Fork_&_Deploy_to_Pages-2ea44f?style=for-the-badge&logo=github)](https://github.com/jiozhaoyue/st-zip-converter/fork)
+
+只需简单 3 步即可上线：
+1. **Fork 本仓库**：点击上方绿色徽标或页面右上角的 **[Fork]**，将项目复制到您的个人 GitHub 账号下。
+2. **启用工作流**：进入您 Fork 后的仓库，点击 **Actions** 标签页，点击绿色的 **「I understand my workflows, go ahead and enable them」** 按钮启用自动化构建。
+3. **开启 Pages 并触发**：
+   - 进入仓库 **Settings** -> **Pages**，在 **Build and deployment** 下的 **Source** 下拉框选择 **「GitHub Actions」**。
+   - 回到 **Actions** 标签页，在左侧点击 **Deploy to GitHub Pages**，点击右侧的 **Run workflow** 按钮。
+   - 约 20 秒后部署完成，即可在 `https://<您的GitHub用户名>.github.io/st-zip-converter/` 拥有永久私有的专属在线转换站！
+
+#### 方案 B: 一键部署至 Vercel / Netlify (极速秒级上线)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/jiozhaoyue/st-zip-converter)
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/jiozhaoyue/st-zip-converter)
+
+点击上方按钮，登录对应平台并一键授权，平台将全自动配置并在全球 CDN 节点秒级部署完成。
+
 
 ---
 
