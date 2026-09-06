@@ -6,7 +6,8 @@
 import { zipIo } from './zip-io.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
 import { CATEGORIES, CATEGORY_LABELS, categoryOfHubPath } from './inspect.js';
-import { routeSource, targetEntryPath, TARGETS } from './transform.js';
+import { routeSource, targetEntryPath, TARGETS, isJunkOrDevFile, EXTENSION_MODES } from './transform.js';
+import { isTavernBuiltinAsset } from './builtin-assets.js';
 
 export const ACTIONS = Object.freeze({
   COPY: 'COPY',             // 原位或同名直通复制
@@ -82,6 +83,9 @@ export async function generatePlan(source, target, {
   includeBackups = true,
   includeAppPrivate = false,
   keepAll = false,
+  extensionMode = EXTENSION_MODES.FULL,
+  keepDevFiles = false,
+  pruneBuiltinAssets = false,
 } = {}) {
   const detector = await io.openReader(source);
   let detection;
@@ -155,7 +159,16 @@ export async function generatePlan(source, target, {
       let reason = '';
 
       // 1. 判断原生处置动作与目标路径
-      if (routed.kind === 'manifest') {
+      if (pruneBuiltinAssets && isTavernBuiltinAsset(routed.hubPath)) {
+        action = ACTIONS.DROP;
+        reason = '酒馆原生固定资产(默认背景/主题/预设)，已智能剔除';
+      } else if (isJunkOrDevFile(routed.hubPath, { keepDevFiles, keepAll })) {
+        action = ACTIONS.DROP;
+        reason = '开发/构建冗余或系统临时文件(安全清洗)';
+      } else if (extensionMode === EXTENSION_MODES.MANIFEST && routed.kind === 'extension-pkg') {
+        action = ACTIONS.DROP;
+        reason = '轻量清单模式：扩展代码由目标酒馆按清单下载';
+      } else if (routed.kind === 'manifest') {
         if (target === TARGETS.L) {
           action = ACTIONS.SYNTHESIZE;
           targetPath = 'manifest.json';
@@ -200,12 +213,15 @@ export async function generatePlan(source, target, {
           action = ACTIONS.DROP;
           reason = '应用级私有配置，目标平台不消费';
         }
-      } else if (target === TARGETS.PT && routed.hubPath.startsWith('extensions/') && !routed.hubPath.startsWith('extensions/third-party/')) {
-        // 用户级扩展迁移至 PT third-party
-        const rest = routed.hubPath.slice('extensions/'.length);
-        targetPath = `data/extensions/third-party/${rest}`;
+      } else if (routed.kind === 'extension-pkg' && (target === TARGETS.TT || target === TARGETS.PT)) {
+        targetPath = targetEntryPath(routed.hubPath, target);
         action = ACTIONS.MIGRATE;
-        reason = 'PT 不支持用户级 extensions/ 目录，已自动重装迁移为 third-party 布局';
+        reason = `适配 ${target.toUpperCase()} 平台 third-party 扩展目录布局`;
+      } else if (routed.kind === 'extension-pkg' && (target === TARGETS.ST || target === TARGETS.L)
+        && (entry.fileName.startsWith('extensions/third-party/') || entry.fileName.startsWith('data/extensions/third-party/'))) {
+        targetPath = targetEntryPath(routed.hubPath, target);
+        action = ACTIONS.MIGRATE;
+        reason = '消除错误的 third-party 嵌套，自动平铺为目标平台规范布局';
       } else {
         targetPath = targetEntryPath(routed.hubPath, target);
         action = targetPath === entry.fileName ? ACTIONS.COPY : ACTIONS.ROUTE;

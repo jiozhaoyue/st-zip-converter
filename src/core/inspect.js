@@ -45,6 +45,9 @@ export function categoryOfHubPath(hubPath) {
   if (
     hubPath === 'settings.json'
     || hubPath === 'tauritavern-settings.json'
+    || hubPath === 'stats.json'
+    || hubPath === 'macros.json'
+    || hubPath === 'user_data.json'
     || hubPath.startsWith('backups/')
     || hubPath === 'backups'
   ) {
@@ -73,7 +76,13 @@ export function categoryOfHubPath(hubPath) {
     || hubPath.startsWith('themes/')
     || hubPath.startsWith('movingUI/')
     || hubPath.startsWith('QuickReplies/')
+    || hubPath.startsWith('quick-replies/')
+    || hubPath.startsWith('quick_replies/')
     || hubPath.startsWith('textgen_presets/')
+    || hubPath.startsWith('regex/')
+    || hubPath.startsWith('regex_scripts/')
+    || hubPath === 'custom_styles.css'
+    || hubPath === 'custom.css'
   ) {
     return CATEGORIES.PRESETS;
   }
@@ -86,6 +95,14 @@ export function categoryOfHubPath(hubPath) {
     || hubPath === 'assets'
     || hubPath.startsWith('user/')
     || hubPath === 'user'
+    || hubPath.startsWith('expressions/')
+    || hubPath.startsWith('expression/')
+    || hubPath.startsWith('default_expressions/')
+    || hubPath.startsWith('sprites/')
+    || hubPath.startsWith('speech/')
+    || hubPath.startsWith('audio/')
+    || hubPath.startsWith('sounds/')
+    || hubPath.startsWith('voice/')
   ) {
     return CATEGORIES.ASSETS;
   }
@@ -96,7 +113,11 @@ export function categoryOfHubPath(hubPath) {
   ) {
     return CATEGORIES.GLOBAL_EXTENSIONS;
   }
-  if (hubPath.startsWith('extensions/') || hubPath === 'extensions') {
+  if (
+    hubPath.startsWith('extensions/')
+    || hubPath === 'extensions'
+    || hubPath.startsWith('scripts/')
+  ) {
     return CATEGORIES.EXTENSIONS;
   }
   if (hubPath.startsWith('vectors/') || hubPath === 'vectors') {

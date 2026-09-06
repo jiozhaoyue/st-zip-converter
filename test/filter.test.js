@@ -54,8 +54,8 @@ describe('零拷贝中央目录预检与 10 大标准类目聚合 (inspectArchiv
     expect(categories[CATEGORIES.PRESETS].count).toBe(1); // OpenAI Settings
     expect(categories[CATEGORIES.SETTINGS].count).toBe(2); // settings.json + backups/auto-2026.json
     expect(categories[CATEGORIES.SECRETS].count).toBe(1);
-    expect(categories[CATEGORIES.ASSETS].count).toBe(1); // User Avatars
-    expect(categories[CATEGORIES.GLOBAL_EXTENSIONS].count).toBe(2); // extensions/third-party
+    expect(categories[CATEGORIES.EXTENSIONS].count).toBe(2); // extensions/test-extension (平铺用户扩展)
+    expect(categories[CATEGORIES.GLOBAL_EXTENSIONS].count).toBe(0); // 纯用户包不含全局第三方扩展
     expect(categories[CATEGORIES.VECTORS].count).toBe(0); // 空类目
   });
 

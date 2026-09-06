@@ -3,6 +3,7 @@ import { Report } from './report.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
 import { zipIo } from './zip-io.js';
 import { categoryOfHubPath } from './inspect.js';
+import { isTavernBuiltinAsset } from './builtin-assets.js';
 
 /**
  * 转换管线:源布局规范化为 hub(ST 摊平)→ 逐条目按目标适配写出。
@@ -23,6 +24,11 @@ export const TARGETS = Object.freeze({
   PT: 'pt',
 });
 
+export const EXTENSION_MODES = Object.freeze({
+  MANIFEST: 'manifest', // 轻量清单模式:仅导出来源清单，不打包插件实体与 git packfile，防 408 超时
+  FULL: 'full',         // 完整离线包模式:打包代码文件，适合无网环境
+});
+
 const TT_USER_PREFIX = 'data/default-user/';
 const TT_THIRD_PARTY_PREFIX = 'data/extensions/third-party/';
 const TT_SOURCES_PREFIX = 'data/_tauritavern/extension-sources/';
@@ -38,6 +44,110 @@ const TT_APP_PRIVATE_USER = ['tauritavern-settings.json', 'user/lan-sync/'];
 const TT_DERIVED_USER = ['content.log', 'user/cache/'];
 
 const FIXED_TIMESTAMP = '2020-01-01T00:00:00.000Z';
+
+/**
+ * 判断条目是否属于开发垃圾、构建冗余或系统临时文件
+ * @param {string} hubPath hub 路径
+ * @param {object} [options]
+ * @param {boolean} [options.keepDevFiles] 是否保留开发与构建文件
+ * @param {boolean} [options.keepAll] 是否保留所有内容
+ * @returns {boolean}
+ */
+export function isJunkOrDevFile(hubPath, { keepDevFiles = false, keepAll = false } = {}) {
+  if (keepAll) return false;
+
+  const fileName = hubPath.slice(hubPath.lastIndexOf('/') + 1);
+
+  // 1. 系统级垃圾文件（任何情况均默认剔除）
+  if (
+    fileName === '.DS_Store'
+    || fileName === 'Thumbs.db'
+    || fileName === 'desktop.ini'
+    || hubPath.startsWith('__MACOSX/')
+    || hubPath.includes('/__MACOSX/')
+    || fileName.endsWith('.tmp')
+  ) {
+    return true;
+  }
+
+  // 2. 开发与构建冗余（当 !keepDevFiles 时剔除）
+  if (!keepDevFiles) {
+    // 依赖目录与测试目录
+    if (
+      hubPath.includes('/node_modules/')
+      || hubPath.startsWith('node_modules/')
+      || hubPath.includes('/test/')
+      || hubPath.includes('/tests/')
+      || hubPath.includes('/__tests__/')
+      || hubPath.includes('/coverage/')
+    ) {
+      return true;
+    }
+
+    // 构建与工程配置文件
+    if (
+      fileName.startsWith('webpack.config.')
+      || fileName.startsWith('vite.config.')
+      || fileName.startsWith('rollup.config.')
+      || fileName.startsWith('tsconfig.')
+      || fileName === 'tsconfig.json'
+      || fileName === '.babelrc'
+      || fileName.startsWith('babel.config.')
+    ) {
+      return true;
+    }
+
+    // 源码映射与测试脚本
+    if (
+      fileName.endsWith('.map')
+      || fileName.endsWith('.spec.js')
+      || fileName.endsWith('.test.js')
+      || fileName.endsWith('.spec.ts')
+      || fileName.endsWith('.test.ts')
+    ) {
+      return true;
+    }
+
+    // Git 运行时冗余 (logs/、hooks/、refs/original/)
+    if (
+      hubPath.includes('/.git/logs/')
+      || hubPath.includes('/.git/hooks/')
+      || hubPath.includes('/.git/refs/original/')
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function extractGitRemoteUrl(configText) {
+  if (!configText) return null;
+  const match = configText.match(/\[remote\s+["']origin["']\][\s\S]*?url\s*=\s*([^\r\n]+)/i)
+    || configText.match(/url\s*=\s*([^\r\n]+)/i);
+  return match ? match[1].trim() : null;
+}
+
+export function extractGitBranch(headText) {
+  if (!headText) return null;
+  const match = headText.match(/ref:\s*refs\/heads\/([^\r\n]+)/i);
+  return match ? match[1].trim() : null;
+}
+
+export function extensionFolderName(hubPath) {
+  if (!hubPath.startsWith('extensions/')) return '';
+  const rest = hubPath.slice('extensions/'.length);
+  const slash = rest.indexOf('/');
+  return slash > 0 ? rest.slice(0, slash) : rest;
+}
+
+export function extensionRelativePath(hubPath) {
+  if (!hubPath.startsWith('extensions/')) return '';
+  const rest = hubPath.slice('extensions/'.length);
+  const slash = rest.indexOf('/');
+  if (slash <= 0) return rest;
+  return rest.slice(slash + 1);
+}
 
 const INSTALL_MD = `# 手动导入说明(ST 目标)
 
@@ -85,6 +195,9 @@ export async function convert(sourcePath, targetPath, {
   includeBackups = true,
   includeAppPrivate = false,
   compressionLevel = 5,
+  extensionMode = EXTENSION_MODES.FULL,
+  keepDevFiles = false,
+  pruneBuiltinAssets = false,
 } = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
     throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
@@ -118,8 +231,10 @@ export async function convert(sourcePath, targetPath, {
     manifest: null,
     extensionSources: new Map(), // folderName -> {scope, fileName, record}
     extensionManifests: new Map(), // folderName -> parsed manifest object
+    extensionGitMeta: new Map(), // folderName -> { remoteUrl, branch, commit }
     sawEngineDump: false,
-    userExtensionsMigrated: 0, // PT 目标:迁移为 third-party 布局的用户级扩展条目数
+    thirdPartyFlattenedCount: 0, // ST/L 目标: 消除错误的 third-party 嵌套并拉平的条目数
+    userExtensionsMigrated: 0, // PT/TT 目标: 迁移为 third-party 布局的用户级扩展条目数
     userExtensionCollisions: new Set(), // 与 third-party 同名而被丢弃的扩展名
   };
 
@@ -157,6 +272,20 @@ export async function convert(sourcePath, targetPath, {
       }
       let routed = routeSource(entry.fileName, detection.layout);
 
+      // 酒馆原生固定资产智能过滤 (剔除系统自带默认背景、默认主题等重复素材)
+      if (pruneBuiltinAssets && isTavernBuiltinAsset(routed.hubPath)) {
+        entry.skip();
+        report.dropped(routed.hubPath, '酒馆原生固定资产(默认背景/主题/预设)，已智能剔除');
+        continue;
+      }
+
+      // 垃圾文件与构建冗余过滤（清理开发垃圾、构建脚本与临时缓存）
+      if (isJunkOrDevFile(routed.hubPath, { keepDevFiles, keepAll })) {
+        entry.skip();
+        report.dropped(routed.hubPath, '开发/构建冗余或系统临时文件(安全清洗)');
+        continue;
+      }
+
       // 按单文件细粒度排除过滤 (可穿透树形勾选)
       if (excludedPaths && (excludedPaths.has(entry.fileName) || excludedPaths.has(routed.hubPath))) {
         entry.skip();
@@ -176,7 +305,7 @@ export async function convert(sourcePath, targetPath, {
       // 按用户类目选择过滤（脱敏排除）
       if (selection && typeof selection === 'object') {
         const cat = categoryOfHubPath(routed.hubPath);
-        if (cat && selection[cat] === false) {
+        if (cat && (selection[cat] === false || (cat === 'extensions' && selection.extensions === false))) {
           entry.skip();
           report.filtered(routed.hubPath, cat);
           continue;
@@ -264,59 +393,135 @@ export async function convert(sourcePath, targetPath, {
         continue;
       }
 
-      // PT 目标:用户级扩展迁移为 third-party 布局(PT 目录表没有 extensions/,
-      // 原样放 default-user/extensions 会被 PT 整体丢弃);与 third-party 同名时保留第三方副本。
-      if (routed.kind === 'user' && target === TARGETS.PT
-        && routed.hubPath.startsWith(USER_EXTENSIONS_PREFIX)
-        && !routed.hubPath.startsWith(THIRD_PARTY_PREFIX)) {
-        const rest = routed.hubPath.slice(USER_EXTENSIONS_PREFIX.length);
-        const slash = rest.indexOf('/');
-        if (slash > 0) {
-          const name = rest.slice(0, slash);
-          if (thirdPartyFolders.has(name)) {
-            context.userExtensionCollisions.add(name);
+      // user / extension-pkg:流式直通，或轻量清单解析
+      if (routed.kind === 'extension-pkg') {
+        const restUnderExt = routed.hubPath.slice('extensions/'.length);
+        const extFolder = extensionFolderName(routed.hubPath);
+        const relPath = extensionRelativePath(routed.hubPath);
+
+        // 散文件过滤 (如 extensions/ 根目录下的 .gitkeep): TT/PT 目标只消费 目录名/文件 形态
+        if ((target === TARGETS.TT || target === TARGETS.PT) && !restUnderExt.includes('/')) {
+          entry.skip();
+          report.dropped(routed.hubPath, 'extensions 根下的散文件,目标平台不消费');
+          continue;
+        }
+
+        // ST/L 目标: 遇到错误的 third-party 嵌套布局，自动拉平为标准平铺布局
+        if (target === TARGETS.ST || target === TARGETS.L) {
+          if (entry.fileName.startsWith('extensions/third-party/')
+            || entry.fileName.startsWith('data/extensions/third-party/')) {
+            context.thirdPartyFlattenedCount += 1;
+          }
+        }
+
+        // PT / TT 目标: 用户级扩展迁移为 third-party 布局，与 third-party 同名时保留第三方副本
+        const isUserExt = !entry.fileName.startsWith('extensions/third-party/')
+          && !entry.fileName.startsWith('data/extensions/third-party/');
+
+        if ((target === TARGETS.PT || target === TARGETS.TT) && isUserExt) {
+          if (thirdPartyFolders.has(extFolder)) {
+            context.userExtensionCollisions.add(extFolder);
             entry.skip();
-            report.dropped(routed.hubPath, '与 third-party 扩展 "' + name + '" 同名,保留第三方副本');
+            report.dropped(routed.hubPath, `与 third-party 扩展 "${extFolder}" 同名,保留第三方副本`);
             continue;
           }
-          const migratedHub = THIRD_PARTY_PREFIX + rest;
-          const outPath = 'data/extensions/third-party/' + rest;
-          if (rest === name + '/manifest.json') {
-            const data = await entry.read();
-            noteExtensionPackage(context, migratedHub, data);
-            await writer.add(outPath, data);
-          } else {
-            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
-          }
           context.userExtensionsMigrated += 1;
-          report.copied(routed.hubPath, entry.uncompressedSize);
-          continue;
         }
-      }
 
-      // user / extension-pkg:流式直通,只有扩展 manifest 需要读内容(小文件)
-      const outPath = targetEntryPath(routed.hubPath, target);
-      if (routed.kind === 'extension-pkg') {
-        const fromTpRoot = routed.hubPath.slice(THIRD_PARTY_PREFIX.length);
-        if ((target === TARGETS.TT || target === TARGETS.PT) && !fromTpRoot.includes('/')) {
-          // third-party 根下的散文件(如 .gitkeep):TT/PT 只消费 目录名/文件 形态
-          entry.skip();
-          report.dropped(routed.hubPath, 'third-party 根下的散文件,目标平台不消费');
-          continue;
-        }
-        if (extensionRelativePath(routed.hubPath) === 'manifest.json') {
+        // 1. 读取扩展清单 manifest.json
+        if (relPath === 'manifest.json' || relPath.endsWith('/manifest.json')) {
           const data = await entry.read();
           noteExtensionPackage(context, routed.hubPath, data);
-          await writer.add(outPath, data);
-          report.copied(routed.hubPath, entry.uncompressedSize);
+          if (extensionMode !== EXTENSION_MODES.MANIFEST) {
+            const outPath = targetEntryPath(routed.hubPath, target);
+            await writer.add(outPath, data);
+            report.copied(routed.hubPath, entry.uncompressedSize);
+          } else {
+            report.dropped(routed.hubPath, '轻量清单模式：已记录扩展清单，实体文件不打包');
+          }
           continue;
         }
+
+        // 2. 解析 Git 仓库配置与指针 (.git/config, .git/HEAD 等)
+        if (relPath === '.git/config' || relPath.endsWith('/.git/config')) {
+          try {
+            const text = JSON_DECODER.decode(await entry.read());
+            const url = extractGitRemoteUrl(text);
+            if (url && extFolder) {
+              const current = context.extensionGitMeta.get(extFolder) || {};
+              current.remoteUrl = url;
+              context.extensionGitMeta.set(extFolder, current);
+            }
+          } catch { /* 忽略读取错误 */ }
+          if (extensionMode !== EXTENSION_MODES.MANIFEST) {
+            const outPath = targetEntryPath(routed.hubPath, target);
+            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+            report.copied(routed.hubPath, entry.uncompressedSize);
+          } else {
+            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git Remote URL，实体文件不打包');
+          }
+          continue;
+        }
+
+        if (relPath === '.git/HEAD' || relPath.endsWith('/.git/HEAD')) {
+          try {
+            const text = JSON_DECODER.decode(await entry.read());
+            const branch = extractGitBranch(text);
+            if (branch && extFolder) {
+              const current = context.extensionGitMeta.get(extFolder) || {};
+              current.branch = branch;
+              context.extensionGitMeta.set(extFolder, current);
+            }
+          } catch { /* 忽略读取错误 */ }
+          if (extensionMode !== EXTENSION_MODES.MANIFEST) {
+            const outPath = targetEntryPath(routed.hubPath, target);
+            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+            report.copied(routed.hubPath, entry.uncompressedSize);
+          } else {
+            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git 分支，实体文件不打包');
+          }
+          continue;
+        }
+
+        if (relPath.includes('/.git/refs/heads/') || relPath.startsWith('.git/refs/heads/')) {
+          try {
+            const commit = JSON_DECODER.decode(await entry.read()).trim();
+            if (commit && extFolder && /^[0-9a-f]{40}$/i.test(commit)) {
+              const current = context.extensionGitMeta.get(extFolder) || {};
+              current.commit = commit;
+              context.extensionGitMeta.set(extFolder, current);
+            }
+          } catch { /* 忽略读取错误 */ }
+          if (extensionMode !== EXTENSION_MODES.MANIFEST) {
+            const outPath = targetEntryPath(routed.hubPath, target);
+            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+            report.copied(routed.hubPath, entry.uncompressedSize);
+          } else {
+            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git Commit，实体文件不打包');
+          }
+          continue;
+        }
+
+        // 3. 轻量清单模式下，跳过其他代码文件
+        if (extensionMode === EXTENSION_MODES.MANIFEST) {
+          entry.skip();
+          report.dropped(routed.hubPath, '轻量清单模式：扩展代码由目标酒馆按清单下载');
+          continue;
+        }
+
+        // 4. 完整模式下直通写出
+        const outPath = targetEntryPath(routed.hubPath, target);
+        if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+        report.copied(routed.hubPath, entry.uncompressedSize);
+        continue;
       }
+
+      const outPath = targetEntryPath(routed.hubPath, target);
       if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
       report.copied(routed.hubPath, entry.uncompressedSize);
     }
 
-    await emitSynthesized(writer, report, context, target, selection);
+    await emitSynthesized(writer, report, context, target, selection, { extensionMode });
     await writer.close();
     return report;
   } catch (error) {
@@ -332,6 +537,9 @@ export function routeSource(sourcePath, layout) {
   if (layout === LAYOUTS.TT) {
     if (sourcePath.startsWith(TT_USER_PREFIX)) {
       const hubPath = sourcePath.slice(TT_USER_PREFIX.length);
+      if (sourcePath.startsWith('data/default-user/_compat/')) {
+        return { kind: 'compat', hubPath: sourcePath.slice('data/default-user/'.length) };
+      }
       if (TT_APP_PRIVATE_USER.some((p) => hubPath === p || hubPath.startsWith(p))) {
         return { kind: 'tt-app-private', hubPath };
       }
@@ -342,7 +550,7 @@ export function routeSource(sourcePath, layout) {
     }
     if (sourcePath.startsWith(TT_THIRD_PARTY_PREFIX)) {
       const rest = sourcePath.slice(TT_THIRD_PARTY_PREFIX.length);
-      return { kind: 'extension-pkg', hubPath: `${THIRD_PARTY_PREFIX}${rest}` };
+      return { kind: 'extension-pkg', hubPath: `extensions/${rest}` };
     }
     if (sourcePath.startsWith(TT_SOURCES_PREFIX)) {
       const rest = sourcePath.slice(TT_SOURCES_PREFIX.length);
@@ -369,6 +577,11 @@ export function routeSource(sourcePath, layout) {
     return { kind: 'drop', hubPath: sourcePath.slice(DATA_PREFIX.length), reason: 'TT data 根下未归类内容' };
   }
 
+  // 跨平台兼容私有沙箱条目
+  if (sourcePath.startsWith('_compat/')) {
+    return { kind: 'compat', hubPath: sourcePath };
+  }
+
   // st / l:摊平布局
   if (sourcePath === 'manifest.json') {
     return { kind: 'manifest', hubPath: 'manifest.json' };
@@ -376,26 +589,71 @@ export function routeSource(sourcePath, layout) {
   if (ENGINE_DUMP_ENTRIES.includes(sourcePath)) {
     return { kind: 'engine-dump', hubPath: sourcePath };
   }
-  if (sourcePath.startsWith(THIRD_PARTY_PREFIX)) {
+  if (sourcePath.startsWith('extensions/third-party/')) {
+    const rest = sourcePath.slice('extensions/third-party/'.length);
+    return { kind: 'extension-pkg', hubPath: `extensions/${rest}` };
+  }
+  if (sourcePath.startsWith('extensions/')) {
     return { kind: 'extension-pkg', hubPath: sourcePath };
   }
   return { kind: 'user', hubPath: sourcePath };
 }
 
-/** hub 路径 → 目标平台上的最终条目路径。 */
+/** hub 路径 → 目标平台上的最终条目路径。包含私有配置沙箱解包与跨平台安全隔离。 */
 export function targetEntryPath(hubPath, target) {
+  // 1. 跨平台私有配置沙箱解包 (Unwrap compat)
+  if (hubPath.startsWith('_compat/')) {
+    const parts = hubPath.slice('_compat/'.length).split('/');
+    const platform = parts[0]; // 'luker', 'tt', 'st'
+    const subPath = parts.slice(1).join('/');
+    if ((platform === 'luker' || platform === 'l') && target === TARGETS.L) {
+      return subPath;
+    }
+    if (platform === 'tt' && target === TARGETS.TT) {
+      return `data/default-user/${subPath}`;
+    }
+    if (platform === 'st' && target === TARGETS.ST) {
+      return subPath;
+    }
+  }
+
+  // 2. 目标不是 Luker 时，Luker 专属私有文件转入 _compat/luker/
+  if (target !== TARGETS.L) {
+    if (hubPath === 'stats.json' || hubPath === 'macros.json') {
+      const compatPath = `_compat/luker/${hubPath}`;
+      if (target === TARGETS.TT || target === TARGETS.PT) {
+        return `data/default-user/${compatPath}`;
+      }
+      return compatPath;
+    }
+  }
+
+  // 3. 目标不是 TT 时，TT 专属私有文件转入 _compat/tt/
+  if (target !== TARGETS.TT) {
+    if (hubPath === 'tauritavern-settings.json') {
+      const compatPath = `_compat/tt/${hubPath}`;
+      if (target === TARGETS.PT) {
+        return `data/default-user/${compatPath}`;
+      }
+      return compatPath;
+    }
+  }
+
+  // 4. 标准平台布局映射
   if (target === TARGETS.TT || target === TARGETS.PT) {
-    if (hubPath.startsWith(THIRD_PARTY_PREFIX)) {
-      return `data/extensions/third-party/${hubPath.slice(THIRD_PARTY_PREFIX.length)}`;
+    if (hubPath.startsWith('extensions/')) {
+      return `data/extensions/third-party/${hubPath.slice('extensions/'.length)}`;
     }
     return `data/default-user/${hubPath}`;
   }
   return hubPath;
 }
 
-/** 预扫用:路径若属于 third-party 扩展包,返回目录名(st/l 与 TT 两种布局都认)。 */
+/** 预扫用:路径若属于扩展包,返回目录名(st/l 与 TT 两种布局都认)。 */
 export function thirdPartyFolderOf(sourcePath, layout) {
-  const prefixes = layout === LAYOUTS.TT ? [TT_THIRD_PARTY_PREFIX] : [THIRD_PARTY_PREFIX];
+  const prefixes = layout === LAYOUTS.TT
+    ? [TT_THIRD_PARTY_PREFIX]
+    : ['extensions/third-party/'];
   for (const prefix of prefixes) {
     if (!sourcePath.startsWith(prefix)) continue;
     const rest = sourcePath.slice(prefix.length);
@@ -405,13 +663,9 @@ export function thirdPartyFolderOf(sourcePath, layout) {
   return null;
 }
 
-function extensionRelativePath(hubPath) {
-  const rest = hubPath.slice(THIRD_PARTY_PREFIX.length);
-  return rest.slice(rest.indexOf('/') + 1);
-}
-
 function noteExtensionPackage(context, hubPath, data) {
-  const rest = hubPath.slice(THIRD_PARTY_PREFIX.length);
+  if (!hubPath.startsWith('extensions/')) return;
+  const rest = hubPath.slice('extensions/'.length);
   const separator = rest.indexOf('/');
   if (separator <= 0) return;
   const folderName = rest.slice(0, separator);
@@ -423,9 +677,9 @@ function noteExtensionPackage(context, hubPath, data) {
 }
 
 /**
- * 尾部合成条目:目标 manifest(L)、extension-sources(pt/tt)、ST 安装说明。
+ * 尾部合成条目:目标 manifest(L)、extension-sources(pt/tt)、官方扩展下载索引、离线脚本与 ST 安装说明。
  */
-async function emitSynthesized(writer, report, context, target, selection) {
+async function emitSynthesized(writer, report, context, target, selection, { extensionMode = EXTENSION_MODES.FULL } = {}) {
   if (target === TARGETS.L) {
     const baseSelection = { ...L_SELECTION };
     if (selection && typeof selection === 'object') {
@@ -448,14 +702,88 @@ async function emitSynthesized(writer, report, context, target, selection) {
     report.synthesized('manifest.json');
   }
 
-  if (target === TARGETS.PT && context.userExtensionsMigrated > 0) {
+  // 汇总所有已知扩展
+  const allExtNames = new Set([
+    ...context.extensionManifests.keys(),
+    ...context.extensionSources.keys(),
+    ...context.extensionGitMeta.keys(),
+  ]);
+
+  const extItems = [];
+  for (const name of [...allExtNames].sort()) {
+    const manifest = context.extensionManifests.get(name) || {};
+    const gitMeta = context.extensionGitMeta.get(name) || {};
+    const srcRecord = context.extensionSources.get(name)?.record || {};
+    const url = gitMeta.remoteUrl || srcRecord.remote_url || (typeof manifest.homePage === 'string' ? manifest.homePage.trim() : '');
+    const branch = gitMeta.branch || srcRecord.reference || 'main';
+    const commit = gitMeta.commit || srcRecord.installed_commit || '';
+    const displayName = manifest.display_name || name;
+    const description = manifest.description || '';
+    extItems.push({
+      id: name,
+      name,
+      displayName,
+      description,
+      url,
+      branch,
+      commit,
+      version: manifest.version || '1.0.0',
+      type: 'extension',
+      manifest,
+    });
+  }
+
+  // 仅在 ST / L 目标且启用清单模式时，生成结构化清单与官方 Content Downloader 索引
+  const shouldEmitManifest = (target === TARGETS.ST || target === TARGETS.L)
+    && extensionMode === EXTENSION_MODES.MANIFEST;
+
+  if (extItems.length > 0 && (!selection || selection.extensions !== false) && shouldEmitManifest) {
+    // 1. 生成与 SillyTavern 官方 Content (assets) 下载规范完全兼容的 extensions-index.json
+    const officialIndex = {
+      extension: extItems.map(({ id, displayName, name, description, url, branch, commit, type }) => ({
+        id,
+        name: displayName || name,
+        description,
+        url,
+        branch,
+        commit,
+        type,
+      })),
+    };
+    await writer.add('extensions-index.json', encodeJson(officialIndex));
+    report.synthesized('extensions-index.json');
+
+    // 2. 生成转换器结构化清单供宿主插件自动恢复
+    const convertManifest = {
+      converter: 'st-zip-converter',
+      generatedAt: FIXED_TIMESTAMP,
+      mode: extensionMode,
+      total: extItems.length,
+      extensions: extItems,
+    };
+    await writer.add('_convert/extensions-manifest.json', encodeJson(convertManifest));
+    report.synthesized('_convert/extensions-manifest.json');
+
+    report.warn(
+      `已启用轻量清单模式：已记录 ${extItems.length} 个扩展清单（未打包实体代码与 Git packfile），`
+      + '已生成 extensions-index.json 与 _convert/extensions-manifest.json。',
+    );
+  }
+
+  if ((target === TARGETS.ST || target === TARGETS.L) && context.thirdPartyFlattenedCount > 0) {
+    report.warn(
+      `已针对 ${target.toUpperCase()} 平台规范消除错误的 third-party 嵌套，自动将 ${context.thirdPartyFlattenedCount} 个扩展条目拉平为标准平铺布局 (extensions/<name>/)。`,
+    );
+  }
+
+  if ((target === TARGETS.PT || target === TARGETS.TT) && context.userExtensionsMigrated > 0) {
     report.warn(
       `已将 ${context.userExtensionsMigrated} 个用户级 extensions/** 条目迁移为 third-party 布局`
-      + '(PT 目录表没有 extensions/,原样放置会被 PT 丢弃);'
+      + `(${target.toUpperCase()} 规范需放置在 data/extensions/third-party/); `
       + '来源记录取自各扩展 manifest 的 homePage。',
     );
   }
-  if (target === TARGETS.PT && context.userExtensionCollisions.size > 0) {
+  if ((target === TARGETS.PT || target === TARGETS.TT) && context.userExtensionCollisions.size > 0) {
     report.warn(
       `以下用户级扩展与 third-party 同名,已保留第三方副本: `
       + [...context.userExtensionCollisions].sort().join(', '),
@@ -484,8 +812,7 @@ async function emitSynthesized(writer, report, context, target, selection) {
 /**
  * PT/TT 目标的 extension-sources 产出:
  * - 源里已有记录 → 原样保留(保 reference/installed_commit,更新链不断)
- * - 没有记录 → 从扩展 manifest 的 homePage 合成(reference/installed_commit 置空,
- *   PT 的 readExtensionSource 允许;非 https 的 homePage 视为无来源并警告,与 PT 对齐)
+ * - 没有记录 → 从扩展 manifest 的 homePage 或 Git 提取信息合成
  */
 function buildExtensionSources(context, report) {
   const output = new Map();
@@ -494,18 +821,27 @@ function buildExtensionSources(context, report) {
     if (record) output.set(`data/_tauritavern/extension-sources/${scope}/${fileName}`, record);
   }
 
-  for (const [folderName, manifest] of context.extensionManifests) {
+  const allNames = new Set([
+    ...context.extensionManifests.keys(),
+    ...context.extensionGitMeta.keys(),
+  ]);
+
+  for (const folderName of allNames) {
     if (context.extensionSources.has(folderName)) continue;
-    const homePage = typeof manifest.homePage === 'string' ? manifest.homePage.trim() : '';
+    const manifest = context.extensionManifests.get(folderName) || {};
+    const gitMeta = context.extensionGitMeta.get(folderName) || {};
+    const homePage = gitMeta.remoteUrl
+      || (typeof manifest.homePage === 'string' ? manifest.homePage.trim() : '');
+
     if (/^https:\/\//iu.test(homePage)) {
       output.set(`data/_tauritavern/extension-sources/global/${folderName}.json`, {
         remote_url: homePage,
-        reference: '',
-        installed_commit: '',
+        reference: gitMeta.branch || '',
+        installed_commit: gitMeta.commit || '',
       });
     } else {
       report.warn(
-        `扩展 "${folderName}" 无来源记录且 manifest.homePage 非 https(${homePage || '空'}),`
+        `扩展 "${folderName}" 无来源记录且 remoteUrl/homePage 非 https(${homePage || '空'}),`
         + '按 PT 规则它将在导入时被跳过,请在 PT 扩展面板重装。',
       );
     }

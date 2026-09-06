@@ -81,8 +81,8 @@ function flatUserEntries() {
     ['settings.json', SETTINGS],
     ['secrets.json', SECRETS],
     ['User Avatars/fixture-avatar.png', pngBytes('avatar')],
-    ['extensions/third-party/test-extension/manifest.json', json(MANIFEST)],
-    ['extensions/third-party/test-extension/index.js', EXT_INDEX],
+    ['extensions/test-extension/manifest.json', json(MANIFEST)],
+    ['extensions/test-extension/index.js', EXT_INDEX],
     // 派生缓存:默认应被丢弃(--keep-all 保留)
     ['thumbnails/fixture-avatar.png', pngBytes('thumb')],
     ['backups/auto-2026.json', Buffer.from('[]', 'utf8')],

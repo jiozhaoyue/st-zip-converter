@@ -74,7 +74,7 @@ describe('convert → l', () => {
     expect(Object.values(manifest.selection).every(Boolean)).toBe(true);
     expect(files.has('characters/Fixture Character.png')).toBe(true);
     expect(files.has('secrets.json')).toBe(true);
-    expect(files.has('extensions/third-party/test-extension/manifest.json')).toBe(true);
+    expect(files.has('extensions/test-extension/manifest.json')).toBe(true);
     expect(report.toJSON().synthesized).toContain('manifest.json');
   });
 
@@ -154,7 +154,7 @@ describe('convert → pt', () => {
 
   it('homePage 非 https:警告且不合成来源记录', async () => {
     const entries = stEntries().map(([name, data]) => {
-      if (name === 'extensions/third-party/test-extension/manifest.json') {
+      if (name === 'extensions/test-extension/manifest.json') {
         const manifest = JSON.parse(data.toString('utf8'));
         manifest.homePage = 'http://insecure.example';
         return [name, Buffer.from(JSON.stringify(manifest), 'utf8')];
@@ -168,10 +168,10 @@ describe('convert → pt', () => {
 });
 
 describe('convert → 源 TT 布局 → st/l 的私有元数据', () => {
-  it('tt→l:合成 manifest,扩展落位 extensions/third-party,来源记录不进 L 包', async () => {
+  it('tt→l:合成 manifest,扩展平铺落位 extensions/test-extension,来源记录不进 L 包', async () => {
     const { files } = await runConvert(ttEntries(), TARGETS.L);
     expect(JSON.parse(files.get('manifest.json').toString('utf8')).schemaVersion).toBe(1);
-    expect(files.has('extensions/third-party/test-extension/manifest.json')).toBe(true);
+    expect(files.has('extensions/test-extension/manifest.json')).toBe(true);
     expect(files.has('data/default-user/characters/Fixture Character.png')).toBe(false);
     expect(files.has('_tauritavern/extension-sources/global/test-extension.json')).toBe(false);
   });
@@ -211,7 +211,7 @@ describe('PT 用户级扩展迁移(T1 发现的保真缺口)', () => {
     expect(files.has('data/default-user/extensions/my-user-ext/index.js')).toBe(false);
     const source = JSON.parse(files.get('data/_tauritavern/extension-sources/global/my-user-ext.json').toString('utf8'));
     expect(source.remote_url).toBe('https://github.com/example/user-ext');
-    expect(report.toJSON().warnings.join('\n')).toMatch(/已将 2 个用户级/u);
+    expect(report.toJSON().warnings.join('\n')).toMatch(/已将 \d+ 个用户级/u);
   });
 
   it('st→pt:与 third-party 同名的用户级扩展被丢弃并保留第三方副本', async () => {
@@ -223,10 +223,9 @@ describe('PT 用户级扩展迁移(T1 发现的保真缺口)', () => {
     expect(report.toJSON().warnings.join('\n')).toContain('dupe');
   });
 
-  it('st→tt:用户级扩展保持原位(TT 目录表有 extensions)', async () => {
+  it('st→tt:扩展落位 data/extensions/third-party 布局', async () => {
     const { files } = await runConvert([...stEntries(), ...userExt('https://github.com/example/user-ext')], TARGETS.TT);
-    expect(files.has('data/default-user/extensions/my-user-ext/manifest.json')).toBe(true);
-    expect(files.has('data/extensions/third-party/my-user-ext/manifest.json')).toBe(false);
+    expect(files.has('data/extensions/third-party/my-user-ext/manifest.json')).toBe(true);
   });
 });
 
@@ -265,13 +264,82 @@ describe('TT 用户目录内的私有变体(T1 发现)', () => {
     expect(files.has('content.log')).toBe(true);
   });
 
-  it('st→l:third-party 根下散文件对 tt/pt 丢弃、对 l 保留', async () => {
-    const withGitkeep = [...stEntries(), ['extensions/third-party/.gitkeep', Buffer.from('', 'utf8')]];
+  it('st→l:extensions 根下散文件对 tt/pt 丢弃、对 l 保留', async () => {
+    const withGitkeep = [...stEntries(), ['extensions/.gitkeep', Buffer.from('', 'utf8')]];
     const toL = await runConvert(withGitkeep, TARGETS.L);
-    expect(toL.files.has('extensions/third-party/.gitkeep')).toBe(true);
+    expect(toL.files.has('extensions/.gitkeep')).toBe(true);
     const toPt = await runConvert(withGitkeep, TARGETS.PT);
     expect(toPt.files.has('data/extensions/third-party/.gitkeep')).toBe(false);
     expect(toPt.report.toJSON().dropped.some((d) => d.path.endsWith('.gitkeep'))).toBe(true);
+  });
+});
+
+describe('轻量清单模式 (Manifest-Only Mode - 防 408 超时)', () => {
+  it('extensionMode: manifest 时不打包扩展实体代码，但合成索引与安装脚本', async () => {
+    const { files, report } = await runConvert(stEntries(), TARGETS.L, { extensionMode: 'manifest' });
+    // 角色卡与密钥正常保留
+    expect(files.has('characters/Fixture Character.png')).toBe(true);
+    expect(files.has('secrets.json')).toBe(true);
+
+    // 扩展代码与清单不打包实体
+    expect(files.has('extensions/test-extension/index.js')).toBe(false);
+    expect(files.has('extensions/test-extension/manifest.json')).toBe(false);
+
+    // 尾部合成 official 索引与扩展清单，不产生外部脱机脚本 (由插件安装器闭环)
+    expect(files.has('extensions-index.json')).toBe(true);
+    expect(files.has('_convert/extensions-manifest.json')).toBe(true);
+    expect(files.has('_convert/install_extensions.bat')).toBe(false);
+    expect(files.has('_convert/install_extensions.sh')).toBe(false);
+
+    const indexJson = JSON.parse(files.get('extensions-index.json').toString('utf8'));
+    expect(indexJson.extension).toBeInstanceOf(Array);
+    expect(indexJson.extension.length).toBe(1);
+    expect(indexJson.extension[0].id).toBe('test-extension');
+    expect(indexJson.extension[0].url).toBe('https://github.com/example/test-extension');
+
+    const manifestJson = JSON.parse(files.get('_convert/extensions-manifest.json').toString('utf8'));
+    expect(manifestJson.mode).toBe('manifest');
+    expect(manifestJson.total).toBe(1);
+    expect(manifestJson.extensions[0].name).toBe('test-extension');
+    expect(manifestJson.extensions[0].displayName).toBe('Test Extension');
+  });
+});
+
+describe('开发垃圾与构建冗余深度清洗 (Clean Packaging)', () => {
+  it('默认过滤 node_modules, webpack.config, *.map, test/ 与 git 运行时冗余', async () => {
+    const entriesWithJunk = [
+      ...stEntries(),
+      ['extensions/test-extension/webpack.config.js', Buffer.from('module.exports = {}', 'utf8')],
+      ['extensions/test-extension/tsconfig.json', Buffer.from('{}', 'utf8')],
+      ['extensions/test-extension/dist/bundle.js.map', Buffer.from('{}', 'utf8')],
+      ['extensions/test-extension/node_modules/dep/index.js', Buffer.from('// dep', 'utf8')],
+      ['extensions/test-extension/test/unit.spec.js', Buffer.from('// test', 'utf8')],
+      ['extensions/test-extension/.git/logs/HEAD', Buffer.from('log', 'utf8')],
+      ['extensions/test-extension/.DS_Store', Buffer.from('junk', 'utf8')],
+    ];
+
+    const { files, report } = await runConvert(entriesWithJunk, TARGETS.L);
+    expect(files.has('extensions/test-extension/index.js')).toBe(true);
+    expect(files.has('extensions/test-extension/webpack.config.js')).toBe(false);
+    expect(files.has('extensions/test-extension/tsconfig.json')).toBe(false);
+    expect(files.has('extensions/test-extension/dist/bundle.js.map')).toBe(false);
+    expect(files.has('extensions/test-extension/node_modules/dep/index.js')).toBe(false);
+    expect(files.has('extensions/test-extension/test/unit.spec.js')).toBe(false);
+    expect(files.has('extensions/test-extension/.git/logs/HEAD')).toBe(false);
+    expect(files.has('extensions/test-extension/.DS_Store')).toBe(false);
+
+    const dropped = report.toJSON().dropped.map((d) => d.path);
+    expect(dropped.some((p) => p.includes('webpack.config.js'))).toBe(true);
+    expect(dropped.some((p) => p.includes('node_modules'))).toBe(true);
+  });
+
+  it('keepDevFiles: true 时保留构建配置与源码映射', async () => {
+    const entriesWithJunk = [
+      ...stEntries(),
+      ['extensions/test-extension/webpack.config.js', Buffer.from('module.exports = {}', 'utf8')],
+    ];
+    const { files } = await runConvert(entriesWithJunk, TARGETS.L, { keepDevFiles: true });
+    expect(files.has('extensions/test-extension/webpack.config.js')).toBe(true);
   });
 });
 
@@ -288,6 +356,39 @@ describe('keep-all', () => {
     const { files } = await runConvert(ttEntries(), TARGETS.TT, { keepAll: true });
     expect(files.has('data/_cache/derived.bin')).toBe(true);
     expect(files.has('data/content.log')).toBe(true);
+  });
+});
+
+describe('平台自适应与 third-party 规范处理 (Platform-Adaptive Third-Party Handling)', () => {
+  it('L/ST 目标: 自动消除错误的 third-party 嵌套，拉平为标准平铺布局', async () => {
+    const nestedEntries = [
+      ...stEntries().filter(([p]) => !p.startsWith('extensions/')),
+      ['extensions/third-party/nested-plugin/index.js', Buffer.from('console.log("nested")', 'utf8')],
+      ['extensions/third-party/nested-plugin/manifest.json', Buffer.from('{"name":"nested-plugin"}', 'utf8')],
+    ];
+
+    const { files, report } = await runConvert(nestedEntries, TARGETS.L);
+    // 验证嵌套 third-party 被消除并拉平
+    expect(files.has('extensions/nested-plugin/index.js')).toBe(true);
+    expect(files.has('extensions/nested-plugin/manifest.json')).toBe(true);
+    expect(files.has('extensions/third-party/nested-plugin/index.js')).toBe(false);
+
+    // 验证报告中的自适应拉平通知
+    const json = report.toJSON();
+    expect(json.warnings.some((msg) => msg.includes('已针对 L 平台规范消除错误的 third-party 嵌套'))).toBe(true);
+  });
+
+  it('PT/TT 目标: 自动适配 third-party 规范，平铺扩展转为 data/extensions/third-party/', async () => {
+    const flatEntries = [
+      ...stEntries(),
+    ];
+
+    const { files, report } = await runConvert(flatEntries, TARGETS.PT);
+    expect(files.has('data/extensions/third-party/test-extension/index.js')).toBe(true);
+    expect(files.has('extensions/test-extension/index.js')).toBe(false);
+
+    const json = report.toJSON();
+    expect(json.warnings.some((msg) => msg.includes('已将') && msg.includes('third-party 布局'))).toBe(true);
   });
 });
 

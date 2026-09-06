@@ -36,9 +36,14 @@ import {
   restoreToHost,
   getHandle,
   registerMenuButton,
+  mountSettingsDrawer,
 } from './src/ui/host-bridge.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
+import { getWorkbenchHtml } from './src/ui/workbench-template.js';
+import { splitArchiveEntries } from './src/core/splitter.js';
+import { renderSplitDeliveryModal } from './src/ui/split-deliver-modal.js';
+import { zipIo } from './src/core/zip-io.js';
 
 function formatTimestamp() {
   return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
@@ -51,12 +56,15 @@ function formatBytes(bytes) {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-async function main() {
+async function main(appRoot = document.getElementById('app')) {
+  const root = appRoot || document.getElementById('app');
+  if (!root) return;
+
   const host = detectHost();
   const view = createViewController();
 
   // 初始化底部实时日志抽屉
-  const logConsole = setupLogConsole(document.getElementById('app'));
+  const logConsole = setupLogConsole(root);
   logger.info(`应用启动，运行模式: ${host.isPlugin ? host.platform.toUpperCase() + ' 扩展插件' : '独立 Web 模式'}`);
 
   let currentFile = null;
@@ -80,6 +88,9 @@ async function main() {
         sourceName: srcName,
         target,
         handle,
+        part: 'part1',
+        category: 'all',
+        mode: 'split',
       });
     }
 
@@ -92,6 +103,9 @@ async function main() {
         sourceName: `${host.platform || 'st'}-${currentHostHandle}`,
         target: effectiveTarget,
         handle: currentHostHandle,
+        part: 'part1',
+        category: 'all',
+        mode: 'split',
       });
     }
   }
@@ -124,6 +138,34 @@ async function main() {
   const restoreModalDesc = document.getElementById('restore-modal-desc');
   const btnCancelRestore = document.getElementById('btn-cancel-restore');
   const btnConfirmRestore = document.getElementById('btn-confirm-restore');
+
+  function getExtensionMode() {
+    const checked = document.querySelector('input[name="extension-mode"]:checked');
+    return checked ? checked.value : 'manifest';
+  }
+
+  function getKeepDevFiles() {
+    const chk = document.getElementById('keep-dev-files-check');
+    return chk ? chk.checked : false;
+  }
+
+  document.querySelectorAll('input[name="extension-mode"]').forEach((el) => {
+    el.addEventListener('change', () => {
+      document.querySelectorAll('.extension-mode-section label').forEach((lbl) => {
+        const input = lbl.querySelector('input[name="extension-mode"]');
+        if (input) {
+          lbl.style.background = input.checked ? 'rgba(137, 180, 250, 0.08)' : 'rgba(255, 255, 255, 0.03)';
+          lbl.style.borderColor = input.checked ? 'rgba(137, 180, 250, 0.3)' : 'rgba(255, 255, 255, 0.1)';
+        }
+      });
+      refreshPlan();
+    });
+  });
+
+  const keepDevFilesCheck = document.getElementById('keep-dev-files-check');
+  if (keepDevFilesCheck) {
+    keepDevFilesCheck.addEventListener('change', () => refreshPlan());
+  }
 
   // 初始化外部数据包类目过滤器组件
   setupCategoryFilter({
@@ -275,6 +317,19 @@ async function main() {
     });
   }
 
+  // 快捷预设模板点击一键应用
+  document.querySelectorAll('.btn-tpl-preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tpl = btn.getAttribute('data-tpl');
+      if (tpl && filenameTemplateInput) {
+        filenameTemplateInput.value = tpl;
+        filenameTemplateInput.dispatchEvent(new Event('input'));
+        updateFilenamePreview();
+        refreshPlan();
+      }
+    });
+  });
+
   // 1. 更新工作区状态栏
   async function updateWorkspaceUI() {
     if (!isStorageSupported()) return;
@@ -313,6 +368,8 @@ async function main() {
           includeBackups,
           includeCache,
           includeAppPrivate,
+          extensionMode: getExtensionMode(),
+          keepDevFiles: getKeepDevFiles(),
         },
       });
 
@@ -461,25 +518,35 @@ async function main() {
         handle: currentHostHandle,
       });
 
-      // 如果指定了跨平台直出格式 (非 native)
-      if (selectedTarget !== 'native' && selectedTarget !== host.platform) {
-        targetLayout = selectedTarget;
-        view.setProgress(40, `数据已拉取，正在转换为目标格式 ${selectedTarget.toUpperCase()}...`);
-        logger.info(`进行直出格式转换: ${host.platform.toUpperCase()} -> ${selectedTarget.toUpperCase()}`);
+      // 检查智能分包与原生资产过滤设置
+      const hostSplitSelect = document.getElementById('host-split-select');
+      const splitVal = hostSplitSelect ? hostSplitSelect.value : 'none';
+      const shouldSplit = splitVal !== 'none';
+      const hostPruneBuiltin = document.getElementById('host-prune-builtin');
+      const pruneBuiltinAssets = hostPruneBuiltin ? hostPruneBuiltin.checked : true;
+
+      // 如果指定了跨平台直出格式 (非 native) 或启用了原生资产过滤
+      if ((selectedTarget !== 'native' && selectedTarget !== host.platform) || pruneBuiltinAssets) {
+        targetLayout = selectedTarget === 'native' ? host.platform : selectedTarget;
+        view.setProgress(40, `数据已拉取，正在转换处理数据包 (${targetLayout.toUpperCase()})...`);
+        logger.info(`进行直出格式与资产过滤处理: ${host.platform.toUpperCase()} -> ${targetLayout.toUpperCase()}`);
 
         const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
         const { report, resultBlob } = await runConversionTask({
           source: rawBackupBlob,
-          target: selectedTarget,
+          target: targetLayout,
           options: {
             selection,
             includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : true,
             includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
             includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
             compressionLevel,
+            extensionMode: getExtensionMode(),
+            keepDevFiles: getKeepDevFiles(),
+            pruneBuiltinAssets,
           },
           onProgress: (cur, total, name) => {
-            const pct = total > 0 ? 40 + Math.round((cur / total) * 55) : 60;
+            const pct = total > 0 ? 40 + Math.round((cur / total) * 50) : 60;
             view.setProgress(pct, `正在直出写入 [${cur}/${total}]: ${name}`);
           },
         });
@@ -488,7 +555,51 @@ async function main() {
         view.renderReport(report);
       }
 
-      // 暂存到工作区
+      // 执行智能增量分卷 (若开启)
+      if (shouldSplit) {
+        const thresholdMB = parseInt(splitVal, 10) || 100;
+        view.setProgress(92, `正在按 ${thresholdMB} MB 阈值执行智能独立分包...`);
+        logger.info(`启动智能分包引擎: 单包阈值 ${thresholdMB} MB`);
+
+        const reader = await zipIo.openReader(finalBlob);
+        const entries = [];
+        for await (const e of reader.entries()) {
+          if (e.isDirectory) { e.skip(); continue; }
+          entries.push({ path: e.fileName, data: await e.read(), size: e.uncompressedSize });
+        }
+        await reader.close();
+
+        const splitResult = await splitArchiveEntries(entries, {
+          thresholdMB,
+          target: effectiveTarget,
+          handle: currentHostHandle,
+          filenameTemplate: template,
+        });
+
+        for (const p of splitResult.parts) {
+          await saveFile({
+            name: p.partName,
+            size: p.sizeBytes,
+            blob: p.blob,
+            layout: targetLayout,
+            role: targetDestination === 'workspace' ? 'source' : 'output',
+          });
+        }
+        await updateWorkspaceUI();
+
+        if (targetDestination === 'download') {
+          renderSplitDeliveryModal(splitResult);
+          view.setProgress(100, `宿主数据已成功切分为 ${splitResult.totalParts} 个独立压缩包！`);
+          logger.success(`宿主导出分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})`);
+          return;
+        } else {
+          view.setProgress(100, `宿主数据 ${splitResult.totalParts} 个分卷已存入本地工作区！`);
+          logger.success(`宿主导出分卷已存入工作区完成: 共 ${splitResult.totalParts} 卷`);
+          return;
+        }
+      }
+
+      // 单包模式：暂存到工作区
       await saveFile({
         name: finalFilename,
         size: finalBlob.size,
@@ -700,6 +811,13 @@ async function main() {
     const includeAppPrivate = includePrivateCheck ? includePrivateCheck.checked : false;
     const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
 
+    // 检查智能分包与原生资产过滤设置
+    const splitSelect = document.getElementById('split-select');
+    const splitVal = splitSelect ? splitSelect.value : 'none';
+    const shouldSplit = splitVal !== 'none';
+    const pruneBuiltinCheck = document.getElementById('prune-builtin-check');
+    const pruneBuiltinAssets = pruneBuiltinCheck ? pruneBuiltinCheck.checked : true;
+
     try {
       btnConvert.disabled = true;
       if (btnRestoreLuker) btnRestoreLuker.disabled = true;
@@ -716,6 +834,9 @@ async function main() {
           includeCache,
           includeAppPrivate,
           compressionLevel,
+          extensionMode: getExtensionMode(),
+          keepDevFiles: getKeepDevFiles(),
+          pruneBuiltinAssets,
         },
         onProgress: (cur, total, name) => {
           const pct = total > 0 ? 5 + Math.round((cur / total) * 90) : 50;
@@ -724,15 +845,56 @@ async function main() {
       });
 
       lastConvertedBlob = resultBlob;
+      const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
+      const currentHandle = currentFileHandle || currentHostHandle || 'default-user';
+
+      // 执行智能增量分卷 (若开启)
+      if (shouldSplit) {
+        const thresholdMB = parseInt(splitVal, 10) || 100;
+        view.setProgress(95, `正在按 ${thresholdMB} MB 阈值执行智能独立分包...`);
+        logger.info(`启动智能分包引擎: 单包阈值 ${thresholdMB} MB`);
+
+        const reader = await zipIo.openReader(resultBlob);
+        const entries = [];
+        for await (const e of reader.entries()) {
+          if (e.isDirectory) { e.skip(); continue; }
+          entries.push({ path: e.fileName, data: await e.read(), size: e.uncompressedSize });
+        }
+        await reader.close();
+
+        const splitResult = await splitArchiveEntries(entries, {
+          thresholdMB,
+          target,
+          handle: currentHandle,
+          filenameTemplate: template,
+        });
+
+        for (const p of splitResult.parts) {
+          await saveFile({
+            name: p.partName,
+            size: p.sizeBytes,
+            blob: p.blob,
+            layout: target,
+            role: 'output',
+          });
+        }
+        await updateWorkspaceUI();
+        view.renderReport(report);
+
+        renderSplitDeliveryModal(splitResult);
+        view.setProgress(100, `外部数据已成功切分为 ${splitResult.totalParts} 个独立压缩包！`);
+        logger.success(`外部 Zip 分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})`);
+        return;
+      }
+
       view.setProgress(100, `转换成功！共写入 ${report.totals.written} 项，已丢弃/过滤 ${report.totals.dropped + (report.totals.filtered || 0)} 项`);
       logger.success(`数据包转换成功！共写入 ${report.totals.written} 个文件`);
 
       // 暂存转换产物到 IndexedDB
-      const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
       const outputFilename = resolveFilename(template, {
         sourceName: currentFile.name,
         target,
-        handle: currentFileHandle || currentHostHandle || 'default-user',
+        handle: currentHandle,
       });
 
       try {
@@ -818,9 +980,84 @@ async function main() {
   }
 }
 
+let isWorkbenchInitialized = false;
+
+/**
+ * 呼出模态数据包工作台 (供宿主插件环境使用)
+ */
+export function openConverterModal() {
+  if (typeof document === 'undefined') return;
+
+  let modalOverlay = document.getElementById('st-converter-modal-overlay');
+  if (!modalOverlay) {
+    modalOverlay = document.createElement('div');
+    modalOverlay.id = 'st-converter-modal-overlay';
+    modalOverlay.className = 'st-converter-modal-overlay';
+
+    const appContainer = document.createElement('div');
+    appContainer.className = 'app-container';
+    appContainer.id = 'app';
+    appContainer.innerHTML = getWorkbenchHtml({ isModal: true });
+
+    modalOverlay.appendChild(appContainer);
+    document.body.appendChild(modalOverlay);
+
+    const closeBtn = appContainer.querySelector('#btn-close-converter-modal');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        modalOverlay.style.display = 'none';
+      });
+    }
+
+    modalOverlay.addEventListener('click', (e) => {
+      if (e.target === modalOverlay) {
+        modalOverlay.style.display = 'none';
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modalOverlay && modalOverlay.style.display !== 'none') {
+        modalOverlay.style.display = 'none';
+      }
+    });
+
+    if (!isWorkbenchInitialized) {
+      isWorkbenchInitialized = true;
+      main(appContainer);
+    }
+  } else {
+    modalOverlay.style.display = 'flex';
+  }
+}
+
+/**
+ * 自适应启动入口：检测独立 Web 模式 vs 酒馆插件模式
+ */
+function bootstrap() {
+  const host = detectHost();
+  const existingApp = document.getElementById('app');
+
+  if (existingApp) {
+    // 独立 Web 模式 (直接打开 index.html)
+    if (!isWorkbenchInitialized) {
+      isWorkbenchInitialized = true;
+      main(existingApp);
+    }
+  } else {
+    // 宿主扩展模式 (SillyTavern / Luker)
+    // 1. 注入扩展设置抽屉 (#extensions_settings2 / #extensions_settings)
+    mountSettingsDrawer(openConverterModal);
+    // 2. 注入魔棒快捷菜单 (#extensionsMenu / #options)
+    registerMenuButton(openConverterModal);
+    logger.info(`st-zip-converter 扩展面板已就绪 (${host.platform.toUpperCase()} 模式)`);
+  }
+}
+
 // 启动应用
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', main);
-} else {
-  main();
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+  } else {
+    bootstrap();
+  }
 }

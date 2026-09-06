@@ -5,5 +5,7 @@
   "author": "jiozhaoyue",
   "description": "在 SillyTavern / Luker / PureTavern / TauriTavern 之间互转导出的 Zip 数据包",
   "homePage": "https://github.com/jiozhaoyue/st-zip-converter",
-  "loading_order": 50
+  "loading_order": 50,
+  "js": "index.js",
+  "css": "style.css"
 }

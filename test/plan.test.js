@@ -36,10 +36,10 @@ describe('完全扫描与转换动作预测引擎 (generatePlan)', () => {
     expect(charItems[0].action === ACTIONS.ROUTE).toBe(true);
     expect(charItems[0].targetPath).toContain('data/default-user/characters/');
 
-    // 第三方扩展应路由到 data/extensions/third-party/
-    const globalExtItems = plan.categories.globalExtensions.items;
-    expect(globalExtItems.length).toBe(2);
-    expect(globalExtItems[0].targetPath).toContain('data/extensions/third-party/');
+    // 用户平铺扩展转换到 TT 时应路由到 data/extensions/third-party/
+    const extItems = plan.categories.extensions.items;
+    expect(extItems.length).toBe(2);
+    expect(extItems[0].targetPath).toContain('data/extensions/third-party/');
 
     // 统计数据
     expect(plan.actionStats[ACTIONS.ROUTE]).toBeGreaterThan(0);

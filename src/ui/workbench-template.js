@@ -1,13 +1,10 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>st-zip-converter - 全能酒馆数据包工作站</title>
-  <link rel="stylesheet" href="./style.css">
-</head>
-<body>
-  <div class="app-container" id="app">
+/**
+ * 酒馆数据包互转工坊 - 完整 HTML 模板生成器
+ * 支持独立 Web 页面挂载与宿主酒馆 (SillyTavern / Luker) 模态弹窗复用
+ */
+
+export function getWorkbenchHtml({ isModal = false } = {}) {
+  return `
     <!-- Header -->
     <header class="app-header">
       <div class="title-group">
@@ -15,8 +12,9 @@
         <p>SillyTavern · Luker · TauriTavern · PureTavern 互转 · 细粒度导出 · 增量恢复</p>
       </div>
       <div class="header-badges">
-        <div class="badge" id="env-badge">独立 Web 模式</div>
+        <div class="badge" id="env-badge">检测中...</div>
         <div class="badge badge-user" id="host-user-badge" style="display: none;">用户: 未登录</div>
+        ${isModal ? '<button type="button" class="st-converter-modal-close-btn" id="btn-close-converter-modal" title="关闭工作台">&times;</button>' : ''}
       </div>
     </header>
 
@@ -390,8 +388,5 @@
     <footer class="app-footer">
       <p>st-zip-converter · 遵循 SillyTavern 扩展规范 · <a href="https://github.com/jiozhaoyue/st-zip-converter" target="_blank" rel="noopener">GitHub 仓库</a> · <a href="https://github.com/jiozhaoyue/st-zip-converter/fork" target="_blank" rel="noopener">Fork 并部署专属 Pages</a></p>
     </footer>
-  </div>
-
-  <script type="module" src="./index.js"></script>
-</body>
-</html>
+  `;
+}
