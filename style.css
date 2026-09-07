@@ -653,6 +653,36 @@ body:has(> .app-container) {
   justify-content: space-between;
 }
 
+/* 统一文件树确认栏（宿主拉取阶段2：勾选 → 确认继续） */
+.app-container .host-tree-confirm-bar, .st-converter-drawer-app .host-tree-confirm-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.app-container .host-tree-confirm-bar[hidden], .st-converter-drawer-app .host-tree-confirm-bar[hidden] {
+  display: none;
+}
+
+.app-container .htc-hint, .st-converter-drawer-app .htc-hint {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.app-container .htc-actions, .st-converter-drawer-app .htc-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 /* 任务控制条（暂停/中止/继续/丢弃）——挂在进度条下方 */
 .app-container .task-controls, .st-converter-drawer-app .task-controls {
   display: flex;

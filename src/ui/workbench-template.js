@@ -121,6 +121,18 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false } = {}) {
           <div class="output-estimate" id="output-estimate-text"></div>
         </div>
         <div class="category-grid" id="category-checkboxes"></div>
+        <div class="host-tree-confirm-bar" id="host-tree-confirm-bar" hidden>
+          <span class="htc-hint"><i class="fa-solid fa-list-check"></i> 统一文件树已就绪：可展开类目明细逐文件勾选</span>
+          <div class="htc-actions">
+            <button type="button" class="menu_button btn-tool" id="btn-host-tree-selectall" title="全选所有类目并清空逐文件排除">全选</button>
+            <button type="button" class="menu_button menu_button_icon btn-accent" id="btn-host-tree-confirm" title="按当前勾选继续转换">
+              <i class="fa-solid fa-check"></i> <span>确认并继续转换</span>
+            </button>
+            <button type="button" class="menu_button" id="btn-host-tree-cancel" title="取消本次拉取，清理半成品">
+              <i class="fa-solid fa-ban"></i> <span>取消拉取</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="unified-options">

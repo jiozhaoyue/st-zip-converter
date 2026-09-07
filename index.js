@@ -17,6 +17,7 @@ import {
   setSelectionState,
   getExcludedPaths,
   setExcludedPaths,
+  selectAll as categorySelectAll,
   resetCategoryFilter,
 } from './src/ui/category-filter.js';
 import {
@@ -169,6 +170,20 @@ async function main(appRoot = document.getElementById('app')) {
       refreshPlan();
     },
   });
+
+  // 统一文件树确认栏按钮（宿主拉取阶段2）
+  const btnHostTreeConfirm = document.getElementById('btn-host-tree-confirm');
+  const btnHostTreeCancel = document.getElementById('btn-host-tree-cancel');
+  const btnHostTreeSelectAll = document.getElementById('btn-host-tree-selectall');
+  if (btnHostTreeConfirm) {
+    btnHostTreeConfirm.addEventListener('click', () => resolveHostTreeConfirm(true));
+  }
+  if (btnHostTreeCancel) {
+    btnHostTreeCancel.addEventListener('click', () => resolveHostTreeConfirm(false));
+  }
+  if (btnHostTreeSelectAll) {
+    btnHostTreeSelectAll.addEventListener('click', () => categorySelectAll());
+  }
 
   // 批量队列转换执行逻辑
   async function runBatchConversion(sourceRecords) {
@@ -630,6 +645,34 @@ async function main(appRoot = document.getElementById('app')) {
   }
 
   // 6. 执行宿主拉取操作（统一选项，产物一律进待导出区）
+
+  // 统一文件树确认栏（宿主拉取阶段2：渲染树 → 用户勾选 → 确认/取消）
+  let hostTreeConfirmResolve = null;
+
+  function waitHostTreeConfirm(taskId) {
+    return new Promise((resolve) => {
+      hostTreeConfirmResolve = resolve;
+      const bar = document.getElementById('host-tree-confirm-bar');
+      if (!bar) {
+        resolve(true); // 无确认栏（测试环境/模板漂移）：维持现状行为直接继续
+        return;
+      }
+      bar.hidden = false;
+      bar.dataset.taskId = taskId;
+      view.setProgress(38, `请在统一文件树勾选需要的文件/类目，确认后继续`);
+    });
+  }
+
+  function resolveHostTreeConfirm(confirmed) {
+    const bar = document.getElementById('host-tree-confirm-bar');
+    if (bar) bar.hidden = true;
+    if (hostTreeConfirmResolve) {
+      const r = hostTreeConfirmResolve;
+      hostTreeConfirmResolve = null;
+      r(confirmed);
+    }
+  }
+
   async function handleHostExport({ resumeCheckpoint = null, resumeTaskId = null } = {}) {
     const btnHostFetch = document.getElementById('btn-host-fetch');
 
@@ -709,6 +752,60 @@ async function main(appRoot = document.getElementById('app')) {
         ? await opfsHandleToFile(rawBackup.handle)
         : rawBackup;
 
+      // 记录 OPFS 半成品归属（中止/丢弃时清理）
+      if (rawBackupIsOpfs) {
+        opfsCleanupId = taskId;
+        opfsCleanupName = opfsName;
+      }
+
+      // ===== 统一文件树：先扫描后拉取（阶段2 等待用户确认勾选）=====
+      // 端点不支持文件级导出（ST/Luker 同），拉取本身全量落盘；
+      // 过滤在本地 convert() 以 excludedPaths 完成，零额外网络成本。
+      view.setProgress(38, `数据包已落盘，正在扫描文件树 (只读中央目录)...`);
+      let hostPlan = null;
+      try {
+        const effectiveTargetPreview = selectedTarget === 'native'
+          ? hostLayoutCode(host.platform)
+          : selectedTarget;
+        hostPlan = await runPlanTask({
+          source: rawBackupBlob,
+          target: effectiveTargetPreview,
+          options: {
+            selection: getSelectionState(),
+            excludedPaths: getExcludedPaths(),
+            includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : false,
+            includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
+            includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
+            extensionMode: getExtensionMode(),
+            keepDevFiles: getKeepDevFiles(),
+            pruneBuiltinAssets: document.getElementById('prune-builtin-check')?.checked ?? true,
+          },
+        });
+      } catch (scanErr) {
+        logger.warn(`统一文件树扫描失败 (${scanErr.message})，降级为按类目勾选继续`);
+      }
+
+      if (hostPlan) {
+        renderCategoryStats(hostPlan);
+        logger.info(`统一文件树就绪: ${hostPlan.totalSourceFiles} 个文件，可展开类目明细逐文件勾选，确认后继续转换`);
+      }
+
+      const confirmed = await waitHostTreeConfirm(taskId);
+      if (!confirmed) {
+        // 用户中止/丢弃：清理半成品与清单
+        await taskManager.abort(taskId);
+        taskControls.hide();
+        if (opfsName) await opfsTmpCleanup(opfsName);
+        resetCategoryFilter();
+        view.setProgress(100, `宿主拉取已取消`);
+        logger.info('宿主拉取在文件树确认阶段被取消，半成品已清理');
+        return;
+      }
+
+      // 确认后的勾选状态即为最终过滤依据（树派生 selection/excludedPaths 已由 category-filter 维护）
+      const confirmedSelection = getSelectionState();
+      const confirmedExcludedPaths = getExcludedPaths();
+
       const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
       const effectiveTarget = selectedTarget === 'native'
         ? hostLayoutCode(host.platform)
@@ -732,28 +829,32 @@ async function main(appRoot = document.getElementById('app')) {
       const hostIncludeBackups = includeBackupsCheck ? includeBackupsCheck.checked : false;
 
       // 如果指定了跨平台直出格式 (非 native) 或启用了原生资产过滤 或 不包含备份聊天与快照
-      // ST 宿主下 selection 由插件内过滤生效，因此只要勾选不全量就必须走转换过滤
+      // ST 宿主下 selection 由插件内过滤生效，因此只要勾选不全量就必须走转换过滤；
+      // 统一文件树确认后的 excludedPaths（逐文件勾选差异）也强制走转换过滤
       const hasPartialSelection = hostSupportsSelection
         ? false
         : Object.keys(FULL_SELECTION).some((k) => !selection[k]);
+      const hasFileExclusions = confirmedExcludedPaths.size > 0;
       const needsTransform = (selectedTarget !== 'native' && selectedTarget !== effectiveTarget)
         || pruneBuiltinAssets
         || !hostIncludeBackups
-        || hasPartialSelection;
+        || hasPartialSelection
+        || hasFileExclusions;
 
       if (needsTransform) {
         targetLayout = selectedTarget === 'native'
           ? hostLayoutCode(host.platform)
           : selectedTarget;
         view.setProgress(40, `数据已拉取，正在转换处理数据包 (${targetLayout.toUpperCase()})...`);
-        logger.info(`进行直出格式与资产过滤处理: ${host.platform.toUpperCase()} -> ${targetLayout.toUpperCase()} (包含备份聊天: ${hostIncludeBackups})`);
+        logger.info(`进行直出格式与资产过滤处理: ${host.platform.toUpperCase()} -> ${targetLayout.toUpperCase()} (包含备份聊天: ${hostIncludeBackups}, 逐文件排除: ${confirmedExcludedPaths.size})`);
 
         const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
         const { report, resultBlob } = await runConversionTask({
           source: rawBackupBlob,
           target: targetLayout,
           options: {
-            selection,
+            selection: confirmedSelection,
+            excludedPaths: confirmedExcludedPaths,
             includeBackups: hostIncludeBackups,
             includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
             includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
@@ -761,6 +862,7 @@ async function main(appRoot = document.getElementById('app')) {
             extensionMode: getExtensionMode(),
             keepDevFiles: getKeepDevFiles(),
             pruneBuiltinAssets,
+            signal,
           },
           onProgress: (cur, total, name) => {
             const pct = total > 0 ? 40 + Math.round((cur / total) * 50) : 60;
@@ -770,6 +872,9 @@ async function main(appRoot = document.getElementById('app')) {
 
         finalBlob = resultBlob;
         view.renderReport(report);
+      } else if (hasFileExclusions || confirmedExcludedPaths.size > 0) {
+        // 不转换时排除集也应同步到当前过滤器（保持树状态与产物一致）
+        setExcludedPaths(confirmedExcludedPaths);
       }
 
       // 执行外部基准增量导出比对 (生成仅包含新增与修改项的纯增量补丁包)
