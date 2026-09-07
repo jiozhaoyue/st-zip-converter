@@ -90,3 +90,17 @@ Long tasks (host fetch / convert / restore) are managed by `src/core/task-manage
 rebuilds a fresh Worker. Forgetting this hangs every subsequent conversion forever
 (no error, just silence). AbortSignal itself cannot be `postMessage`d — strip it
 from serialized options and listen on the main thread instead.
+
+### High-frequency progress callbacks must be rAF-coalesced (bit us 2026-09-07)
+Streaming fetch delivers ~50 chunks/sec; calling `setProgress` synchronously per
+chunk accumulated fourteen 80-107ms longtasks in 20s (real-device measured) and
+the whole host page stuttered. Rule: progress DOM writes go through a
+requestAnimationFrame coalescer (latest value wins). Same applies to any
+per-chunk/per-entry callback chained to DOM.
+
+### Luker backup selection gotcha
+`selection.settings=true` implicitly packs `data/<user>/backups/` (historical
+snapshot dir) server-side — a 2GB backups dir turns a "settings-only" fetch into
+a full 1.4GB download at ~16MB/s (archiver deflate-6 is the server ceiling).
+Warn users before fetching; the fix is trimming snapshots or deselecting
+settings, not plugin-side changes.
