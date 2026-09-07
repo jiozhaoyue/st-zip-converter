@@ -105,7 +105,12 @@ export async function verifyHostPlatform(frontendPlatform) {
     }
   }
 
-  const version = data?.agent ?? data?.version ?? data?.pkgVersion ?? null;
+  // 徽标展示用短版本号：Luker agent 形如 "Luker:2.7.0:Cohee#1207" → 取 "2.7.0"
+  let version = data?.agent ?? data?.version ?? data?.pkgVersion ?? null;
+  if (typeof version === 'string' && version.includes(':')) {
+    const seg = version.split(':')[1];
+    if (seg) version = seg;
+  }
   if (endpointPlatform !== frontendPlatform) {
     logger.warn(`宿主类型前端判定 (${frontendPlatform}) 与服务端校验 (${endpointPlatform}) 不一致，以服务端为准。版本: ${version ?? '未知'}`);
   } else {
