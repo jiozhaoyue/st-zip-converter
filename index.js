@@ -695,6 +695,7 @@ async function main(appRoot = document.getElementById('app')) {
 
     // 断点续传：携带清单重跑（Range 尽力而为，见 fetchHostBackup 内部决策）
     const taskId = resumeTaskId || `fetch-${Date.now()}`;
+    let opfsName = null; // OPFS 半成品名（catch 清理需引用，须在 try 外声明避免 TDZ ReferenceError）
     const { signal, onCheckpoint } = taskManager.start(taskId, '宿主拉取', {
       resumable: true,
       totalBytes: resumeCheckpoint?.totalBytes || 0,
@@ -747,7 +748,7 @@ async function main(appRoot = document.getElementById('app')) {
 
       // 统一源形态：OPFS 句柄 → File（zip.js 原生消费 File，零内存拷贝）
       const rawBackupIsOpfs = rawBackup && rawBackup.kind === 'opfs';
-      const opfsName = rawBackupIsOpfs ? rawBackup.name : null;
+      opfsName = rawBackupIsOpfs ? rawBackup.name : null;
       const rawBackupBlob = rawBackupIsOpfs
         ? await opfsHandleToFile(rawBackup.handle)
         : rawBackup;

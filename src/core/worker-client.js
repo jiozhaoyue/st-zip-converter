@@ -135,6 +135,9 @@ export async function runConversionTask({ source, target, options = {}, onProgre
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       try { worker.terminate(); } catch { /* 已终止 */ }
+      // terminate 后该 Worker 实例不可再用；置空让下一次任务重建，
+      // 否则暂停过一次后所有后续任务都向死 worker postMessage 而永久挂起
+      workerInstance = null;
       cleanup();
       reject(new DOMException('转换任务已被中止/暂停', 'AbortError'));
     };
