@@ -30,12 +30,31 @@ export function createViewController() {
   const warningsSummary = document.getElementById('warnings-summary');
   const warningsLog = document.getElementById('warnings-log');
 
-  function setProgress(percent, label = '') {
+  let pendingProgress = null;
+  let progressRafId = 0;
+
+  function applyProgress() {
+    progressRafId = 0;
+    if (pendingProgress === null) return;
+    const { percent, label } = pendingProgress;
+    pendingProgress = null;
     progressContainer.classList.add('active');
-    const clamped = Math.min(100, Math.max(0, Math.round(percent)));
-    progressBarFill.style.width = `${clamped}%`;
-    progressPercent.textContent = `${clamped}%`;
+    progressBarFill.style.width = `${percent}%`;
+    progressPercent.textContent = `${percent}%`;
     if (label) statusLabel.textContent = label;
+  }
+
+  /**
+   * setProgress 节流版：传输流每秒触发数十次回调，逐次同步写 DOM
+   * 会积累 80-107ms 的 longtask（2026-09-07 真机实测），整页随之卡顿。
+   * 合并到 rAF 一帧一次写入；label 总是取最新值。
+   */
+  function setProgress(percent, label = '') {
+    const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+    pendingProgress = { percent: clamped, label: label || pendingProgress?.label || '' };
+    if (!progressRafId) {
+      progressRafId = requestAnimationFrame(applyProgress);
+    }
   }
 
   function hideProgress() {

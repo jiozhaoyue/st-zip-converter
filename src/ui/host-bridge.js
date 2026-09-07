@@ -240,7 +240,7 @@ export async function opfsHandleToFile(handle) {
  * @param {'st'|'luker'} platform
  * @param {Record<string, boolean>} [selection] 细粒度类目选择
  * @param {object} [options]
- * @param {function(string, number, number, string=): void} [options.onPhase] 阶段回调 (phase, received, total, opfsName?)
+ * @param {function(string, number, number, string=, number=): void} [options.onPhase] 阶段回调 (phase, received, total, opfsName?, currentBps?)
  * @param {string} [options.taskId] 任务标识（OPFS 临时文件名，默认按时间戳）
  * @param {AbortSignal} [options.signal] 中止信号（透传 fetch 与 reader 循环）
  * @param {{receivedBytes?: number, totalBytes?: number, opfsName?: string|null}} [options.resumeCheckpoint] 断点清单
@@ -336,6 +336,9 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
       const chunks = writable ? null : [];
       let received = appendFromByte;
       let lastLoggedPct = -1;
+      // 实测速度采样（滑动窗口 2s）：onPhase 直传，非估算
+      let speedWindowBytes = 0;
+      let speedWindowStart = performance.now();
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -345,6 +348,15 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
           chunks.push(value);
         }
         received += value.length;
+        speedWindowBytes += value.length;
+        const now = performance.now();
+        const windowMs = now - speedWindowStart;
+        let currentBps = null;
+        if (windowMs >= 500) {
+          currentBps = (speedWindowBytes * 1000) / windowMs; // bytes per second
+          speedWindowBytes = 0;
+          speedWindowStart = now;
+        }
         if (transferTotal > 0) {
           const pct = Math.round((received / transferTotal) * 100);
           if (pct >= lastLoggedPct + 10) {
@@ -356,7 +368,7 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
           lastLoggedPct = received - (received % 4194304);
           logger.info(`数据包传输中: 已接收 ${(received / 1048576).toFixed(1)} MB`);
         }
-        onPhase?.('transferring', received, transferTotal, opfsHandle ? opfsName : undefined);
+        onPhase?.('transferring', received, transferTotal, opfsHandle ? opfsName : undefined, currentBps);
       }
       if (writable) {
         await writable.close();

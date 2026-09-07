@@ -113,7 +113,6 @@ async function main(appRoot = document.getElementById('app')) {
   // DOM 元素引用
   const envBadge = document.getElementById('env-badge');
   const hostUserBadge = document.getElementById('host-user-badge');
-  const hostTagPlatform = document.getElementById('host-tag-platform');
   const btnRestoreLuker = document.getElementById('btn-restore-luker');
   const targetSelect = document.getElementById('target-select');
   const btnConvert = document.getElementById('btn-convert');
@@ -460,19 +459,24 @@ async function main(appRoot = document.getElementById('app')) {
     }
   }
 
-  // 3. 宿主环境识别与 Badge 标识
-  const applyHostBadge = (platform) => {
+  // 3. 宿主环境识别与 Badge 标识（单枚合并徽标：运行形态 + 宿主 + 服务端版本）
+  const HOST_BADGE_STYLES = {
+    st: { text: 'SillyTavern 插件', color: 'var(--accent-st)' },
+    luker: { text: 'Luker 插件', color: 'var(--accent-luker)' },
+    standalone: { text: '独立 Web 模式', color: '' },
+  };
+  const applyHostBadge = (platform, version = null) => {
     if (!envBadge) return;
-    if (platform === 'st') {
-      envBadge.textContent = 'SillyTavern 插件模式';
-      envBadge.style.color = 'var(--accent-st)';
-      envBadge.style.borderColor = 'var(--accent-st)';
-    } else if (platform === 'luker') {
-      envBadge.textContent = 'Luker 插件模式';
-      envBadge.style.color = 'var(--accent-luker)';
-      envBadge.style.borderColor = 'var(--accent-luker)';
+    const style = HOST_BADGE_STYLES[platform] || HOST_BADGE_STYLES.standalone;
+    envBadge.textContent = version && platform !== 'standalone'
+      ? `${style.text} · v${version}`
+      : style.text;
+    if (style.color) {
+      envBadge.style.color = style.color;
+      envBadge.style.borderColor = style.color;
     } else {
-      envBadge.textContent = '独立 Web 模式';
+      envBadge.style.color = '';
+      envBadge.style.borderColor = '';
     }
   };
   applyHostBadge(host.platform);
@@ -482,10 +486,6 @@ async function main(appRoot = document.getElementById('app')) {
     if (!host.isPlugin) return;
     const btnHostFetch = document.getElementById('btn-host-fetch');
     if (btnHostFetch) btnHostFetch.style.display = 'inline-flex';
-    if (hostTagPlatform) {
-      hostTagPlatform.textContent = `宿主环境: ${platform.toUpperCase()}`;
-      hostTagPlatform.style.display = 'inline-block';
-    }
 
     // ST 宿主端点不支持 selection：在类目面板头部注入"插件内过滤"提示
     const categoryPanel = document.getElementById('category-panel');
@@ -524,12 +524,14 @@ async function main(appRoot = document.getElementById('app')) {
   // 服务端 /version 二次校验：不一致时以服务端为准并刷新 UI
   if (host.isPlugin) {
     verifyHostPlatform(host.platform)
-      .then(({ platform: verifiedPlatform }) => {
+      .then(({ platform: verifiedPlatform, version }) => {
         if (verifiedPlatform !== host.platform && verifiedPlatform !== 'standalone') {
           host.platform = verifiedPlatform;
-          applyHostBadge(verifiedPlatform);
           applyPluginUi(verifiedPlatform);
           logger.info(`宿主环境已按服务端校验结果刷新: ${verifiedPlatform.toUpperCase()}`);
+        }
+        if (verifiedPlatform !== 'standalone') {
+          applyHostBadge(verifiedPlatform, version || null);
         }
       })
       .catch((err) => console.warn('宿主服务端校验失败:', err));
@@ -720,19 +722,31 @@ async function main(appRoot = document.getElementById('app')) {
         logger.info('ST 宿主端点仅支持全量导出，类目筛选将在导出后由插件内过滤执行');
       }
 
+      // Luker 服务端 selection.settings 会隐含打包 backups/ 目录（历史快照，
+      // src/users.js getUserBackupTargets）：勾了 settings 的用户每次都在拉
+      // 全部历史备份，GB 级 backups 是"慢"的主因——发请求前给出明确警示。
+      const hostIncludeBackups = includeBackupsCheck ? includeBackupsCheck.checked : false;
+      if (hostSupportsSelection && endpointSelection.settings && !hostIncludeBackups) {
+        logger.warn('提示: 勾选「系统设置」时 Luker 服务端会隐含打包 backups/ 历史快照目录（可能数 GB）。'
+          + '若拉取缓慢，请清理酒馆内历史备份快照，或在下方勾选项中取消「系统设置」。');
+      }
+
       const rawBackup = await fetchHostBackup(host.platform, endpointSelection, {
         taskId,
         signal,
         resumeCheckpoint,
-        onPhase: async (phase, received, total, opfsName) => {
+        onPhase: async (phase, received, total, opfsName, currentBps) => {
+          // 实测速度直显（bytes/s → MB/s），非估算
+          const speedText = currentBps ? ` ${((currentBps / 1048576)).toFixed(1)} MB/s` : '';
+          const receivedText = `已接收 ${(received / 1048576).toFixed(1)}${total > 0 ? ` / ${(total / 1048576).toFixed(1)}` : ''} MB`;
           if (phase === 'host-generating') {
-            view.setProgress(12, `宿主正在打包数据 (用户: ${currentHostHandle})，数据量越大耗时越久...`);
+            view.setProgress(12, `[1/3 宿主打包中] 正在请求 /api/users/backup · 服务端正在读取磁盘并压缩打包 (deflate) · 用户: ${currentHostHandle} · 此阶段耗时取决于数据量与服务端 CPU`);
           } else if (phase === 'transferring') {
             if (total > 0) {
               const pct = 15 + Math.round((received / total) * 20);
-              view.setProgress(pct, `数据包传输中 ${Math.round((received / total) * 100)}% (${(received / 1048576).toFixed(1)} MB)`);
+              view.setProgress(pct, `[2/3 传输中] 正在接收宿主打包的 ZIP 流 · ${receivedText}${speedText}`);
             } else {
-              view.setProgress(18, `数据包传输中，已接收 ${(received / 1048576).toFixed(1)} MB...`);
+              view.setProgress(18, `[2/3 传输中] 正在接收宿主打包的 ZIP 流 (无 Content-Length) · ${receivedText}${speedText}`);
             }
             // 断点清单跟踪（TaskManager 节流持久化；中止/暂停时由 fetch 循环 force 落盘）
             if (opfsName) {
@@ -827,7 +841,6 @@ async function main(appRoot = document.getElementById('app')) {
       const shouldSplit = splitVal !== 'none';
       const pruneBuiltinCheck = document.getElementById('prune-builtin-check');
       const pruneBuiltinAssets = pruneBuiltinCheck ? pruneBuiltinCheck.checked : true;
-      const hostIncludeBackups = includeBackupsCheck ? includeBackupsCheck.checked : false;
 
       // 如果指定了跨平台直出格式 (非 native) 或启用了原生资产过滤 或 不包含备份聊天与快照
       // ST 宿主下 selection 由插件内过滤生效，因此只要勾选不全量就必须走转换过滤；

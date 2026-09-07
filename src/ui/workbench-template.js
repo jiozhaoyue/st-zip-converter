@@ -6,6 +6,13 @@
  */
 
 export function getWorkbenchHtml({ isModal = false, isDrawer = false } = {}) {
+  // 状态徽标组：独立/模态模式渲染在顶部 header，抽屉模式渲染在块一 status-row——
+  // 两种模式各自只渲染一份（历史上两处同时渲染产生过重复 id，getElementById 只命中
+  // 第一份，第二份永远停留在"检测中"，且与 env-badge 信息重复——2026-09-07 修复）。
+  const badgesHtml = `
+      <span class="badge" id="env-badge">检测中...</span>
+      <span class="badge badge-user" id="host-user-badge" style="display: none;">用户: 未登录</span>
+  `;
   return `
     ${!isDrawer ? `
     <header class="app-header">
@@ -14,26 +21,20 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false } = {}) {
         <p>SillyTavern · Luker · TauriTavern · PureTavern 互转 · 细粒度导出 · 增量恢复</p>
       </div>
       <div class="header-badges">
-        <div class="badge" id="env-badge">检测中...</div>
-        <div class="badge badge-user" id="host-user-badge" style="display: none;">用户: 未登录</div>
+        ${badgesHtml}
         ${isModal ? '<button type="button" class="st-converter-modal-close-btn" id="btn-close-converter-modal" title="关闭工作台">&times;</button>' : ''}
       </div>
     </header>
-    ` : `
-    <!-- 抽屉模式：状态徽标并入块一状态行 -->
-    <div class="status-row" id="status-row">
-      <span class="badge" id="env-badge">检测中...</span>
-      <span class="badge badge-user" id="host-user-badge" style="display: none;">用户: 未登录</span>
-      <span class="host-tag-platform" id="host-tag-platform" style="display: none;">宿主环境: 检测中</span>
-    </div>
-    `}
+    ` : ''}
 
     <!-- ═══ 块一：状态头 + 数据包区 ═══ -->
     <div class="wb-block wb-block-status">
+      ${isDrawer ? `
       <div class="status-row" id="status-row">
-        <span class="host-tag-platform" id="host-tag-platform" style="display: none;">宿主环境: 检测中</span>
+        ${badgesHtml}
       </div>
-      <div class="quota-bars" id="usage-dashboard"><!-- 两行配额条 (usage-dashboard.js) --></div>
+      ` : ''}
+      <div class="quota-bars" id="usage-dashboard"><!-- 配额条 (usage-dashboard.js) --></div>
 
       <div class="zone-card">
         <div class="zone-title"><i class="fa-solid fa-inbox"></i> 上传暂存区</div>
