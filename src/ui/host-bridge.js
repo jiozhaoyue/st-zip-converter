@@ -167,19 +167,80 @@ export async function getHandle() {
 }
 
 /**
- * 从当前酒馆端点拉取细粒度或全量备份 Zip Blob（三段式进度版）
+ * OPFS 可用性特性检测（仅浏览器；Node/Vitest 环境直接 false）
+ * @returns {boolean}
+ */
+export function supportsOpfs() {
+  try {
+    return typeof navigator !== 'undefined'
+      && typeof navigator.storage?.getDirectory === 'function';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 打开 OPFS 临时目录（fetch-tmp）中的文件句柄
+ * @param {string} name
+ * @param {boolean} [create=true]
+ * @returns {Promise<FileSystemFileHandle|null>} OPFS 不可用时返回 null
+ */
+export async function opfsTmpHandle(name, create = true) {
+  if (!supportsOpfs()) return null;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('fetch-tmp', { create: true });
+    return await dir.getFileHandle(name, { create });
+  } catch (err) {
+    logger.warn(`OPFS 临时文件句柄获取失败 (${err.message})，回退内存模式`);
+    return null;
+  }
+}
+
+/**
+ * 清理 OPFS fetch-tmp 目录下的临时文件（不存在时静默）
+ * @param {string} name
+ */
+export async function opfsTmpCleanup(name) {
+  if (!supportsOpfs()) return;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('fetch-tmp', { create: false });
+    await dir.removeEntry(name);
+    logger.info(`OPFS 临时包已清理: ${name}`);
+  } catch {
+    // 文件不存在或目录不可达：无需清理
+  }
+}
+
+/**
+ * OPFS 句柄 → File（供 convert/zip.js 直接消费）
+ * @param {FileSystemFileHandle} handle
+ * @returns {Promise<File>}
+ */
+export async function opfsHandleToFile(handle) {
+  return handle.getFile();
+}
+
+/**
+ * 从当前酒馆端点拉取细粒度或全量备份 Zip（三段式进度版）
  *
  * 阶段1 宿主生成：TTFB 前等待（宿主打包数据）
  * 阶段2 传输：response.body 流式读取，按 Content-Length 估算百分比
  * 阶段3 插件处理：由调用方 transform 阶段接管（onProgress 回调透传）
  *
+ * 浏览器且有 OPFS 时直写临时文件（GB 级包零内存缓冲），返回句柄描述
+ * { kind:'opfs', name, size, handle }；否则维持内存 Blob 路径。
+ *
  * @param {'st'|'luker'} platform
  * @param {Record<string, boolean>} [selection] 细粒度类目选择
  * @param {object} [options]
  * @param {function(string, number, number): void} [options.onPhase] 阶段回调 (phase, received, total)
- * @returns {Promise<Blob>}
+ * @param {string} [options.taskId] 任务标识（OPFS 临时文件名，默认按时间戳）
+ * @param {AbortSignal} [options.signal] 中止信号（透传 fetch 与 reader 循环）
+ * @returns {Promise<Blob|{kind:'opfs', name:string, size:number, handle:FileSystemFileHandle}>}
  */
-export async function fetchHostBackup(platform, selection = null, { onPhase } = {}) {
+export async function fetchHostBackup(platform, selection = null, { onPhase, taskId, signal } = {}) {
   logger.info(`正在连接宿主 [${platform.toUpperCase()}] 获取授权凭证...`);
   const [token, handle] = await Promise.all([getCsrfToken(), getHandle()]);
 
@@ -199,6 +260,7 @@ export async function fetchHostBackup(platform, selection = null, { onPhase } = 
       'X-CSRF-Token': token,
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
@@ -216,34 +278,78 @@ export async function fetchHostBackup(platform, selection = null, { onPhase } = 
 
   // 流式读取：宿主生成耗时体现在 TTFB，传输耗时体现为 body 逐块到达
   const contentLength = Number(response.headers.get('Content-Length')) || 0;
-  let blob;
-  if (response.body && typeof response.body.getReader === 'function') {
-    onPhase?.('transferring', 0, contentLength);
-    const reader = response.body.getReader();
-    const chunks = [];
-    let received = 0;
-    let lastLoggedPct = -1;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      if (contentLength > 0) {
-        const pct = Math.round((received / contentLength) * 100);
-        if (pct >= lastLoggedPct + 10) {
-          lastLoggedPct = pct;
-          logger.info(`数据包传输中: ${pct}% (${(received / 1048576).toFixed(1)} / ${(contentLength / 1048576).toFixed(1)} MB)`);
-        }
-      } else if (received >= lastLoggedPct + 4194304) {
-        // chunked 响应无 Content-Length：按 4MB 步进汇报
-        lastLoggedPct = received - (received % 4194304);
-        logger.info(`数据包传输中: 已接收 ${(received / 1048576).toFixed(1)} MB`);
-      }
-      onPhase?.('transferring', received, contentLength);
+
+  // OPFS 直写路径：GB 级包零内存缓冲；句柄描述返回给下游按需 getFile()
+  let opfsHandle = null;
+  let opfsName = '';
+  if (supportsOpfs()) {
+    opfsName = `${taskId || `backup_${Date.now()}`}.zip`;
+    opfsHandle = await opfsTmpHandle(opfsName, true);
+    if (opfsHandle) {
+      logger.info(`OPFS 可用，数据包流式直写临时文件: fetch-tmp/${opfsName}`);
     }
-    blob = new Blob(chunks, { type: 'application/zip' });
-  } else {
-    blob = await response.blob();
+  }
+
+  let blob = null;
+  const writable = opfsHandle ? await opfsHandle.createWritable() : null;
+
+  try {
+    if (response.body && typeof response.body.getReader === 'function') {
+      onPhase?.('transferring', 0, contentLength);
+      const reader = response.body.getReader();
+      const chunks = writable ? null : [];
+      let received = 0;
+      let lastLoggedPct = -1;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (writable) {
+          await writable.write(value);
+        } else {
+          chunks.push(value);
+        }
+        received += value.length;
+        if (contentLength > 0) {
+          const pct = Math.round((received / contentLength) * 100);
+          if (pct >= lastLoggedPct + 10) {
+            lastLoggedPct = pct;
+            logger.info(`数据包传输中: ${pct}% (${(received / 1048576).toFixed(1)} / ${(contentLength / 1048576).toFixed(1)} MB)`);
+          }
+        } else if (received >= lastLoggedPct + 4194304) {
+          // chunked 响应无 Content-Length：按 4MB 步进汇报
+          lastLoggedPct = received - (received % 4194304);
+          logger.info(`数据包传输中: 已接收 ${(received / 1048576).toFixed(1)} MB`);
+        }
+        onPhase?.('transferring', received, contentLength);
+      }
+      if (writable) {
+        await writable.close();
+        const file = await opfsHandle.getFile();
+        blob = null;
+        logger.success(`成功从宿主拉取数据包 (OPFS 直写)，大小: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+        await validateBackupShape(file, platform);
+        logger.success(`宿主拉取完成，数据包已落盘 OPFS 临时区`);
+        return { kind: 'opfs', name: opfsName, size: file.size, handle: opfsHandle };
+      }
+      blob = new Blob(chunks, { type: 'application/zip' });
+    } else {
+      blob = await response.blob();
+      if (writable) {
+        // 罕见：response.body 不可流式但 OPFS 可用——落盘后统一走句柄路径
+        await writable.write(blob);
+        await writable.close();
+        const file = await opfsHandle.getFile();
+        await validateBackupShape(file, platform);
+        return { kind: 'opfs', name: opfsName, size: file.size, handle: opfsHandle };
+      }
+    }
+  } catch (err) {
+    // 半成品清理：���存路径无状态；OPFS 路径删临时文件
+    if (writable) {
+      try { await writable.abort(err); } catch { /* 已关闭/中止 */ }
+    }
+    if (opfsHandle) await opfsTmpCleanup(opfsName);
+    throw err;
   }
 
   logger.success(`成功从宿主拉取数据包，大小: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);

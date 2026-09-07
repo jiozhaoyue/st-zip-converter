@@ -42,6 +42,9 @@ import {
   mountSettingsDrawer,
   setupDrawerToggles,
   hostLayoutCode,
+  opfsHandleToFile,
+  opfsTmpCleanup,
+  supportsOpfs,
   FULL_SELECTION,
 } from './src/ui/host-bridge.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
@@ -627,7 +630,8 @@ async function main(appRoot = document.getElementById('app')) {
         logger.info('ST 宿主端点仅支持全量导出，类目筛选将在导出后由插件内过滤执行');
       }
 
-      const rawBackupBlob = await fetchHostBackup(host.platform, endpointSelection, {
+      const rawBackup = await fetchHostBackup(host.platform, endpointSelection, {
+        taskId: `backup_${Date.now()}`,
         onPhase: (phase, received, total) => {
           if (phase === 'host-generating') {
             view.setProgress(12, `宿主正在打包数据 (用户: ${currentHostHandle})，数据量越大耗时越久...`);
@@ -641,7 +645,14 @@ async function main(appRoot = document.getElementById('app')) {
           }
         },
       });
-      
+
+      // 统一源形态：OPFS 句柄 → File（zip.js 原生消费 File，零内存拷贝）
+      const rawBackupIsOpfs = rawBackup && rawBackup.kind === 'opfs';
+      const opfsName = rawBackupIsOpfs ? rawBackup.name : null;
+      const rawBackupBlob = rawBackupIsOpfs
+        ? await opfsHandleToFile(rawBackup.handle)
+        : rawBackup;
+
       const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
       const effectiveTarget = selectedTarget === 'native'
         ? hostLayoutCode(host.platform)
@@ -754,6 +765,7 @@ async function main(appRoot = document.getElementById('app')) {
         refreshExportQueueUI();
         view.setProgress(100, `宿主数据已切分为 ${splitResult.totalParts} 个分卷，已进入待导出区统一处置！`);
         logger.success(`宿主导出分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})，可在待导出区批量下载或存入工作区`);
+        if (opfsName) await opfsTmpCleanup(opfsName);
         return;
       }
 
@@ -770,7 +782,9 @@ async function main(appRoot = document.getElementById('app')) {
 
       view.setProgress(100, `宿主数据包已进入待导出区！`);
       logger.success(`宿主拉取完成: ${finalFilename} (${formatBytes(finalBlob.size)}) —— 可在待导出区下载、选位置导出、存入工作区或写回宿主`);
+      if (opfsName) await opfsTmpCleanup(opfsName);
     } catch (err) {
+      if (typeof opfsName === 'string' && opfsName) await opfsTmpCleanup(opfsName);
       view.setProgress(100, `导出失败: ${err.message}`);
       logger.error('宿主拉取过程发生错误', err);
     } finally {

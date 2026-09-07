@@ -329,7 +329,7 @@ export async function convert(sourcePath, targetPath, {
       if (routed.kind === 'engine-dump') {
         context.sawEngineDump = true;
         if (target === TARGETS.L) {
-          if (!dryRun) writer.addLazy(entry.fileName, lazyOpen(entry));
+          if (!dryRun) writer.addLazy(entry.fileName, lazyOpen(entry), entry.uncompressedSize);
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
@@ -346,7 +346,7 @@ export async function convert(sourcePath, targetPath, {
           const outPath = (target === TARGETS.TT || target === TARGETS.PT)
             ? entry.fileName
             : routed.hubPath;
-          if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+          if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
@@ -358,7 +358,7 @@ export async function convert(sourcePath, targetPath, {
         // TT 应用级私有设置:TT 目标原位保留,其余目标丢弃
         if (target === TARGETS.TT || keepAll || includeAppPrivate) {
           const outPath = target === TARGETS.TT ? entry.fileName : routed.hubPath;
-          if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+          if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
@@ -371,7 +371,7 @@ export async function convert(sourcePath, targetPath, {
       }
       if (routed.kind === 'derived') {
         if (keepAll || includeCache) {
-          if (!dryRun) writer.addLazy(targetEntryPath(routed.hubPath, target), lazyOpen(entry));
+          if (!dryRun) writer.addLazy(targetEntryPath(routed.hubPath, target), lazyOpen(entry), entry.uncompressedSize);
           report.copied(routed.hubPath, entry.uncompressedSize);
         } else {
           entry.skip();
@@ -455,7 +455,7 @@ export async function convert(sourcePath, targetPath, {
           } catch { /* 忽略读取错误 */ }
           if (extensionMode !== EXTENSION_MODES.MANIFEST) {
             const outPath = targetEntryPath(routed.hubPath, target);
-            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
             report.copied(routed.hubPath, entry.uncompressedSize);
           } else {
             report.dropped(routed.hubPath, '轻量清单模式：已解析 Git Remote URL，实体文件不打包');
@@ -475,7 +475,7 @@ export async function convert(sourcePath, targetPath, {
           } catch { /* 忽略读取错误 */ }
           if (extensionMode !== EXTENSION_MODES.MANIFEST) {
             const outPath = targetEntryPath(routed.hubPath, target);
-            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
             report.copied(routed.hubPath, entry.uncompressedSize);
           } else {
             report.dropped(routed.hubPath, '轻量清单模式：已解析 Git 分支，实体文件不打包');
@@ -494,7 +494,7 @@ export async function convert(sourcePath, targetPath, {
           } catch { /* 忽略读取错误 */ }
           if (extensionMode !== EXTENSION_MODES.MANIFEST) {
             const outPath = targetEntryPath(routed.hubPath, target);
-            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+            if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
             report.copied(routed.hubPath, entry.uncompressedSize);
           } else {
             report.dropped(routed.hubPath, '轻量清单模式：已解析 Git Commit，实体文件不打包');
@@ -511,17 +511,22 @@ export async function convert(sourcePath, targetPath, {
 
         // 4. 完整模式下直通写出
         const outPath = targetEntryPath(routed.hubPath, target);
-        if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+        if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
         report.copied(routed.hubPath, entry.uncompressedSize);
         continue;
       }
 
       const outPath = targetEntryPath(routed.hubPath, target);
-      if (!dryRun) writer.addLazy(outPath, lazyOpen(entry));
+      if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
       report.copied(routed.hubPath, entry.uncompressedSize);
     }
 
     await emitSynthesized(writer, report, context, target, selection, { extensionMode });
+    // Store 直存统计汇入报告（zip-io 按扩展名分流 level 0 的条目）
+    if (!dryRun && typeof writer.getStoreStats === 'function') {
+      const storeStats = writer.getStoreStats();
+      report.setStoreBypass(storeStats.count, storeStats.bytes);
+    }
     await writer.close();
     return report;
   } catch (error) {

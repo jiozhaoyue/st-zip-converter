@@ -19,11 +19,37 @@ import { logger } from './logger.js';
 const CONCURRENCY = Math.max(2, Math.min(8, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 6));
 // 262144: zip.js 默认 65536 偏小，大文件流式循环次数过多
 const CHUNK_SIZE = 262144;
+// vendor 压缩/解压线程池上限：默认仅 2，GB 级包是瓶颈；拉满到物理核心数（至少 4）
+const HW = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
 
 zip.configure({
   useWebWorkers: true,
   chunkSize: CHUNK_SIZE,
+  maxWorkers: Math.max(4, HW),
 });
+
+/**
+ * 已压缩内容扩展名集合：对这些条目 deflate 是纯浪费 CPU（压缩率≈0），
+ * Store 直存（level 0）可大幅加速写出。
+ */
+export const STORE_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.ico',
+  '.mp4', '.webm', '.mp3', '.ogg', '.wav', '.flac',
+  '.db', '.sqlite', '.sqlite3', '.zst', '.7z', '.zip', '.gz', '.br', '.rar',
+]);
+
+/**
+ * 条目压缩等级分流：已压缩扩展名 → 0 (Store)，其余透传用户等级。
+ * @param {string} fileName 条目名（可能带路径）
+ * @param {number} userLevel 用户选择的压缩等级 0-9
+ * @returns {number} 实际生效的压缩等级
+ */
+export function entryCompressionLevel(fileName, userLevel) {
+  const base = fileName.slice(fileName.lastIndexOf('/') + 1);
+  const dot = base.lastIndexOf('.');
+  if (dot === -1) return userLevel;
+  return STORE_EXTENSIONS.has(base.slice(dot).toLowerCase()) ? 0 : userLevel;
+}
 
 // 注册 Method 93 (Zstandard) 解码器
 class ZstdDecompressionStream extends TransformStream {
@@ -121,11 +147,25 @@ export const zipIo = {
     const written = new Set();
     const inflight = new Set();
     let firstEntryDone = false;
+    // Store 直存统计（report 消费）：命中已压缩扩展名而绕过 deflate 的条目数与字节量
+    const storeStats = { count: 0, bytes: 0 };
 
     function track(promise) {
       const wrapped = promise.finally(() => inflight.delete(wrapped));
       inflight.add(wrapped);
       return wrapped;
+    }
+
+    function levelFor(name) {
+      const lv = entryCompressionLevel(name, level);
+      return lv;
+    }
+
+    function noteStore(name, byteSize) {
+      if (levelFor(name) === 0 && level !== 0) {
+        storeStats.count += 1;
+        storeStats.bytes += byteSize || 0;
+      }
     }
 
     /**
@@ -144,28 +184,32 @@ export const zipIo = {
       async add(name, data) {
         if (written.has(name)) return;
         written.add(name);
+        const entryLevel = levelFor(name);
+        noteStore(name, data.byteLength ?? data.length ?? 0);
         if (!firstEntryDone) {
           // 首条目（通常为 manifest.json / 顺序敏感条目）先落盘再放开并发，
           // 保证中央目录首条顺序与恢复端 manifest 处理兼容
-          await track(writer.add(name, new zip.Uint8ArrayReader(new Uint8Array(data))));
+          await track(writer.add(name, new zip.Uint8ArrayReader(new Uint8Array(data)), { level: entryLevel }));
           firstEntryDone = true;
           return;
         }
         await waitForSlot();
-        return track(writer.add(name, new zip.Uint8ArrayReader(new Uint8Array(data))));
+        return track(writer.add(name, new zip.Uint8ArrayReader(new Uint8Array(data)), { level: entryLevel }));
       },
 
       /**
        * 流式直通条目（pass-through 大文件零拷贝）
        */
-      addLazy(name, openFn) {
+      addLazy(name, openFn, byteSize = 0) {
         if (written.has(name)) return Promise.resolve();
         written.add(name);
+        const entryLevel = levelFor(name);
+        noteStore(name, byteSize);
         const task = (async () => {
           if (!firstEntryDone) {
             // 首条目独占写入（同 add 的保序语义）
             const { readable, writable } = new TransformStream({}, { highWaterMark: 16 });
-            const addPromise = writer.add(name, readable);
+            const addPromise = writer.add(name, readable, { level: entryLevel });
             openFn((err, source) => {
               if (err) {
                 writable.abort(err);
@@ -179,7 +223,7 @@ export const zipIo = {
           }
           await waitForSlot();
           const { readable, writable } = new TransformStream({}, { highWaterMark: 16 });
-          const addPromise = writer.add(name, readable);
+          const addPromise = writer.add(name, readable, { level: entryLevel });
           openFn((err, source) => {
             if (err) {
               writable.abort(err);
@@ -200,6 +244,12 @@ export const zipIo = {
           await Promise.race(inflight);
         }
       },
+
+      /**
+       * Store 直存统计（命中已压缩扩展名绕过 deflate 的条目）
+       * @returns {{count: number, bytes: number}}
+       */
+      getStoreStats: () => ({ ...storeStats }),
 
       async close() {
         // 收齐全部在飞写入再关闭，保证中央目录完整

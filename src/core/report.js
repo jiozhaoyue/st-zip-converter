@@ -64,6 +64,7 @@ export class Report {
   #filtered = [];
   #warnings = [];
   #synthesized = [];
+  #storeBypass = { count: 0, bytes: 0 };
 
   constructor(sourceLayout, target) {
     this.#sourceLayout = sourceLayout;
@@ -72,6 +73,15 @@ export class Report {
 
   get target() {
     return this.#target;
+  }
+
+  /**
+   * 记录 Store 直存统计（已压缩扩展名条目绕过 deflate 的数量与字节量）
+   * @param {number} count
+   * @param {number} bytes
+   */
+  setStoreBypass(count, bytes) {
+    this.#storeBypass = { count: count || 0, bytes: bytes || 0 };
   }
 
   setSourceLayout(layout) {
@@ -124,6 +134,7 @@ export class Report {
       filtered: this.#filtered,
       synthesized: this.#synthesized,
       warnings: this.#warnings,
+      storeBypass: { ...this.#storeBypass },
       totals: {
         copied: [...this.#modules.values()].reduce((sum, m) => sum + m.copied, 0),
         dropped: this.#dropped.length,
