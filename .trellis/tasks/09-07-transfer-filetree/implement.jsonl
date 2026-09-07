@@ -1,0 +1,4 @@
+{"file": "docs/superpowers/specs/2026-09-07-transfer-speed-task-control-filetree.md", "reason": "权威技术设计：OPFS流式拉取/智能压缩/TaskManager/统一文件树全规格"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "平台zip布局/流式IO/内存预算/秘密保留约束，改造zip-io与transform必读"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试矩阵/验证命令/内存限制/禁用模式"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "CSS双前缀铁律/命名空间隔离/宿主检测协议，UI接线必读"}

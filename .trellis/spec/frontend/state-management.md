@@ -62,3 +62,31 @@ function download(blob, filename) {
 ### 3. Streamed Reading via `@zip.js/zip.js`
 - Use `BlobReader` instead of reading blobs into `ArrayBuffer` via `blob.arrayBuffer()`.
 - Use `BlobWriter` to write chunks directly into the browser's blob store without holding intermediate byte arrays in JS heap.
+
+---
+
+## Long-Task State: TaskManager + OPFS Half-Products (2026-09-07)
+
+Long tasks (host fetch / convert / restore) are managed by `src/core/task-manager.js`
+(pure state machine, adapter-injected persistence) with UI controls in
+`src/ui/task-controls.js`. State: `running | paused | aborted | done | failed`.
+
+### OPFS half-product lifecycle (fetch tasks)
+- Streaming fetch writes to OPFS `fetch-tmp/<taskId>.zip` — never buffer GB-scale
+  bodies in memory (`chunks.push` + `new Blob(chunks)` is the old anti-pattern).
+- **Pause semantics**: close the writable (do NOT abort) so the half-file survives;
+  checkpoint `{ receivedBytes, totalBytes, opfsName }` persists via the adapter.
+- **Resume**: try `Range: bytes=<received>-` first; a non-206 response means the
+  endpoint does not support ranges → discard the half-file and refetch from zero.
+- **Abort/discard**: `removeEntry` the temp file. Success: downstream consumes the
+  File via `getFile()` (zip.js natively accepts File), then cleanup.
+- Catch-block cleanup must reference variables declared OUTSIDE the `try` — an
+  `opfsName` declared inside `try` hits a TDZ ReferenceError in the error path.
+
+### Shared Worker + AbortSignal trap (bit us 2026-09-07)
+`worker-client.js` reuses ONE `Worker` instance. On pause/abort we call
+`worker.terminate()` — a terminated Worker ignores all future `postMessage`.
+**Rule**: after `terminate()`, set `workerInstance = null` so the next task
+rebuilds a fresh Worker. Forgetting this hangs every subsequent conversion forever
+(no error, just silence). AbortSignal itself cannot be `postMessage`d — strip it
+from serialized options and listen on the main thread instead.

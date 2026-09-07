@@ -1,0 +1,4 @@
+{"file": "docs/superpowers/specs/2026-09-07-transfer-speed-task-control-filetree.md", "reason": "验收对照权威设计"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量检查基准"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "前端质量基准（bundle预算/引擎一致性/冒烟测试）"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "CSS作用域合规检查依据"}
