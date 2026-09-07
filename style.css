@@ -653,6 +653,42 @@ body:has(> .app-container) {
   justify-content: space-between;
 }
 
+/* 任务控制条（暂停/中止/继续/丢弃）——挂在进度条下方 */
+.app-container .task-controls, .st-converter-drawer-app .task-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.app-container .task-controls[hidden], .st-converter-drawer-app .task-controls[hidden] {
+  display: none;
+}
+
+.app-container .tc-btn, .st-converter-drawer-app .tc-btn {
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.app-container .tc-btn:hover, .st-converter-drawer-app .tc-btn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.app-container .tc-btn.tc-danger, .st-converter-drawer-app .tc-btn.tc-danger {
+  border-color: color-mix(in srgb, var(--danger, #c0392b) 45%, transparent);
+  background: color-mix(in srgb, var(--danger, #c0392b) 10%, transparent);
+}
+
+.app-container .tc-btn.tc-danger:hover, .st-converter-drawer-app .tc-btn.tc-danger:hover {
+  background: color-mix(in srgb, var(--danger, #c0392b) 22%, transparent);
+}
+
 /* ==========================================================================
    转换报告卡片 (Report Panel)
    ========================================================================== */

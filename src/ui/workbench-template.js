@@ -61,6 +61,12 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false } = {}) {
           <span id="status-label">准备就绪</span>
           <span id="progress-percent">0%</span>
         </div>
+        <div class="task-controls" id="task-controls" hidden>
+          <button type="button" class="tc-btn" id="tc-pause" title="暂停任务（记录断点，可续传）"><i class="fa-solid fa-pause"></i> 暂停</button>
+          <button type="button" class="tc-btn tc-danger" id="tc-abort" title="中止任务（丢弃半成品）"><i class="fa-solid fa-xmark"></i> 中止</button>
+          <button type="button" class="tc-btn" id="tc-resume" title="从断点继续" hidden><i class="fa-solid fa-play"></i> 继续</button>
+          <button type="button" class="tc-btn tc-danger" id="tc-discard" title="丢弃断点与半成品" hidden><i class="fa-solid fa-trash"></i> 丢弃</button>
+        </div>
       </div>
 
       <div class="report-panel" id="report-panel">

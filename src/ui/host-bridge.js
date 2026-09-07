@@ -232,15 +232,21 @@ export async function opfsHandleToFile(handle) {
  * 浏览器且有 OPFS 时直写临时文件（GB 级包零内存缓冲），返回句柄描述
  * { kind:'opfs', name, size, handle }；否则维持内存 Blob 路径。
  *
+ * 暂停/中止：signal.aborted 时 — OPFS 路径先 close 保住半成品（暂停语义：
+ * 半成品保留给续传），随后抛 AbortError；调用方 pause 前用 onCheckpoint 落清单。
+ * 续传：resumeCheckpoint.receivedBytes > 0 时先尝试 Range 请求从断点接（追加写
+ * OPFS）；响应非 206 或端点不支持 → 整包重拉（半成品作废，logger.warn 提示）。
+ *
  * @param {'st'|'luker'} platform
  * @param {Record<string, boolean>} [selection] 细粒度类目选择
  * @param {object} [options]
- * @param {function(string, number, number): void} [options.onPhase] 阶段回调 (phase, received, total)
+ * @param {function(string, number, number, string=): void} [options.onPhase] 阶段回调 (phase, received, total, opfsName?)
  * @param {string} [options.taskId] 任务标识（OPFS 临时文件名，默认按时间戳）
  * @param {AbortSignal} [options.signal] 中止信号（透传 fetch 与 reader 循环）
+ * @param {{receivedBytes?: number, totalBytes?: number, opfsName?: string|null}} [options.resumeCheckpoint] 断点清单
  * @returns {Promise<Blob|{kind:'opfs', name:string, size:number, handle:FileSystemFileHandle}>}
  */
-export async function fetchHostBackup(platform, selection = null, { onPhase, taskId, signal } = {}) {
+export async function fetchHostBackup(platform, selection = null, { onPhase, taskId, signal, resumeCheckpoint } = {}) {
   logger.info(`正在连接宿主 [${platform.toUpperCase()}] 获取授权凭证...`);
   const [token, handle] = await Promise.all([getCsrfToken(), getHandle()]);
 
@@ -252,13 +258,21 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
   logger.info(`向宿主发起数据包导出请求 (用户: ${handle})...`);
   onPhase?.('host-generating', 0, 0);
 
+  // 续传：优先 Range 从断点接（追加写 OPFS 半成品）
+  const resumeBytes = Math.max(0, resumeCheckpoint?.receivedBytes || 0);
+  const resumeOpfsName = resumeCheckpoint?.opfsName || null;
+  const useRangeResume = resumeBytes > 0 && supportsOpfs() && Boolean(resumeOpfsName);
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-CSRF-Token': token,
+  };
+  if (useRangeResume) headers.Range = `bytes=${resumeBytes}-`;
+
   const response = await fetch('/api/users/backup', {
     method: 'POST',
     credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRF-Token': token,
-    },
+    headers,
     body: JSON.stringify(body),
     signal,
   });
@@ -276,14 +290,32 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
     throw err;
   }
 
+  let appendFromByte = 0;
+  let opfsName = '';
+  if (useRangeResume) {
+    if (response.status === 206) {
+      // Range 续传成立：追加到既有半成品
+      opfsName = resumeOpfsName;
+      appendFromByte = resumeBytes;
+      logger.info(`宿主支持 Range 续传，从断点 ${formatBytes(resumeBytes)} 处继续接收`);
+    } else {
+      // 非 206：端点不支持（Luker archiver 动态流大概率不支持）→ 整包重拉
+      logger.warn('宿主端点不支持 Range 续传（响应非 206），半成品作废，整包重拉');
+      await opfsTmpCleanup(resumeOpfsName);
+    }
+  }
+
   // 流式读取：宿主生成耗时体现在 TTFB，传输耗时体现为 body 逐块到达
   const contentLength = Number(response.headers.get('Content-Length')) || 0;
+  // 206 响应的 Content-Length 是剩余长度
+  const transferTotal = response.status === 206 && contentLength > 0
+    ? contentLength + appendFromByte
+    : contentLength;
 
   // OPFS 直写路径：GB 级包零内存缓冲；句柄描述返回给下游按需 getFile()
   let opfsHandle = null;
-  let opfsName = '';
   if (supportsOpfs()) {
-    opfsName = `${taskId || `backup_${Date.now()}`}.zip`;
+    opfsName = opfsName || `${taskId || `backup_${Date.now()}`}.zip`;
     opfsHandle = await opfsTmpHandle(opfsName, true);
     if (opfsHandle) {
       logger.info(`OPFS 可用，数据包流式直写临时文件: fetch-tmp/${opfsName}`);
@@ -292,13 +324,17 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
 
   let blob = null;
   const writable = opfsHandle ? await opfsHandle.createWritable() : null;
+  if (writable && appendFromByte === 0) {
+    // 全新拉取：清空既有同名半成品（Range 追加路径保留内容）
+    await writable.truncate(0);
+  }
 
   try {
     if (response.body && typeof response.body.getReader === 'function') {
-      onPhase?.('transferring', 0, contentLength);
+      onPhase?.('transferring', appendFromByte, transferTotal, opfsHandle ? opfsName : undefined);
       const reader = response.body.getReader();
       const chunks = writable ? null : [];
-      let received = 0;
+      let received = appendFromByte;
       let lastLoggedPct = -1;
       for (;;) {
         const { done, value } = await reader.read();
@@ -309,26 +345,24 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
           chunks.push(value);
         }
         received += value.length;
-        if (contentLength > 0) {
-          const pct = Math.round((received / contentLength) * 100);
+        if (transferTotal > 0) {
+          const pct = Math.round((received / transferTotal) * 100);
           if (pct >= lastLoggedPct + 10) {
             lastLoggedPct = pct;
-            logger.info(`数据包传输中: ${pct}% (${(received / 1048576).toFixed(1)} / ${(contentLength / 1048576).toFixed(1)} MB)`);
+            logger.info(`数据包传输中: ${pct}% (${(received / 1048576).toFixed(1)} / ${(transferTotal / 1048576).toFixed(1)} MB)`);
           }
         } else if (received >= lastLoggedPct + 4194304) {
           // chunked 响应无 Content-Length：按 4MB 步进汇报
           lastLoggedPct = received - (received % 4194304);
           logger.info(`数据包传输中: 已接收 ${(received / 1048576).toFixed(1)} MB`);
         }
-        onPhase?.('transferring', received, contentLength);
+        onPhase?.('transferring', received, transferTotal, opfsHandle ? opfsName : undefined);
       }
       if (writable) {
         await writable.close();
         const file = await opfsHandle.getFile();
-        blob = null;
         logger.success(`成功从宿主拉取数据包 (OPFS 直写)，大小: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
         await validateBackupShape(file, platform);
-        logger.success(`宿主拉取完成，数据包已落盘 OPFS 临时区`);
         return { kind: 'opfs', name: opfsName, size: file.size, handle: opfsHandle };
       }
       blob = new Blob(chunks, { type: 'application/zip' });
@@ -344,7 +378,15 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
       }
     }
   } catch (err) {
-    // 半成品清理：���存路径无状态；OPFS 路径删临时文件
+    if (signal?.aborted || err?.name === 'AbortError') {
+      // 暂停/中止语义：OPFS 半成品 close 保留（续传判断由调用方决定），不删清单
+      if (writable) {
+        try { await writable.close(); } catch { /* 已关闭 */ }
+      }
+      logger.info(`传输被暂停/中止，OPFS 半成品已保留: fetch-tmp/${opfsName}`);
+      throw err;
+    }
+    // 真实错误：半成品清理（内存路径无状态；OPFS 路径删临时文件）
     if (writable) {
       try { await writable.abort(err); } catch { /* 已关闭/中止 */ }
     }

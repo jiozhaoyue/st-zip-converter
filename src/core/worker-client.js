@@ -83,10 +83,13 @@ export async function runPlanTask({ source, target, options = {} }) {
  * @param {Blob|File|string} params.source
  * @param {string} params.target
  * @param {object} [params.options]
- * @param {function} [params.onProgress]
+ * @param {AbortSignal} [params.options.signal] 中止信号（Worker 路径触发 terminate，主线程路径透传 convert）
+ * @param {Map<string,number>|Object<string,number>} [params.options.resumeCrcMap] 断点续传 crc 清单
+ * @param {function} [params.onProgress] (current, total, filename, crc32)
+ * @param {function} [params.onEntryDone] (源条目名, crc32)——主线程路径直通；Worker 路径由 onProgress 累积
  * @returns {Promise<{ report: object, resultBlob?: Blob, targetPath?: string }>}
  */
-export async function runConversionTask({ source, target, options = {}, onProgress }) {
+export async function runConversionTask({ source, target, options = {}, onProgress, onEntryDone }) {
   // 如果在 Node/Vitest 或没有 Worker 环境，或者传入的是路径字符串，执行同构主线程降级
   if (!supportsWebWorker() || typeof source === 'string') {
     const isBlob = typeof source !== 'string';
@@ -101,6 +104,7 @@ export async function runConversionTask({ source, target, options = {}, onProgre
       target,
       io: zipIo,
       onProgress,
+      onEntryDone,
     });
     const resultBlob = isBlob ? await destination.getData() : null;
     return {
@@ -110,7 +114,7 @@ export async function runConversionTask({ source, target, options = {}, onProgre
     };
   }
 
-  // 浏览器多线程环境
+  // 浏览器多线程环境：signal.aborted 时立即 terminate（半成品 BlobWriter 丢弃）
   const worker = getWorker();
   const id = ++messageIdCounter;
 
@@ -119,25 +123,45 @@ export async function runConversionTask({ source, target, options = {}, onProgre
     excludedPaths: options.excludedPaths instanceof Set
       ? Array.from(options.excludedPaths)
       : options.excludedPaths,
+    resumeCrcMap: options.resumeCrcMap instanceof Map
+      ? Object.fromEntries(options.resumeCrcMap)
+      : (options.resumeCrcMap ?? undefined),
   };
+  delete serializedOptions.signal; // AbortSignal 不可 postMessage，主线程侧轮询 terminate
+
+  // 主线程累积断点清单（PROGRESS 消息带 crc32；节流落盘由调用方 onCheckpoint 完成）
+  const doneEntries = new Map();
 
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      try { worker.terminate(); } catch { /* 已终止 */ }
+      cleanup();
+      reject(new DOMException('转换任务已被中止/暂停', 'AbortError'));
+    };
+    const cleanup = () => {
+      worker.removeEventListener('message', handler);
+      options.signal?.removeEventListener?.('abort', onAbort);
+    };
+    options.signal?.addEventListener?.('abort', onAbort);
+
     const handler = (e) => {
       const data = e.data;
       if (!data || data.id !== id) return;
 
       if (data.type === 'PROGRESS') {
+        if (data.crc32 != null) doneEntries.set(data.filename, data.crc32);
         if (typeof onProgress === 'function') {
-          onProgress(data.current, data.total, data.filename);
+          onProgress(data.current, data.total, data.filename, data.crc32);
         }
       } else if (data.type === 'DONE') {
-        worker.removeEventListener('message', handler);
+        cleanup();
         resolve({
           report: data.report,
           resultBlob: data.resultBlob,
+          doneEntries,
         });
       } else if (data.type === 'ERROR') {
-        worker.removeEventListener('message', handler);
+        cleanup();
         reject(new Error(data.error));
       }
     };

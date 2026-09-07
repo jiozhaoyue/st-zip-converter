@@ -64,6 +64,7 @@ export class Report {
   #filtered = [];
   #warnings = [];
   #synthesized = [];
+  #resumed = [];
   #storeBypass = { count: 0, bytes: 0 };
 
   constructor(sourceLayout, target) {
@@ -121,6 +122,16 @@ export class Report {
     this.#synthesized.push(hubPath);
   }
 
+  /**
+   * 断点续传命中：crc32 清单匹配，本条目跳过重写
+   * @param {string} hubPath
+   */
+  resumed(hubPath) {
+    const bucket = this.#module(classifyModule(hubPath));
+    bucket.resumed = (bucket.resumed || 0) + 1;
+    this.#resumed.push(hubPath);
+  }
+
   warn(message) {
     this.#warnings.push(message);
   }
@@ -134,12 +145,14 @@ export class Report {
       filtered: this.#filtered,
       synthesized: this.#synthesized,
       warnings: this.#warnings,
+      resumed: this.#resumed,
       storeBypass: { ...this.#storeBypass },
       totals: {
         copied: [...this.#modules.values()].reduce((sum, m) => sum + m.copied, 0),
         dropped: this.#dropped.length,
         filtered: this.#filtered.length,
         synthesized: this.#synthesized.length,
+        resumed: this.#resumed.length,
         warnings: this.#warnings.length,
       },
     };

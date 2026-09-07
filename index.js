@@ -28,8 +28,10 @@ import {
   listStoredFiles,
 } from './src/storage/db.js';
 import { generateDeltaArchive } from './src/core/delta.js';
+import { TaskManager, TASK_STATES } from './src/core/task-manager.js';
 import { renderStashList, filterStashFiles } from './src/ui/stash-list.js';
 import { ExportQueue, renderExportQueue } from './src/ui/export-queue.js';
+import { initTaskControls } from './src/ui/task-controls.js';
 import { renderUsageDashboard } from './src/ui/usage-dashboard.js';
 import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
 import {
@@ -276,6 +278,39 @@ async function main(appRoot = document.getElementById('app')) {
 
   // 待导出区（所有产物统一出口）
   const exportQueue = new ExportQueue();
+
+  // 长任务管理器（宿主拉取/转换/写回共用）+ 进度条旁任务控制条
+  const taskManager = new TaskManager();
+  const taskControls = initTaskControls({
+    taskManager,
+    onPause: (id) => {
+      // 拉取执行体在 reader 循环内感知 signal.aborted 后自行 checkpoint+cancel；
+      // 此处仅记录暂停请求已发起。
+      logger.info(`暂停请求已发送: ${id}`);
+    },
+    onResume: (id, checkpoint) => {
+      if (id.startsWith('fetch-')) handleHostExport({ resumeCheckpoint: checkpoint, resumeTaskId: id });
+    },
+    onAbort: (id) => {
+      logger.warn(`任务已中止: ${id}`);
+      if (opfsCleanupId === id) {
+        opfsTmpCleanup(opfsCleanupName);
+        opfsCleanupId = null;
+        opfsCleanupName = null;
+      }
+    },
+    onDiscard: (id) => {
+      logger.warn(`断点与半成品已丢弃: ${id}`);
+      if (opfsCleanupId === id) {
+        opfsTmpCleanup(opfsCleanupName);
+        opfsCleanupId = null;
+        opfsCleanupName = null;
+      }
+    },
+  });
+  // 当前 OPFS 半成品归属（中止/丢弃时清理）
+  let opfsCleanupId = null;
+  let opfsCleanupName = null;
   function refreshExportQueueUI() {
     if (!exportQueuePanel) return;
     renderExportQueue({
@@ -595,7 +630,7 @@ async function main(appRoot = document.getElementById('app')) {
   }
 
   // 6. 执行宿主拉取操作（统一选项，产物一律进待导出区）
-  async function handleHostExport() {
+  async function handleHostExport({ resumeCheckpoint = null, resumeTaskId = null } = {}) {
     const btnHostFetch = document.getElementById('btn-host-fetch');
 
     // 检查差量补丁模式是否已指定基准包
@@ -615,6 +650,17 @@ async function main(appRoot = document.getElementById('app')) {
 
     const selectedTarget = targetSelect ? targetSelect.value : 'native';
 
+    // 断点续传：携带清单重跑（Range 尽力而为，见 fetchHostBackup 内部决策）
+    const taskId = resumeTaskId || `fetch-${Date.now()}`;
+    const { signal, onCheckpoint } = taskManager.start(taskId, '宿主拉取', {
+      resumable: true,
+      totalBytes: resumeCheckpoint?.totalBytes || 0,
+    });
+    taskControls.showRunning(taskId, { totalBytes: resumeCheckpoint?.totalBytes || 0 });
+    if (resumeCheckpoint) {
+      logger.info(`续传任务 ${taskId}: 断点 ${formatBytes(resumeCheckpoint.receivedBytes || 0)}`);
+    }
+
     try {
       view.setProgress(10, `正在向宿主 ${host.platform.toUpperCase()} 请求数据包...`);
       logger.info(`向宿主请求导出数据包，勾选类目: ${Object.keys(selection).filter((k) => selection[k]).join(', ')}`);
@@ -631,8 +677,10 @@ async function main(appRoot = document.getElementById('app')) {
       }
 
       const rawBackup = await fetchHostBackup(host.platform, endpointSelection, {
-        taskId: `backup_${Date.now()}`,
-        onPhase: (phase, received, total) => {
+        taskId,
+        signal,
+        resumeCheckpoint,
+        onPhase: async (phase, received, total, opfsName) => {
           if (phase === 'host-generating') {
             view.setProgress(12, `宿主正在打包数据 (用户: ${currentHostHandle})，数据量越大耗时越久...`);
           } else if (phase === 'transferring') {
@@ -641,6 +689,14 @@ async function main(appRoot = document.getElementById('app')) {
               view.setProgress(pct, `数据包传输中 ${Math.round((received / total) * 100)}% (${(received / 1048576).toFixed(1)} MB)`);
             } else {
               view.setProgress(18, `数据包传输中，已接收 ${(received / 1048576).toFixed(1)} MB...`);
+            }
+            // 断点清单跟踪（TaskManager 节流持久化；中止/暂停时由 fetch 循环 force 落盘）
+            if (opfsName) {
+              await onCheckpoint({
+                receivedBytes: received,
+                totalBytes: total,
+                opfsName,
+              }, { bytes: received });
             }
           }
         },
@@ -782,11 +838,33 @@ async function main(appRoot = document.getElementById('app')) {
 
       view.setProgress(100, `宿主数据包已进入待导出区！`);
       logger.success(`宿主拉取完成: ${finalFilename} (${formatBytes(finalBlob.size)}) —— 可在待导出区下载、选位置导出、存入工作区或写回宿主`);
+      await taskManager.complete(taskId);
+      taskControls.hide();
       if (opfsName) await opfsTmpCleanup(opfsName);
     } catch (err) {
-      if (typeof opfsName === 'string' && opfsName) await opfsTmpCleanup(opfsName);
-      view.setProgress(100, `导出失败: ${err.message}`);
-      logger.error('宿主拉取过程发生错误', err);
+      if (err?.name === 'AbortError') {
+        // 暂停（signal.aborted + paused 状态）与中止在 UI 层表现一致；中止路径 taskControls 已复位
+        const rec = taskManager.get(taskId);
+        if (rec && rec.state === TASK_STATES.PAUSED) {
+          const total = rec.checkpoint?.totalBytes || rec.totalBytes || 0;
+          const received = rec.receivedBytes || rec.checkpoint?.receivedBytes || 0;
+          const pct = total > 0 ? Math.round((received / total) * 100) : 0;
+          taskControls.showPaused(taskId, { percent: pct, receivedBytes: received, totalBytes: total });
+          taskControls.setPausedCheckpoint(taskId, rec.checkpoint);
+          view.setProgress(pct, `任务已暂停，可从断点继续或丢弃`);
+          logger.info(`任务已暂停于 ${pct}% (${formatBytes(received)})`);
+        } else if (rec && rec.state === TASK_STATES.ABORTED) {
+          taskControls.hide();
+          view.setProgress(100, `任务已中止`);
+          if (typeof opfsName === 'string' && opfsName) await opfsTmpCleanup(opfsName);
+        }
+      } else {
+        await taskManager.fail(taskId, Boolean(opfsName));
+        taskControls.hide();
+        if (typeof opfsName === 'string' && opfsName) await opfsTmpCleanup(opfsName);
+        view.setProgress(100, `导出失败: ${err.message}`);
+        logger.error('宿主拉取过程发生错误', err);
+      }
     } finally {
       if (btnHostFetch) btnHostFetch.disabled = false;
     }

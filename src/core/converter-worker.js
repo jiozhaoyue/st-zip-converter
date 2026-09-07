@@ -43,13 +43,14 @@ self.onmessage = async (e) => {
         excludedPaths: excludedSet,
         target,
         io: zipIo,
-        onProgress: (current, total, filename) => {
+        onProgress: (current, total, filename, crc32) => {
           self.postMessage({
             type: 'PROGRESS',
             id,
             current,
             total,
             filename,
+            crc32: crc32 ?? null,
           });
         },
       });

@@ -181,6 +181,11 @@ const L_SELECTION = Object.freeze({
  * @param {string} options.target st|l|tt|pt
  * @param {boolean} [options.keepAll] 保留派生缓存与 TT 私有目录
  * @param {boolean} [options.dryRun] 只产出报告不写文件(数据条目跳过读取)
+ * @param {AbortSignal} [options.signal] 中止信号（每条目边界检查；暂停/中止由 TaskManager 触发）
+ * @param {Map<string,number>|Object<string,number>} [options.resumeCrcMap] 断点续传清单：
+ *   源条目名 → 已写入目标时的 crc32；命中且值相等的条目跳过（report 计入 resumedCount）
+ * @param {function(string, number): void} [options.onEntryDone] 每完成一个源条目回调
+ *   (源条目名, crc32)——供 TaskManager 更新断点清单
  * @returns {Promise<Report>}
  */
 export async function convert(sourcePath, targetPath, {
@@ -198,6 +203,9 @@ export async function convert(sourcePath, targetPath, {
   extensionMode = EXTENSION_MODES.FULL,
   keepDevFiles = false,
   pruneBuiltinAssets = false,
+  signal,
+  resumeCrcMap,
+  onEntryDone,
 } = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
     throw new Error(`convert: target 必须是 ${Object.values(TARGETS).join('|')} 之一`);
@@ -205,6 +213,16 @@ export async function convert(sourcePath, targetPath, {
   if (!io || typeof io.openReader !== 'function' || typeof io.createWriter !== 'function') {
     throw new Error('convert: 必须提供有效的 io 适配器 (openReader/createWriter)');
   }
+
+  // 断点续传清单归一为 Map（worker postMessage 序列化后可能是普通对象）
+  const resumedCrc = resumeCrcMap instanceof Map
+    ? resumeCrcMap
+    : (resumeCrcMap && typeof resumeCrcMap === 'object' ? new Map(Object.entries(resumeCrcMap)) : null);
+  const checkAbort = () => {
+    if (signal?.aborted) {
+      throw new DOMException('转换任务已被中止/暂停', 'AbortError');
+    }
+  };
 
   // 检测用一次遍历,yauzl/zip.js 的游标不能倒回,主循环须重新打开。
   const detector = await io.openReader(sourcePath);
@@ -264,12 +282,24 @@ export async function convert(sourcePath, targetPath, {
     for await (const entry of reader.entries()) {
       processedEntries++;
       if (typeof onProgress === 'function') {
-        onProgress(processedEntries, totalEntries, entry.fileName);
+        onProgress(processedEntries, totalEntries, entry.fileName, entry.crc32 ?? null);
       }
+      checkAbort();
       if (entry.isDirectory) {
         entry.skip();
         continue;
       }
+
+      // 断点续传：crc32 命中清单 → 已写入过目标，直接跳过（不重读内容）
+      if (resumedCrc && entry.crc32 != null) {
+        const doneCrc = resumedCrc.get(entry.fileName) ?? resumedCrc.get(routeSource(entry.fileName, detection.layout).hubPath);
+        if (doneCrc != null && doneCrc === entry.crc32) {
+          entry.skip();
+          report.resumed(routeSource(entry.fileName, detection.layout).hubPath);
+          continue;
+        }
+      }
+
       let routed = routeSource(entry.fileName, detection.layout);
 
       // 酒馆原生固定资产智能过滤 (剔除系统自带默认背景、默认主题等重复素材)
@@ -519,6 +549,9 @@ export async function convert(sourcePath, targetPath, {
       const outPath = targetEntryPath(routed.hubPath, target);
       if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
       report.copied(routed.hubPath, entry.uncompressedSize);
+      if (typeof onEntryDone === 'function' && entry.crc32 != null) {
+        onEntryDone(entry.fileName, entry.crc32);
+      }
     }
 
     await emitSynthesized(writer, report, context, target, selection, { extensionMode });
