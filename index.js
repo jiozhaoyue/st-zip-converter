@@ -42,6 +42,7 @@ import {
   restoreToHost,
   getHandle,
   registerMenuButton,
+  mountNativeBackupButton,
   mountSettingsDrawer,
   setupDrawerToggles,
   hostLayoutCode,
@@ -516,6 +517,10 @@ async function main(appRoot = document.getElementById('app')) {
       targetSelect.value = 'native';
     }
     registerMenuButton(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    // 原生"用户数据备份"UI 旁也注入入口，与扩展设置抽屉共存
+    mountNativeBackupButton(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   };

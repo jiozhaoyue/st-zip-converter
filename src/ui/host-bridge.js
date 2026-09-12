@@ -1018,6 +1018,25 @@ export function mountSettingsDrawer(onInit) {
 }
 
 /**
+ * 展开并平滑滚动到扩展设置抽屉（各注入入口共用的打开动作）
+ */
+function openConverterDrawer() {
+  const drawer = document.getElementById('st_zip_converter_settings');
+  if (!drawer) return false;
+  const content = drawer.querySelector(':scope > .inline-drawer-content');
+  const icon = drawer.querySelector(':scope > .inline-drawer-toggle .inline-drawer-icon');
+  if (content) {
+    content.style.display = 'block';
+    if (icon) {
+      icon.classList.remove('down');
+      icon.classList.add('up');
+    }
+  }
+  drawer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return true;
+}
+
+/**
  * 宿主扩展菜单按钮注入 (保留向下兼容)
  * @param {() => void} [onOpen]
  */
@@ -1040,22 +1059,7 @@ export function registerMenuButton(onOpen) {
     item.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-
-      // 展开并平滑滚动到抽屉
-      const drawer = document.getElementById('st_zip_converter_settings');
-      if (drawer) {
-        const content = drawer.querySelector(':scope > .inline-drawer-content');
-        const icon = drawer.querySelector(':scope > .inline-drawer-toggle .inline-drawer-icon');
-        if (content) {
-          content.style.display = 'block';
-          if (icon) {
-            icon.classList.remove('down');
-            icon.classList.add('up');
-          }
-        }
-        drawer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-
+      openConverterDrawer();
       if (typeof onOpen === 'function') {
         onOpen();
       }
@@ -1071,5 +1075,44 @@ export function registerMenuButton(onOpen) {
     } else {
       addBtn();
     }
+  }, 1000);
+}
+
+/**
+ * 原生"用户数据备份/导出"UI 注入：在用户设置面板的 .userBackupButton 旁
+ * 追加转换器入口按钮（四个宿主 ST/Luker/TauriTavern/PureTavern 的
+ * templates/userProfile.html 均渲染该按钮，锚点一致），与扩展设置抽屉共存。
+ * @param {() => void} [onOpen]
+ */
+export function mountNativeBackupButton(onOpen) {
+  if (typeof document === 'undefined') return;
+  const BTN_ID = 'st-zip-converter-native-btn';
+
+  const addBtn = () => {
+    if (document.getElementById(BTN_ID)) return true;
+    const anchor = document.querySelector('.userBackupButton');
+    if (!anchor || !anchor.parentElement) return false;
+
+    const btn = document.createElement('div');
+    btn.id = BTN_ID;
+    // 复用宿主原生 menu_button 样式，与 Download Backup 按钮并排
+    btn.className = 'menu_button menu_button_icon';
+    btn.title = '打开酒馆数据包互转工坊（在扩展设置中）';
+    btn.innerHTML = '<i class="fa-fw fa-solid fa-right-left"></i><span>数据包互转</span>';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openConverterDrawer();
+      if (typeof onOpen === 'function') {
+        onOpen();
+      }
+    });
+    anchor.parentElement.insertBefore(btn, anchor.nextSibling);
+    return true;
+  };
+
+  addBtn();
+  const timer = setInterval(() => {
+    if (addBtn()) clearInterval(timer);
   }, 1000);
 }
