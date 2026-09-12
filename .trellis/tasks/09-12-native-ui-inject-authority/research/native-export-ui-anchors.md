@@ -20,9 +20,15 @@
 
 ## 已实现（本任务第一片）
 
-- `src/ui/host-bridge.js`：抽出共用 `openConverterDrawer()`（展开抽屉+平滑滚动），`registerMenuButton` 与新增 `mountNativeBackupButton(onOpen)` 共用；`mountNativeBackupButton` 在 `.userBackupButton` 的 nextSibling 插入 `#st-zip-converter-native-btn`（复用 `menu_button menu_button_icon` 原生类）。
+- `src/ui/host-bridge.js`：抽出共用 `openConverterDrawer()`（展开抽屉+平滑滚动），`registerMenuButton` 与新增 `mountNativeBackupButton(onOpen)` 共用；`mountNativeBackupButton` 在 `.userBackupButton` 的 nextSibling 插入 `#st-zip-converter-native-btn`（复用 `menu_button menu_button_icon` 原生类），并支持 `opts.onQuickFetch`（「一键拉取」按钮 → 复用完整 handleHostExport 流程）。
 - `index.js`：插件模式 `applyPluginUi()` 中与 `registerMenuButton` 并列调用。
 - 无需新增 CSS：按钮全用宿主原生类，且位于宿主面板内，不触碰 `.app-container`/`.st-converter-drawer-app` 作用域铁律。
+
+## 第二片（2026-09-12，commit 待填）
+
+- **Luker 备份管理器内注入**：`mountLukerBackupManagerButton(onOpen)` — `templates/userBackupManager.html`（openBackupManager 动态渲染）的 `.backupActionRow` 首位插入转换器入口；仅 Luker 存在该锚点。
+- **MutationObserver 统一注入**：新增共享 `watchHostDom(injectFn)` + `injectionWatchers` 集合，`mountSettingsDrawer`/`registerMenuButton`/`mountNativeBackupButton`/`mountLukerBackupManagerButton` 四个注入全部改为幂等回调 + 单个 document.body childList/subtree observer（200ms 去抖），替代各自 1s setInterval 轮询；宿主重渲染面板（含 TT 管理面板）时自动自愈重注入。
+- **产物持久归档镜像**：`ExportQueue.stash/ensureStored` 入库成功后 `_mirrorToAuthority(item)` → `authority-store.mirrorArtifact(name, blob)`（fire-and-forget，不可用/失败只告警不阻断本地入库）；`test/durable-mirror.test.js` 5 项（mock db.js saveFile 驱动全路径）。
 
 ## 备份端点（后续在原生 UI 旁加"导出并转换"的接口基础）
 
@@ -31,6 +37,4 @@
 
 ## 待办（后续片）
 
-- [ ] Luker 备份管理器（Backup & Restore 弹层）内再注入一个转换入口（可选）。
-- [ ] 原生按钮旁提供"一键拉取→进转换队列"快捷路径（复用 `fetchHostBackup` + export-queue）。
-- [ ] TT 重渲染场景下按钮丢失的自愈（MutationObserver 替代轮询，统一三个注入函数的轮询模式）。
+- [ ] 原生注入按钮的浏览器端实测（四实例 Playwright 冒烟）。

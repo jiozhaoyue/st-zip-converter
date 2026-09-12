@@ -964,6 +964,50 @@ export function setupDrawerToggles(root) {
   });
 }
 
+// ===== 宿主 DOM 注入基础设施 =====
+
+/**
+ * 共享 MutationObserver：替代每函数独立 setInterval 轮询。
+ * 所有注入回调幂等（先查自身产物是否存在），宿主动态渲染/重渲染面板时
+ * 由 DOM 变更触发重试（同时覆盖 TT 管理面板重渲染等自愈场景）。
+ */
+const injectionWatchers = new Set();
+let injectionObserver = null;
+const INJECT_DEBOUNCE_MS = 200;
+
+function runInjectionWatchers() {
+  injectionWatchers.forEach((fn) => {
+    try {
+      fn();
+    } catch { /* 单个注入失败不阻断其余注入 */ }
+  });
+}
+
+/**
+ * 注册一个幂等注入回调：立即尝试一次，之后宿主 DOM 任何变更时去抖重试
+ * @param {() => void} injectFn 幂等注入函数（内部自行判断锚点/产物是否存在）
+ */
+function watchHostDom(injectFn) {
+  if (typeof document === 'undefined') return;
+  injectionWatchers.add(injectFn);
+  if (document.readyState === 'loading' || !document.body) {
+    document.addEventListener('DOMContentLoaded', () => injectFn(), { once: true });
+  } else {
+    injectFn();
+  }
+  if (injectionObserver || !document.body) return;
+  let scheduled = false;
+  injectionObserver = new MutationObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    setTimeout(() => {
+      scheduled = false;
+      runInjectionWatchers();
+    }, INJECT_DEBOUNCE_MS);
+  });
+  injectionObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 /**
  * 宿主扩展设置抽屉注入 (#extensions_settings2 / #extensions_settings)
  * 直接在酒馆原生设置侧栏展开工作台，无需多余模态弹窗
@@ -1007,14 +1051,7 @@ export function mountSettingsDrawer(onInit) {
     }
   };
 
-  mount();
-  const timer = setInterval(() => {
-    if (document.getElementById(PANEL_ID)) {
-      clearInterval(timer);
-    } else {
-      mount();
-    }
-  }, 1000);
+  watchHostDom(mount);
 }
 
 /**
@@ -1068,14 +1105,7 @@ export function registerMenuButton(onOpen) {
     menuList.appendChild(item);
   };
 
-  addBtn();
-  const timer = setInterval(() => {
-    if (document.getElementById('st-zip-converter-menu-item')) {
-      clearInterval(timer);
-    } else {
-      addBtn();
-    }
-  }, 1000);
+  watchHostDom(addBtn);
 }
 
 /**
@@ -1089,10 +1119,14 @@ export function mountNativeBackupButton(onOpen, opts = {}) {
   if (typeof document === 'undefined') return;
   const BTN_ID = 'st-zip-converter-native-btn';
 
+  const QUICK_ID = `${BTN_ID}-quick-fetch`;
+
   const addBtn = () => {
-    if (document.getElementById(BTN_ID)) return true;
+    const wantQuick = typeof opts.onQuickFetch === 'function';
+    if (document.getElementById(BTN_ID)
+      && (!wantQuick || document.getElementById(QUICK_ID))) return;
     const anchor = document.querySelector('.userBackupButton');
-    if (!anchor || !anchor.parentElement) return false;
+    if (!anchor || !anchor.parentElement) return;
 
     const btn = document.createElement('div');
     btn.id = BTN_ID;
@@ -1113,7 +1147,7 @@ export function mountNativeBackupButton(onOpen, opts = {}) {
     // 一键拉取：直接走完整宿主拉取流程（TaskManager/文件树确认/转换队列全复用）
     if (typeof opts.onQuickFetch === 'function') {
       const quick = document.createElement('div');
-      quick.id = `${BTN_ID}-quick-fetch`;
+      quick.id = QUICK_ID;
       quick.className = 'menu_button menu_button_icon';
       quick.title = '一键拉取宿主数据包并进入待导出区（走完整拉取/转换流程）';
       quick.innerHTML = '<i class="fa-fw fa-solid fa-cloud-arrow-down"></i><span>一键拉取</span>';
@@ -1124,11 +1158,42 @@ export function mountNativeBackupButton(onOpen, opts = {}) {
       });
       anchor.parentElement.insertBefore(quick, btn.nextSibling);
     }
-    return true;
   };
 
-  addBtn();
-  const timer = setInterval(() => {
-    if (addBtn()) clearInterval(timer);
-  }, 1000);
+  watchHostDom(addBtn);
+}
+
+/**
+ * Luker "Backup & Restore" 管理器弹层注入：templates/userBackupManager.html
+ * 由 openBackupManager 动态渲染（callGenericPopup），在动作按钮行
+ * (.backupActionRow，含原生 ZIP 下载按钮) 前插入转换器入口。
+ * 仅 Luker 存在该锚点，其余宿主自然无操作。
+ * @param {() => void} [onOpen]
+ */
+export function mountLukerBackupManagerButton(onOpen) {
+  if (typeof document === 'undefined') return;
+  const BTN_ID = 'st-zip-converter-luker-manager-btn';
+
+  const addBtn = () => {
+    if (document.getElementById(BTN_ID)) return;
+    const row = document.querySelector('.userBackupManager .backupActionRow');
+    if (!row) return;
+
+    const btn = document.createElement('div');
+    btn.id = BTN_ID;
+    btn.className = 'menu_button menu_button_icon';
+    btn.title = '打开酒馆数据包互转工坊（在扩展设置中）';
+    btn.innerHTML = '<i class="fa-fw fa-solid fa-right-left"></i><span>数据包互转</span>';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openConverterDrawer();
+      if (typeof onOpen === 'function') {
+        onOpen();
+      }
+    });
+    row.insertBefore(btn, row.firstChild);
+  };
+
+  watchHostDom(addBtn);
 }

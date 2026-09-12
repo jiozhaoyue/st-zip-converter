@@ -51,6 +51,8 @@ describe('SillyTavern 标准插件工程结构 (st-zip-converter)', () => {
       deleteExtensionViaHost,
       mountSettingsDrawer,
       registerMenuButton,
+      mountNativeBackupButton,
+      mountLukerBackupManagerButton,
     } = await import('../src/ui/host-bridge.js');
     expect(typeof discoverHostExtensions).toBe('function');
     expect(typeof installExtensionViaHost).toBe('function');
@@ -59,6 +61,8 @@ describe('SillyTavern 标准插件工程结构 (st-zip-converter)', () => {
     expect(typeof deleteExtensionViaHost).toBe('function');
     expect(typeof mountSettingsDrawer).toBe('function');
     expect(typeof registerMenuButton).toBe('function');
+    expect(typeof mountNativeBackupButton).toBe('function');
+    expect(typeof mountLukerBackupManagerButton).toBe('function');
 
     // PT / TT 平台自适应：原生支持 third-party，不应报告异常
     const ptCheck = await checkHostThirdPartyAnomaly('pt');

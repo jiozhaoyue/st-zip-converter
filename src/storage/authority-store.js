@@ -198,6 +198,27 @@ export async function getArtifact(name) {
 }
 
 /**
+ * 产物入库时镜像归档到 Authority（fire-and-forget 语义，错误只告警不阻断）
+ * Authority 不可用时静默跳过；同名覆盖（最新产物为准）。
+ * @param {string} name 逻辑名
+ * @param {Blob|File} blob 产物
+ * @returns {Promise<boolean>} 是否成功镜像
+ */
+export async function mirrorArtifact(name, blob) {
+  try {
+    const res = await putArtifact(name, blob);
+    if (res) {
+      console.info(`[authority-store] 产物已归档到 Authority: ${name} (${(res.size / 1048576).toFixed(1)} MB, ${res.chunks} 块)`);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.warn(`[authority-store] 产物镜像失败（不影响本地入库）: ${name}`, err);
+    return false;
+  }
+}
+
+/**
  * 删除产物（清单 + 全部分块）
  * @returns {Promise<boolean>}
  */

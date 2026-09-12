@@ -44,6 +44,7 @@ import {
   getHandle,
   registerMenuButton,
   mountNativeBackupButton,
+  mountLukerBackupManagerButton,
   mountSettingsDrawer,
   setupDrawerToggles,
   hostLayoutCode,
@@ -528,6 +529,10 @@ async function main(appRoot = document.getElementById('app')) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }, {
       onQuickFetch: () => handleHostExport(),
+    });
+    // Luker 备份管理器弹层内也注入入口（仅 Luker 有该锚点，其余宿主无操作）
+    mountLukerBackupManagerButton(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   };
   applyPluginUi(host.platform);

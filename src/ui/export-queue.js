@@ -12,6 +12,7 @@
 
 import { saveFile, deleteFile, getFile } from '../storage/db.js';
 import { ORIGINS } from '../storage/db.js';
+import { mirrorArtifact } from '../storage/authority-store.js';
 
 function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -156,6 +157,15 @@ export class ExportQueue {
   }
 
   /**
+   * 产物持久归档镜像：Authority 后端可用时把入库产物镜像到服务端
+   * （fire-and-forget，失败/不可用只告警，绝不阻断本地入库路径）
+   */
+  _mirrorToAuthority(item) {
+    if (!item?.blob) return;
+    mirrorArtifact(item.name, item.blob).catch(() => {});
+  }
+
+  /**
    * 永久存入工作区（ephemeral 产物首次入库；已入库的空操作）
    */
   async stash(id) {
@@ -174,6 +184,7 @@ export class ExportQueue {
       if (storedId) {
         item.storedId = storedId;
         item.ephemeral = false;
+        this._mirrorToAuthority(item);
       }
       this.notify();
     }
@@ -200,6 +211,7 @@ export class ExportQueue {
         role: 'output',
         origin: item.origin,
       });
+      if (item.storedId) this._mirrorToAuthority(item);
       this.notify();
     }
     return item.storedId;

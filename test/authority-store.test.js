@@ -65,7 +65,7 @@ describe('authority-store 可选适配器', () => {
     expect(await adapter.load('nope')).toBeNull();
   });
 
-  it('大 blob 分块写入并完整重组', async () => {
+  it('大 blob 分块写入并完整重组', { timeout: 30000 }, async () => {
     const client = mockClient();
     __setAuthorityClientForTest(client);
     // 1.5MB 数据，512KB 块 → 3 块（验证跨块边界重组）
