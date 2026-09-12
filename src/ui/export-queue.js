@@ -381,6 +381,20 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
     });
   };
 
-  queue.subscribe(render);
+  // 渲染合帧：批量转换时 notify 高频触发，整表 innerHTML 重建按帧合并
+  // （与 view.js 进度条 rAF 合帧同款策略），避免每条产物一次全量重绘
+  let renderScheduled = false;
+  const renderCoalesced = () => {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    const run = () => {
+      renderScheduled = false;
+      render();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run, 0);
+  };
+
+  queue.subscribe(renderCoalesced);
   render();
 }

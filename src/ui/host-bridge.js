@@ -1109,9 +1109,10 @@ export function registerMenuButton(onOpen) {
 }
 
 /**
- * 原生"用户数据备份/导出"UI 注入：在用户设置面板的 .userBackupButton 旁
- * 追加转换器入口按钮（四个宿主 ST/Luker/TauriTavern/PureTavern 的
- * templates/userProfile.html 均渲染该按钮，锚点一致），与扩展设置抽屉共存。
+ * 原生"用户数据备份/导出"UI 多锚点注入：在所有 .userBackupButton 旁追加
+ * 转换器入口按钮。四个宿主（ST/Luker/TauriTavern/PureTavern）的
+ * templates/userProfile.html（账号弹层）与 templates/admin.html（管理面板，
+ * 每用户行一个）均渲染该锚点，与扩展设置抽屉共存。
  * @param {() => void} [onOpen] 打开抽屉后的回调
  * @param {{ onQuickFetch?: () => void }} [opts] onQuickFetch：一键拉取宿主数据包进转换队列
  */
@@ -1121,43 +1122,45 @@ export function mountNativeBackupButton(onOpen, opts = {}) {
 
   const QUICK_ID = `${BTN_ID}-quick-fetch`;
 
-  const addBtn = () => {
-    const wantQuick = typeof opts.onQuickFetch === 'function';
-    if (document.getElementById(BTN_ID)
-      && (!wantQuick || document.getElementById(QUICK_ID))) return;
-    const anchor = document.querySelector('.userBackupButton');
-    if (!anchor || !anchor.parentElement) return;
-
+  const makeButton = (id, icon, label, title, onClick) => {
     const btn = document.createElement('div');
-    btn.id = BTN_ID;
-    // 复用宿主原生 menu_button 样式，与 Download Backup 按钮并排
+    btn.id = id;
+    btn.dataset.stZipInjected = '1';
+    // 复用宿主原生 menu_button 样式，与原生备份按钮并排
     btn.className = 'menu_button menu_button_icon';
-    btn.title = '打开酒馆数据包互转工坊（在扩展设置中）';
-    btn.innerHTML = '<i class="fa-fw fa-solid fa-right-left"></i><span>数据包互转</span>';
+    btn.title = title;
+    btn.innerHTML = `<i class="fa-fw fa-solid ${icon}"></i>${label ? `<span>${label}</span>` : ''}`;
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      openConverterDrawer();
-      if (typeof onOpen === 'function') {
-        onOpen();
+      onClick();
+    });
+    return btn;
+  };
+
+  const addBtn = () => {
+    // 多锚点：账号弹层（userProfile）与管理面板（admin，每用户行一个）都有 .userBackupButton
+    document.querySelectorAll('.userBackupButton').forEach((anchor) => {
+      if (!anchor.parentElement) return;
+      // 幂等：兄弟位已注入则跳过（弹层重渲染后标记随节点消失，observer 自动重注）
+      if (anchor.nextElementSibling?.dataset?.stZipInjected === '1') return;
+
+      const openBtn = makeButton(BTN_ID, 'fa-right-left', '数据包互转',
+        '打开酒馆数据包互转工坊（在扩展设置中）', () => {
+          openConverterDrawer();
+          if (typeof onOpen === 'function') onOpen();
+        });
+      anchor.parentElement.insertBefore(openBtn, anchor.nextSibling);
+
+      // 「一键拉取」只加在账号弹层锚点（含 <span> 文案）；管理面板行（纯图标）不加，
+      // 避免逐行出现针对当前用户的拉取按钮造成误解
+      const isProfileAnchor = !!anchor.querySelector('span');
+      if (isProfileAnchor && typeof opts.onQuickFetch === 'function') {
+        const quick = makeButton(QUICK_ID, 'fa-cloud-arrow-down', '一键拉取',
+          '一键拉取宿主数据包并进入待导出区（走完整拉取/转换流程）', opts.onQuickFetch);
+        anchor.parentElement.insertBefore(quick, openBtn.nextSibling);
       }
     });
-    anchor.parentElement.insertBefore(btn, anchor.nextSibling);
-
-    // 一键拉取：直接走完整宿主拉取流程（TaskManager/文件树确认/转换队列全复用）
-    if (typeof opts.onQuickFetch === 'function') {
-      const quick = document.createElement('div');
-      quick.id = QUICK_ID;
-      quick.className = 'menu_button menu_button_icon';
-      quick.title = '一键拉取宿主数据包并进入待导出区（走完整拉取/转换流程）';
-      quick.innerHTML = '<i class="fa-fw fa-solid fa-cloud-arrow-down"></i><span>一键拉取</span>';
-      quick.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        opts.onQuickFetch();
-      });
-      anchor.parentElement.insertBefore(quick, btn.nextSibling);
-    }
   };
 
   watchHostDom(addBtn);

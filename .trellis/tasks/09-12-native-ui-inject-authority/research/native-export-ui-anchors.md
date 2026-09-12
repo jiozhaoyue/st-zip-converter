@@ -30,6 +30,13 @@
 - **MutationObserver 统一注入**：新增共享 `watchHostDom(injectFn)` + `injectionWatchers` 集合，`mountSettingsDrawer`/`registerMenuButton`/`mountNativeBackupButton`/`mountLukerBackupManagerButton` 四个注入全部改为幂等回调 + 单个 document.body childList/subtree observer（200ms 去抖），替代各自 1s setInterval 轮询；宿主重渲染面板（含 TT 管理面板）时自动自愈重注入。
 - **产物持久归档镜像**：`ExportQueue.stash/ensureStored` 入库成功后 `_mirrorToAuthority(item)` → `authority-store.mirrorArtifact(name, blob)`（fire-and-forget，不可用/失败只告警不阻断本地入库）；`test/durable-mirror.test.js` 5 项（mock db.js saveFile 驱动全路径）。
 
+## 第三片（2026-09-12）：多锚点全覆盖 + 渲染合帧
+
+- **管理面板注入（四宿主全覆盖）**：`templates/admin.html` 每用户行也有 `.userBackupButton`（纯图标、无 span 文案，ST:69 / TT / PT / Luker 同构）。`mountNativeBackupButton` 升级为多锚点：`querySelectorAll('.userBackupButton')` 逐个幂等注入（`dataset.stZipInjected` 标记 + 兄弟位检查）。「一键拉取」只在账号弹层锚点（含 `<span>` 文案）出现，管理面板行只加打开入口，避免逐行"拉取当前用户"造成误解。
+- **ExportQueue 渲染合帧（性能）**：`renderExportQueue` 的 render 改为 `renderCoalesced`（rAF 优先、Node/降级 setTimeout(0)），批量转换高频 notify 时整表 innerHTML 重建按帧合并，与 view.js 进度条 rAF 合帧同款策略；`ExportQueue.notify()` 语义保持同步不变（既有测试不动）。
+- **注入覆盖范围界定**：数据包级导出 UI 共 5 类均已覆盖（扩展设置抽屉、扩展菜单、账号弹层、管理面板每行、Luker 备份管理器）。聊天/角色卡/世界书等**单体导出**（options 菜单 Export chat、角色卡导出 PNG、世界书单本导出）不注入：转换器消费的是整包 ZIP，在单体导出处加入口语义不符。
+- 自动化测试：187 项全过（Node 环境无 DOM 依赖，注入逻辑以导出存在性断言 + 浏览器端手测覆盖）。
+
 ## 备份端点（后续在原生 UI 旁加"导出并转换"的接口基础）
 
 - 全部四家：`POST /api/users/backup`（body `{handle}`，Luker 额外接受 `{handle, selection}`）→ 返回 zip blob + Content-Disposition 文件名。
