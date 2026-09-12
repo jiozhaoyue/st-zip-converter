@@ -1082,9 +1082,10 @@ export function registerMenuButton(onOpen) {
  * 原生"用户数据备份/导出"UI 注入：在用户设置面板的 .userBackupButton 旁
  * 追加转换器入口按钮（四个宿主 ST/Luker/TauriTavern/PureTavern 的
  * templates/userProfile.html 均渲染该按钮，锚点一致），与扩展设置抽屉共存。
- * @param {() => void} [onOpen]
+ * @param {() => void} [onOpen] 打开抽屉后的回调
+ * @param {{ onQuickFetch?: () => void }} [opts] onQuickFetch：一键拉取宿主数据包进转换队列
  */
-export function mountNativeBackupButton(onOpen) {
+export function mountNativeBackupButton(onOpen, opts = {}) {
   if (typeof document === 'undefined') return;
   const BTN_ID = 'st-zip-converter-native-btn';
 
@@ -1108,6 +1109,21 @@ export function mountNativeBackupButton(onOpen) {
       }
     });
     anchor.parentElement.insertBefore(btn, anchor.nextSibling);
+
+    // 一键拉取：直接走完整宿主拉取流程（TaskManager/文件树确认/转换队列全复用）
+    if (typeof opts.onQuickFetch === 'function') {
+      const quick = document.createElement('div');
+      quick.id = `${BTN_ID}-quick-fetch`;
+      quick.className = 'menu_button menu_button_icon';
+      quick.title = '一键拉取宿主数据包并进入待导出区（走完整拉取/转换流程）';
+      quick.innerHTML = '<i class="fa-fw fa-solid fa-cloud-arrow-down"></i><span>一键拉取</span>';
+      quick.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        opts.onQuickFetch();
+      });
+      anchor.parentElement.insertBefore(quick, btn.nextSibling);
+    }
     return true;
   };
 

@@ -33,6 +33,7 @@ import { TaskManager, TASK_STATES } from './src/core/task-manager.js';
 import { renderStashList, filterStashFiles } from './src/ui/stash-list.js';
 import { ExportQueue, renderExportQueue } from './src/ui/export-queue.js';
 import { initTaskControls } from './src/ui/task-controls.js';
+import { createCheckpointAdapter } from './src/storage/authority-store.js';
 import { renderUsageDashboard } from './src/ui/usage-dashboard.js';
 import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
 import {
@@ -295,7 +296,9 @@ async function main(appRoot = document.getElementById('app')) {
   const exportQueue = new ExportQueue();
 
   // 长任务管理器（宿主拉取/转换/写回共用）+ 进度条旁任务控制条
-  const taskManager = new TaskManager();
+  // 断点持久化：Authority 后端可用时走服务端 KV（跨会话/多端），否则回退默认内存 adapter
+  const authorityCheckpointAdapter = await createCheckpointAdapter();
+  const taskManager = new TaskManager(authorityCheckpointAdapter || undefined);
   const taskControls = initTaskControls({
     taskManager,
     onPause: (id) => {
@@ -519,9 +522,12 @@ async function main(appRoot = document.getElementById('app')) {
     registerMenuButton(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
-    // 原生"用户数据备份"UI 旁也注入入口，与扩展设置抽屉共存
+    // 原生"用户数据备份"UI 旁也注入入口，与扩展设置抽屉共存；
+    // 「一键拉取」复用完整 handleHostExport 流程（TaskManager/文件树确认/待导出区）
     mountNativeBackupButton(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, {
+      onQuickFetch: () => handleHostExport(),
     });
   };
   applyPluginUi(host.platform);

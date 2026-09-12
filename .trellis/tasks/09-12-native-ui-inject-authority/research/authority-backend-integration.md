@@ -46,6 +46,13 @@ const client = await window.STAuthority.AuthoritySDK.init({
 
 ## 建议集成设计（后续片实现）
 
+> 2026-09-12 更新：第一片已实现——`src/storage/authority-store.js`（探测/init、
+> `createCheckpointAdapter()` 复用 TaskManager {save,load,remove} 接缝接管断点
+> KV 持久化、`putArtifact/getArtifact/deleteArtifact` 分块 blob，均安全降级；
+> `test/authority-store.test.js` 5 项）+ 原生备份 UI 旁「一键拉取」按钮
+> （`mountNativeBackupButton` opts.onQuickFetch → 复用完整 handleHostExport 流程）。
+> 剩余：产物落盘 putArtifact 接入 export-queue 入库路径、Luker 备份管理器内注入。
+
 新增 `src/storage/authority-store.js`（可选适配器，与 `db.js` 同接口）：
 
 - `isAvailable()` — 探测 `window.STAuthority?.AuthoritySDK`，init 并缓存 client。
