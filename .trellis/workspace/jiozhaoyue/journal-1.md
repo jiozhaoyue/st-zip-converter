@@ -537,3 +537,25 @@ detectHost改为lukerContext优先协议(实测Luker同时暴露SillyTavern与lu
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: 意图对齐、规则沉淀与两任务归档
+<!-- trellis-session: v=2 fp=f8141e25038e8c1b -->
+
+**Date**: 2026-09-21
+**Task**: 意图对齐、规则沉淀与两任务归档
+**Branch**: `main`
+
+### Summary
+
+回填 09-07/09-12 两任务 PRD 与 implement 执行状态（核对三提交边界 7462523/82ea011/ce1c70f，187 测试全绿）；新建项目级 CLAUDE.md（三形态入口、分层边界、平台码双轨制、Worker 管线、TaskManager 续传、Authority 降级链、宿主注入）；AGENTS.md 沉淀计划先行/可选后端适配器/宿主 UI 注入三条铁律；README 补 Authority 可选增强定位；两任务归档
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19ab53b` | docs(intent): align human-AI intent — backfill PRDs, add CLAUDE.md, codify 3 rules |
+
+### Status
+
+[OK] **Completed**

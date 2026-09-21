@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
-- **Last Active**: 2026-09-07
+- **Total Sessions**: 18
+- **Last Active**: 2026-09-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~539 | Active |
+| `journal-1.md` | ~561 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-09-21 | 意图对齐、规则沉淀与两任务归档 | `19ab53b` | `main` |
 | 17 | 2026-09-07 | 统一工作区与待导出区落地(ui-unify)+父任务完结 | `c81b6f0` | `main` |
 | 16 | 2026-09-07 | 并发管线重写与实例卡顿诊断(perf-overhaul) | `9f2bbe1` | `main` |
 | 15 | 2026-09-07 | 宿主识别修复与Luker UI异常根治(host-detect) | `ffaa110` | `main` |
