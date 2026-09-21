@@ -80,6 +80,25 @@ npm run dev       # vite 开发服务器（独立模式手测）
 - **完成即推送 (Push on Completion Mandate)**:
   - 每个工作阶段（任务/提交批次）完成并通过测试后，必须 `git push` 到 origin，不得只提交不推送。
 
+- **计划先行铁律 (Plan-Before-Code Mandate)**:
+  - Trellis 任务在 `task.py start` 前必须具备回填完成的 `prd.md`（Requirements / Acceptance Criteria 不得为 TBD）；复杂任务还需 `design.md` + `implement.md`。
+  - 严禁实施跑在计划前面：代码提交时若对应任务 PRD 仍为空占位，必须先回填 PRD 再继续。
+  - `implement.md` 复选框随执行**实时勾选**，不允许任务结束后凭记忆批量补勾。
+  - 教训来源：09-12 任务代码完成三片后 PRD 仍为 TBD，导致人机意图漂移（2026-09-21 回填）。
+
+- **Authority 适配器模式约定 (Optional-Backend Adapter Convention)**:
+  - 项目定位为**纯前端为主、Authority 为可选增强层**（2026-09-21 用户确认），不转向前后端混合架构。
+  - 一切服务端能力（Authority SDK / 未来其他后端）一律走「适配器 + 特性检测 + 静默降级」：可用时增强，不可用时纯前端路径（IndexedDB/OPFS/内存 Blob）保持全功能。
+  - 后端调用必须 fire-and-forget 或显式降级，严禁让纯前端主路径阻塞/失败于后端不可用。
+  - README 定位与代码适配器必须保持一致；新增后端能力时同步更新 README「核心特性」。
+
+- **宿主 UI 注入规范 (Host UI Injection Convention)**:
+  - 注入宿主原生 UI（按钮/入口）必须**幂等**且**自愈**：用共享 `watchHostDom` MutationObserver（200ms 去抖）统一注入点，替代各自 `setInterval` 轮询；宿主重渲染导致节点丢失时自动重注入。
+  - 多锚点注入用 `dataset.stZipInjected` 标记 + 兄弟位检查防重复。
+  - 注入元素**复用宿主原生类**（`menu_button` 等），零新增 CSS；任何新增样式仍受双前缀铁律约束。
+  - 注入范围语义边界：只注入「整包 ZIP 级」入口（备份/导出/管理面板行/备份管理器），单体导出（单聊天/单角色卡/单世界书）不注入。
+  - 参考实现：`src/ui/host-bridge.js` 的 `mountNativeBackupButton` / `mountLukerBackupManagerButton`。
+
 <!-- UNIFIED-RULES:START -->
 <!-- 此块由 sync-rules.ps1 自动生成，请勿手动编辑 -->
 <!-- 最后同步: 2026-09-12 19:56:35 -->
