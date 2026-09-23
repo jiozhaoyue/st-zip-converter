@@ -603,3 +603,13 @@ npm run dev       # vite 开发服务器（独立模式手测）
   - 注入元素**复用宿主原生类**（`menu_button` 等），零新增 CSS；任何新增样式仍受双前缀铁律约束。
   - 注入范围语义边界：只注入「整包 ZIP 级」入口（备份/导出/管理面板行/备份管理器），单体导出（单聊天/单角色卡/单世界书）不注入。
   - 参考实现：`src/ui/host-bridge.js` 的 `mountNativeBackupButton` / `mountLukerBackupManagerButton`。
+
+- **子代理来源唯一性 + 并行不阻塞 (Subagent Source Exclusivity & Non-Blocking Parallelism Mandate)**:
+  - **只准使用当前 agent 平台自带的子代理能力**。VS Code Copilot 场景即内置的 `runSubagent` 工具；**通用表述：只调用"本 agent 自身的子代理功能"**。
+  - **禁止调用任何"其他 agent"**——包括但不限于：`trellis channel spawn` 派生的 claude/codex worker、`pebrel agent delegate` / pebrel 分屏里的其他 agent、手工拉起的外部 CLI agent（`claude` / `codex` / `gemini` 等）、其他 IDE 或终端里的 agent 会话。
+  - **主代理不得被任何子代理阻塞**：需要多个子代理时，必须**在工具调用层一次性并发派发**（同一轮内并行发起多个子代理调用），主代理在同一轮内**并行推进自己那份工作**（自己的检索/读取/落盘），不得串行排队、不得空等、不得轮询等待子代理。
+  - **子代理任务必须自包含**：检索范围、具体问题、期望输出、允许写入的落盘路径必须写全；子代理**不继承**主对话上下文。
+  - **写权限边界**：子代理只读，或只写各自负责的产出文件；**禁止子代理与主代理写同一文件**（避免互相覆盖）。
+  - 落地规范见 `.trellis/spec/guides/subagent-collaboration.md`。
+  - 教训来源：2026-09-23 用户两次收紧——先禁 `trellis channel spawn` 外部 worker（已派发 3 个须终止），再明确「只能用自身子代理 + 并行不阻塞」。
+

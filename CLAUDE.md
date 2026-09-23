@@ -59,6 +59,7 @@ npm run gen-fixtures              # 重新生成测试固件 fixtures/
 2. **严禁写本地酒馆实例目录**；实例更新只走 Git（`git clone`/`git pull`/原生扩展安装器）。
 3. **计划先行**：Trellis 任务 PRD 未回填不得提交代码；`implement.md` 复选框随执行实时勾选。
 4. **完成即推送**：测试绿后 `git push` 到 origin，不得只提交不推送。
+5. **子代理只准用自身能力 + 并行不阻塞**：只调用本 agent 平台自带的子代理功能（Copilot 即 `runSubagent`）；**禁止调用其他 agent**（`trellis channel spawn` 的 claude/codex worker、pebrel delegate、外部 CLI agent 等）。多个子代理必须**一次性并发派发**，主代理同一轮内并行推进自身工作，不串行、不空等、不轮询。
 
 ## Trellis 任务流
 

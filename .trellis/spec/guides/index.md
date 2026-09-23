@@ -24,6 +24,7 @@ These guides help you **ask the right questions before coding**.
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
 | [Tavern Datapack Formats](./tavern-datapack-formats.md) | 四平台包布局/导入语义/互转约定与环境教训 | 任何涉及 ST/L/TT/PT 数据搬移的任务 |
+| [Subagent Collaboration](./subagent-collaboration.md) | 子代理来源唯一性 + 并行不阻塞 + 写权限边界 | **派发任何子代理之前**（含多链路并行审计/研究） |
 
 ---
 
@@ -51,6 +52,16 @@ These guides help you **ask the right questions before coding**.
 - [ ] Multiple branches update the same derived state from `kind` / `action`
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+
+### When Dispatching Subagents
+
+- [ ] 用的是**本 agent 自带的子代理功能**？（不是 `trellis channel spawn` / pebrel / 外部 CLI agent）
+- [ ] 多个子代理在**同一轮并发**发起？（不是逐个 await 串行）
+- [ ] 主代理同轮也并行推进了自己的工作？
+- [ ] 每个子代理任务写全了 范围 / 问题 / 期望输出 / 落盘路径？
+- [ ] 有没有两个写者指向同一个文件？
+
+→ Read [Subagent Collaboration](./subagent-collaboration.md)
 
 ### When Verifying AI Cross-Review Results
 
