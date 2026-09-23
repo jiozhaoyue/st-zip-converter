@@ -559,3 +559,51 @@ detectHost改为lukerContext优先协议(实测Luker同时暴露SillyTavern与lu
 ### Status
 
 [OK] **Completed**
+
+
+## Session 19: 性能安全审计、注入面止血与 spec 全量刷新
+<!-- trellis-session: v=2 fp=c1d7201922600987 -->
+
+**Date**: 2026-09-24
+**Task**: 性能安全审计、注入面止血与 spec 全量刷新
+**Branch**: `main`
+
+### Summary
+
+四链路性能安全审计（55 条发现）→ 安全注入面止血（escape 层 + CI 守卫）→ .trellis/spec 全量刷新至当前架构并登记两项后续任务
+
+### Main Changes
+
+- 子代理纪律规则落位：来源唯一性 + 并行不阻塞（AGENTS.md / CLAUDE.md / .trellis/spec/guides/subagent-collaboration.md）
+- 完成 09-23 性能安全审计：恢复链路无界等待、authority 整包常驻、分卷 Blob 驻留、扩展清单可达存储型 XSS；报告归档
+- 安全止血：新增 src/ui/escape.js（escapeHtml 5 字符 / isSafeHttpUrl / trustedStaticMarkup）+ scripts/dom-injection-guard.js 守卫
+- .trellis/spec 全量刷新至当前架构（14 个文件）：删除 build:plugins / IIFE / yauzl-yazl / 58 测试等失效描述；修正 zip-io.js 的 Node 动态 import 表述
+- 登记两项后续任务：09-24-perf-hardening-transfer-memory、09-24-dual-entry-sync-standalone（后者为独立态与插件态模板分歧）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ce1882e` | docs(rules): 新增子代理纪律——来源唯一性 + 并行不阻塞 |
+| `7a22049` | docs(audit): 完成 09-23 性能安全审计——四链路报告与汇总索引 |
+| `2a450bd` | chore(task): archive 09-23-perf-security-audit |
+| `7161e25` | fix(security): 注入面止血——扩展清单 XSS 与全量未转义 innerHTML 插值（新增 dom-injection 守卫） |
+| `848c189` | chore(task): archive 09-23-security-injection-hardening |
+| `d6d2b1b` | chore(task): archive 09-22-css-scope-guard |
+| `990df0c` | docs(spec): 全量刷新 Trellis spec 至当前架构，并登记两项后续任务 PRD |
+
+### Testing
+
+- [OK] npm test：226 passed / 2 skipped（34 文件，基线 199 未退化）
+- [OK] npm run check:css-scope 通过；npm run check:dom-injection 通过（扫描 15 文件 / 整文件豁免 1）
+- [OK] npm run build 成功（dist/ 已 gitignore）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 09-24-perf-hardening-transfer-memory：恢复链路有界等待 + authority 去整包驻留 + 分卷即时释放
+- 09-24-dual-entry-sync-standalone：index.html 缺 #stash-list 导致独立态暂存区不渲染（L1-MR-10 违规）
+- .trellis/tasks 下有两处归档残留空壳目录待清理（待用户批准）
