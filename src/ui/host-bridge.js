@@ -7,6 +7,32 @@ import { logger } from '../core/logger.js';
 import { zipIo } from '../core/zip-io.js';
 import * as zip from '../vendor/zip.js';
 import { getWorkbenchHtml } from './workbench-template.js';
+import { isSafeHttpUrl, trustedStaticMarkup } from './escape.js';
+
+/**
+ * 安全渲染状态文本：图标拆为独立节点，文本走 textContent。
+ *
+ * 存在原因：安装失败时的错误消息可能来自宿主响应正文（用户/服务端可控），
+ * 若走 innerHTML 模板插值即构成注入面。
+ * @param {HTMLElement|null} el 目标元素
+ * @param {string} iconClass Font Awesome 类名（空则不加图标）
+ * @param {string} text 展示文本（按纯文本处理）
+ * @param {string} [color] 文本颜色
+ * @param {string} [iconColor] 图标颜色（缺省继承文本色）
+ */
+function setStatusContent(el, iconClass, text, color, iconColor) {
+  if (!el) return;
+  el.textContent = '';
+  if (iconClass) {
+    const icon = document.createElement('i');
+    icon.className = iconClass;
+    if (iconColor) icon.style.color = iconColor;
+    el.appendChild(icon);
+    el.appendChild(document.createTextNode(' '));
+  }
+  el.appendChild(document.createTextNode(text));
+  if (color) el.style.color = color;
+}
 
 /**
  * 宿主平台代码 → 转换器布局代码映射。
@@ -651,13 +677,13 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       </label>
     </div>
 
-    ${anomaly.hasAnomaly ? `
+    ${trustedStaticMarkup(anomaly.hasAnomaly ? `
     <div id="ext-anomaly-banner" style="margin: 12px 20px 0 20px; padding: 10px 14px; background: rgba(243, 139, 168, 0.15); border: 1px solid #f38ba8; border-radius: 6px; font-size: 0.82rem; color: #f38ba8; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
       <div>
         <strong><i class="fa-solid fa-triangle-exclamation"></i> 检测到错误目录残留：</strong> 本地存在旧版/错误的 <code>data/&lt;user&gt;/extensions/third-party/</code> 文件夹，会导致插件识别失效。
       </div>
       <button id="ext-btn-clean-anomaly" class="menu_button" style="padding: 4px 10px; font-size: 0.78rem; background: #f38ba8; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">一键清理残留 third-party</button>
-    </div>` : ''}
+    </div>` : '')}
 
     <div id="ext-list-container" style="padding: 12px 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px;">
     </div>
@@ -699,24 +725,63 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       border-radius: 6px; font-size: 0.88rem;
     `;
 
-    itemEl.innerHTML = `
-      <input type="checkbox" id="ext-chk-${idx}" ${!isInstalled ? 'checked' : ''} style="cursor: pointer;" />
-      <div style="flex: 1; min-width: 0;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <strong style="color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${ext.displayName || ext.name || folder}</strong>
-          <span style="font-size: 0.75rem; color: #6c7086;">(${folder})</span>
-          ${isInstalled
-            ? '<span style="font-size: 0.72rem; padding: 1px 6px; background: #45475a; color: #a6adc8; border-radius: 4px;">本地已安装</span>'
-            : '<span style="font-size: 0.72rem; padding: 1px 6px; background: rgba(137,180,250,0.2); color: #89b4fa; border-radius: 4px;">待安装</span>'
-          }
-        </div>
-        <div style="font-size: 0.78rem; color: #7f849c; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          <span>${ext.url || '无远程 URL'}</span>
-          ${ext.branch ? `<span style="margin-left: 8px; color: #f9e2af;">分支: ${ext.branch}</span>` : ''}
-        </div>
-      </div>
-      <span id="ext-item-status-${idx}" style="font-size: 0.8rem; color: #6c7086;"></span>
-    `;
+    // 安全：本面板的 ext.* 全部来自**数据包内的 JSON 清单**（攻击者可分发），
+    // 因此一律走 createElement + textContent，禁止任何 innerHTML 插值。
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.id = `ext-chk-${idx}`;
+    chk.checked = !isInstalled;
+    chk.style.cursor = 'pointer';
+
+    const mainCol = document.createElement('div');
+    mainCol.style.cssText = 'flex: 1; min-width: 0;';
+
+    const titleRow = document.createElement('div');
+    titleRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+    const nameEl = document.createElement('strong');
+    nameEl.style.cssText = 'color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+    nameEl.textContent = ext.displayName || ext.name || folder || '未命名扩展';
+    titleRow.appendChild(nameEl);
+
+    const folderEl = document.createElement('span');
+    folderEl.style.cssText = 'font-size: 0.75rem; color: #6c7086;';
+    folderEl.textContent = `(${folder || '未知目录'})`;
+    titleRow.appendChild(folderEl);
+
+    const stateEl = document.createElement('span');
+    stateEl.style.cssText = isInstalled
+      ? 'font-size: 0.72rem; padding: 1px 6px; background: #45475a; color: #a6adc8; border-radius: 4px;'
+      : 'font-size: 0.72rem; padding: 1px 6px; background: rgba(137,180,250,0.2); color: #89b4fa; border-radius: 4px;';
+    stateEl.textContent = isInstalled ? '本地已安装' : '待安装';
+    titleRow.appendChild(stateEl);
+
+    mainCol.appendChild(titleRow);
+
+    const metaRow = document.createElement('div');
+    metaRow.style.cssText = 'font-size: 0.78rem; color: #7f849c; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+
+    // 渲染期校验：非 http(s) 协议（javascript: / data: / vbscript: 等）不输出原值
+    const urlEl = document.createElement('span');
+    urlEl.textContent = isSafeHttpUrl(ext.url) ? ext.url : '无远程 URL';
+    metaRow.appendChild(urlEl);
+
+    if (ext.branch) {
+      const branchEl = document.createElement('span');
+      branchEl.style.cssText = 'margin-left: 8px; color: #f9e2af;';
+      branchEl.textContent = `分支: ${ext.branch}`;
+      metaRow.appendChild(branchEl);
+    }
+
+    mainCol.appendChild(metaRow);
+
+    const itemStatusEl = document.createElement('span');
+    itemStatusEl.id = `ext-item-status-${idx}`;
+    itemStatusEl.style.cssText = 'font-size: 0.8rem; color: #6c7086;';
+
+    itemEl.appendChild(chk);
+    itemEl.appendChild(mainCol);
+    itemEl.appendChild(itemStatusEl);
 
     listEl.appendChild(itemEl);
     itemsState.push({
@@ -812,8 +877,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       progressNum.textContent = progressText;
       progressFill.style.width = `${Math.round(((i + 1) / selected.length) * 100)}%`;
       progressStatus.textContent = `正在浅克隆: ${ext.displayName || ext.name} (${ext.url})...`;
-      statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 克隆中...';
-      statusEl.style.color = '#89b4fa';
+      setStatusContent(statusEl, 'fa-solid fa-spinner fa-spin', '克隆中...', '#89b4fa');
 
       try {
         if (!ext.url || !/^https?:\/\//i.test(ext.url)) {
@@ -828,8 +892,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
         statusEl.style.color = '#a6e3a1';
         successCount++;
       } catch (err) {
-        statusEl.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: #f38ba8;"></i> ${err.message || '安装失败'}`;
-        statusEl.style.color = '#f38ba8';
+        setStatusContent(statusEl, 'fa-solid fa-circle-xmark', err.message || '安装失败', '#f38ba8', '#f38ba8');
         failedItems.push(item);
         logger.error(`扩展 ${ext.name} 安装失败:`, err);
       }
@@ -849,8 +912,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       });
       reloadBtn.style.display = 'inline-block';
     } else {
-      progressStatus.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #a6e3a1;"></i> 全部 ${successCount} 个扩展安装成功！`;
-      progressStatus.style.color = '#a6e3a1';
+      setStatusContent(progressStatus, 'fa-solid fa-circle-check', `全部 ${successCount} 个扩展安装成功！`, '#a6e3a1', '#a6e3a1');
       startBtn.style.display = 'none';
       cancelBtn.style.display = 'none';
       reloadBtn.style.display = 'inline-block';
@@ -1034,7 +1096,7 @@ export function mountSettingsDrawer(onInit) {
         </div>
         <div class="inline-drawer-content" style="display: none;">
           <div class="st-converter-drawer-app" id="app">
-            ${getWorkbenchHtml({ isDrawer: true })}
+            ${trustedStaticMarkup(getWorkbenchHtml({ isDrawer: true }))}
           </div>
         </div>
       </div>
@@ -1129,7 +1191,14 @@ export function mountNativeBackupButton(onOpen, opts = {}) {
     // 复用宿主原生 menu_button 样式，与原生备份按钮并排
     btn.className = 'menu_button menu_button_icon';
     btn.title = title;
-    btn.innerHTML = `<i class="fa-fw fa-solid ${icon}"></i>${label ? `<span>${label}</span>` : ''}`;
+    const iconEl = document.createElement('i');
+    iconEl.className = `fa-fw fa-solid ${icon}`;
+    btn.appendChild(iconEl);
+    if (label) {
+      const labelEl = document.createElement('span');
+      labelEl.textContent = label;
+      btn.appendChild(labelEl);
+    }
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();

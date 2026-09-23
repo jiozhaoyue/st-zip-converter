@@ -23,6 +23,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "check:css-scope": "node scripts/css-scope.js",
+    "check:dom-injection": "node scripts/dom-injection-guard.js",
     "gen-fixtures": "node fixtures/gen.js"
   }
 }

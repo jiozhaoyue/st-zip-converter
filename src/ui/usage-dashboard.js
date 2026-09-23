@@ -7,6 +7,7 @@
  */
 
 import { detectHost } from './host-bridge.js';
+import { escapeHtml } from './escape.js';
 
 function formatBytes(bytes) {
   if (bytes === null || bytes === undefined || bytes < 0) return '—';
@@ -57,9 +58,9 @@ export async function renderUsageDashboard({ containerEl }) {
         browserSection.innerHTML = `
           <div class="usage-quota-label">
             <span><i class="fa-solid fa-hard-drive"></i> 浏览器配额</span>
-            <span>${formatBytes(est.usage || 0)} / ${formatBytes(est.quota)} (${pct.toFixed(1)}%)</span>
+            <span>${escapeHtml(formatBytes(est.usage || 0))} / ${escapeHtml(formatBytes(est.quota))} (${escapeHtml(pct.toFixed(1))}%)</span>
           </div>
-          <div class="usage-quota-bar"><div class="usage-quota-fill" style="width:${pct.toFixed(1)}%"></div></div>
+          <div class="usage-quota-bar"><div class="usage-quota-fill" style="width:${escapeHtml(pct.toFixed(1))}%"></div></div>
         `;
         containerEl.appendChild(browserSection);
       }
@@ -90,10 +91,10 @@ export async function renderUsageDashboard({ containerEl }) {
       : `${formatBytes(usedBytes)} / ${formatBytes(quotaBytes)} (${pct.toFixed(1)}%)`;
     userSection.innerHTML = `
       <div class="usage-quota-label">
-        <span><i class="fa-solid fa-user-shield"></i> 用户配额${over ? '（已超限）' : ''}</span>
-        <span>${detail}</span>
+        <span><i class="fa-solid fa-user-shield"></i> 用户配额${escapeHtml(over ? '（已超限）' : '')}</span>
+        <span>${escapeHtml(detail)}</span>
       </div>
-      <div class="usage-quota-bar"><div class="usage-quota-fill ${over ? 'usage-quota-fill-page' : ''}" style="width:${over ? 100 : pct.toFixed(1)}%"></div></div>
+      <div class="usage-quota-bar"><div class="usage-quota-fill ${escapeHtml(over ? 'usage-quota-fill-page' : '')}" style="width:${escapeHtml(over ? 100 : pct.toFixed(1))}%"></div></div>
     `;
   }).catch(() => {
     if (containerEl.isConnected && containerEl.contains(userSection)) userSection.remove();

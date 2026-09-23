@@ -10,6 +10,7 @@
 import { runConversionTask, runPlanTask } from './src/core/worker-client.js';
 import { logger } from './src/core/logger.js';
 import { setupLogConsole } from './src/ui/log-console.js';
+import { escapeHtml, trustedStaticMarkup } from './src/ui/escape.js';
 import {
   setupCategoryFilter,
   renderCategoryStats,
@@ -601,7 +602,7 @@ async function main(appRoot = document.getElementById('app')) {
   function updateBaseZipStatusUI() {
     if (!hostBaseZipStatus) return;
     if (currentBaseZip) {
-      hostBaseZipStatus.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #10b981;"></i> 已就绪基准包: <b>${currentBaseZip.name}</b> (${formatBytes(currentBaseZip.size)})`;
+      hostBaseZipStatus.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #10b981;"></i> 已就绪基准包: <b>${escapeHtml(currentBaseZip.name)}</b> (${escapeHtml(formatBytes(currentBaseZip.size))})`;
       hostBaseZipStatus.style.color = 'var(--SmartThemeQuoteColor, #93c5fd)';
     } else {
       hostBaseZipStatus.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> 请先选择已有基准包，否则无法生成增量差量补丁';
@@ -1018,7 +1019,7 @@ async function main(appRoot = document.getElementById('app')) {
     }
     pendingRestoreFile = archiveFile;
     if (restoreModalDesc) {
-      restoreModalDesc.innerHTML = `即将把数据包 <strong>「${archiveFile.name}」</strong> (${formatBytes(archiveFile.size)}) 恢复写入到当前酒馆宿主 (${host.platform.toUpperCase()})，请选择恢复模式：`;
+      restoreModalDesc.innerHTML = `即将把数据包 <strong>「${escapeHtml(archiveFile.name)}」</strong> (${escapeHtml(formatBytes(archiveFile.size))}) 恢复写入到当前酒馆宿主 (${escapeHtml(host.platform.toUpperCase())})，请选择恢复模式：`;
     }
     if (restoreModalOverlay) {
       restoreModalOverlay.style.display = 'flex';
@@ -1345,7 +1346,7 @@ export function openConverterModal() {
     const appContainer = document.createElement('div');
     appContainer.className = 'app-container';
     appContainer.id = 'app';
-    appContainer.innerHTML = getWorkbenchHtml({ isModal: true });
+    appContainer.innerHTML = trustedStaticMarkup(getWorkbenchHtml({ isModal: true }));
 
     modalOverlay.appendChild(appContainer);
     document.body.appendChild(modalOverlay);

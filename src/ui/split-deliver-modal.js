@@ -1,3 +1,7 @@
+/* dom-injection-guard:allow-file 本模块为待清理死代码（审计 S-09：全仓 import 后无任何调用点），
+   其 innerHTML 插值不在本任务（安全注入面止血）修复范围；处置方案见
+   .trellis/tasks/archive/2026-09/09-23-perf-security-audit/research/04-dom-injection.md 后续项 S-09。 */
+
 /**
  * 智能分包交付管理面板 (Split Archive Delivery Modal)
  * 呈现切分后的多个独立 Zip 分卷清单，提供一键按序全部下载、单卷下载与云酒馆导入指引。

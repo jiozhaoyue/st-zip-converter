@@ -5,6 +5,7 @@
  */
 
 import { listStoredFiles, getFile, deleteFile } from '../storage/db.js';
+import { escapeHtml, trustedStaticMarkup } from './escape.js';
 
 export const STASH_ORIGINS = Object.freeze(['upload', 'host-export']);
 
@@ -111,7 +112,7 @@ export async function renderStashList({
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'menu_button btn-tool';
-      b.innerHTML = html;
+      b.innerHTML = trustedStaticMarkup(html);
       if (title) b.title = title;
       b.disabled = !enabled;
       b.addEventListener('click', onClick);
@@ -152,16 +153,17 @@ export async function renderStashList({
     const info = document.createElement('div');
     info.className = 'archive-info';
     const label = ORIGIN_LABELS[file.origin] || { text: file.origin || '上传', cls: 'origin-upload' };
+    const activeBadge = isActive ? '<span class="badge-active-file">当前源</span>' : '';
     info.innerHTML = `
       <div class="eq-name-row">
-        <input type="checkbox" class="stash-select-box" data-id="${file.id}" title="加入选择">
-        <span class="archive-name">${file.name}</span>
-        ${isActive ? '<span class="badge-active-file">当前源</span>' : ''}
+        <input type="checkbox" class="stash-select-box" data-id="${escapeHtml(file.id)}" title="加入选择">
+        <span class="archive-name">${escapeHtml(file.name)}</span>
+        ${trustedStaticMarkup(activeBadge)}
       </div>
       <div class="archive-meta">
-        <span class="origin-badge ${label.cls}">${label.text}</span>
-        <span class="meta-badge">${(file.layout || '未知').toUpperCase()}</span>
-        <span>${formatBytes(file.size)}</span>
+        <span class="origin-badge ${escapeHtml(label.cls)}">${escapeHtml(label.text)}</span>
+        <span class="meta-badge">${escapeHtml((file.layout || '未知').toUpperCase())}</span>
+        <span>${escapeHtml(formatBytes(file.size))}</span>
       </div>
     `;
     item.appendChild(info);

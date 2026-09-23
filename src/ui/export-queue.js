@@ -13,6 +13,7 @@
 import { saveFile, deleteFile, getFile } from '../storage/db.js';
 import { ORIGINS } from '../storage/db.js';
 import { mirrorArtifact } from '../storage/authority-store.js';
+import { escapeHtml, trustedStaticMarkup } from './escape.js';
 
 function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -236,7 +237,7 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
 
     const header = document.createElement('div');
     header.className = 'export-queue-header';
-    header.innerHTML = `<span class="eq-title"><i class="fa-solid fa-file-export"></i> 待导出 (${queue.items.length})</span>`;
+    header.innerHTML = `<span class="eq-title"><i class="fa-solid fa-file-export"></i> 待导出 (${escapeHtml(queue.items.length)})</span>`;
 
     if (queue.items.length > 0) {
       const batchBar = document.createElement('div');
@@ -245,7 +246,7 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'menu_button btn-tool';
-        b.innerHTML = html;
+        b.innerHTML = trustedStaticMarkup(html);
         if (title) b.title = title;
         b.addEventListener('click', onClick);
         return b;
@@ -280,7 +281,7 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'menu_button btn-tool';
-        b.innerHTML = html;
+        b.innerHTML = trustedStaticMarkup(html);
         if (title) b.title = title;
         b.addEventListener('click', onClick);
         return b;
@@ -329,16 +330,22 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
       const info = document.createElement('div');
       info.className = 'eq-info';
       const originLabel = ORIGIN_LABELS[item.origin] || ORIGIN_LABELS[ORIGINS.CONVERTED];
+      const layoutBadge = item.targetLayout
+        ? `<span class="meta-badge">${escapeHtml(String(item.targetLayout).toUpperCase())}</span>`
+        : '';
+      const storedBadge = item.storedId
+        ? '<span class="eq-stored">已入库</span>'
+        : '<span class="eq-ephemeral">临时</span>';
       info.innerHTML = `
         <div class="eq-name-row">
-          <input type="checkbox" class="eq-select-box" data-id="${item.id}" ${selected.has(item.id) ? 'checked' : ''}>
-          <span class="eq-name">${item.name}</span>
+          <input type="checkbox" class="eq-select-box" data-id="${escapeHtml(item.id)}" ${trustedStaticMarkup(selected.has(item.id) ? 'checked' : '')}>
+          <span class="eq-name">${escapeHtml(item.name)}</span>
         </div>
         <div class="eq-meta">
-          <span class="origin-badge ${originLabel.cls}">${originLabel.text}</span>
-          ${item.targetLayout ? `<span class="meta-badge">${String(item.targetLayout).toUpperCase()}</span>` : ''}
-          <span>${formatBytes(item.blob.size)}</span>
-          ${item.storedId ? '<span class="eq-stored">已入库</span>' : '<span class="eq-ephemeral">临时</span>'}
+          <span class="origin-badge ${escapeHtml(originLabel.cls)}">${escapeHtml(originLabel.text)}</span>
+          ${trustedStaticMarkup(layoutBadge)}
+          <span>${escapeHtml(formatBytes(item.blob.size))}</span>
+          ${trustedStaticMarkup(storedBadge)}
         </div>
       `;
       row.appendChild(info);
@@ -349,7 +356,7 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
         const b = document.createElement('button');
         b.type = 'button';
         b.className = `btn-archive-action ${cls}`;
-        b.innerHTML = html;
+        b.innerHTML = trustedStaticMarkup(html);
         if (title) b.title = title;
         b.addEventListener('click', onClick);
         return b;

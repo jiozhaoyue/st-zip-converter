@@ -1,16 +1,13 @@
 import { logger, LOG_LEVELS } from '../core/logger.js';
+import { escapeHtml, trustedStaticMarkup } from './escape.js';
 
 /**
  * 实时日志与审计抽屉控制台 (UI)
  * 常驻于主面板底部，支持实时高亮、级别过滤、自动滚屏、一键复制与下载。
+ *
+ * 转义统一走 `./escape.js`（覆盖 & < > " ' 五个字符）——历史上此处自带只覆盖
+ * 3 个字符的私有实现，漏掉引号转义会在属性上下文留下注入面。
  */
-
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
 
 export function setupLogConsole(containerElement) {
   if (!containerElement) return null;
@@ -136,10 +133,10 @@ export function setupLogConsole(containerElement) {
     }
 
     line.innerHTML = `
-      <span class="log-time">[${entry.timestamp}]</span>
-      <span class="log-tag tag-${entry.level.toLowerCase()}">[${entry.level}]</span>
+      <span class="log-time">[${escapeHtml(entry.timestamp)}]</span>
+      <span class="log-tag tag-${escapeHtml(entry.level.toLowerCase())}">[${escapeHtml(entry.level)}]</span>
       <span class="log-msg">${escapeHtml(entry.message)}</span>
-      ${detailHtml}
+      ${trustedStaticMarkup(detailHtml)}
     `;
     return line;
   }
@@ -208,7 +205,7 @@ export function setupLogConsole(containerElement) {
         await navigator.clipboard.writeText(text);
         const origHtml = btnCopy.innerHTML;
         btnCopy.innerHTML = '<i class="fa-solid fa-check"></i> 已复制!';
-        setTimeout(() => { btnCopy.innerHTML = origHtml; }, 1800);
+        setTimeout(() => { btnCopy.innerHTML = trustedStaticMarkup(origHtml); }, 1800);
       } catch {
         alert('复制失败，请手动在控制台选取');
       }

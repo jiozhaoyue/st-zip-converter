@@ -4,6 +4,7 @@
 
 import { detectFromReader } from '../core/detect.js';
 import { zipIo } from '../core/zip-io.js';
+import { escapeHtml } from './escape.js';
 
 export function setupFileDrop({
   dropzoneEl,
@@ -75,7 +76,7 @@ export function setupFileDrop({
       const file = zipFiles[0];
       selectedFile = file;
       const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
-      mainTextEl.innerHTML = `<i class="fa-solid fa-file-zipper"></i> ${file.name} (${sizeMb} MB)`;
+      mainTextEl.innerHTML = `<i class="fa-solid fa-file-zipper"></i> ${escapeHtml(file.name)} (${escapeHtml(sizeMb)} MB)`;
       subTextEl.textContent = '正在分析包结构并自动嗅探源平台...';
 
       try {
@@ -100,7 +101,7 @@ export function setupFileDrop({
         if (onError) onError(err);
       }
     } else {
-      mainTextEl.innerHTML = `<i class="fa-solid fa-boxes-stacked"></i> 已选择 ${zipFiles.length} 个数据包`;
+      mainTextEl.innerHTML = `<i class="fa-solid fa-boxes-stacked"></i> 已选择 ${escapeHtml(zipFiles.length)} 个数据包`;
       subTextEl.textContent = '正在批量分析并存入工作区...';
 
       const results = [];
@@ -133,7 +134,7 @@ export function setupFileDrop({
   return {
     getSelectedFile: () => selectedFile,
     setFilename: (name) => {
-      if (mainTextEl) mainTextEl.innerHTML = `<i class="fa-solid fa-file-zipper"></i> ${name}`;
+      if (mainTextEl) mainTextEl.innerHTML = `<i class="fa-solid fa-file-zipper"></i> ${escapeHtml(name)}`;
     },
     clear: () => {
       selectedFile = null;

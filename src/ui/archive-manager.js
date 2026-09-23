@@ -5,6 +5,7 @@
  */
 
 import { listStoredFiles, getFile, deleteFile, ORIGINS } from '../storage/db.js';
+import { escapeHtml } from './escape.js';
 
 function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -74,7 +75,7 @@ export async function renderArchiveManager({
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = `archive-filter-chip ${originFilter === f.value ? 'active' : ''}`;
-    chip.innerHTML = `<i class="fa-solid ${f.icon}"></i> ${f.label} (${count})`;
+    chip.innerHTML = `<i class="fa-solid ${escapeHtml(f.icon)}"></i> ${escapeHtml(f.label)} (${escapeHtml(count)})`;
     chip.addEventListener('click', () => {
       if (typeof onFilterChanged === 'function') onFilterChanged(f.value);
     });
@@ -113,10 +114,10 @@ export async function renderArchiveManager({
     const metaEl = document.createElement('div');
     metaEl.className = 'archive-meta';
     metaEl.innerHTML = `
-      <span class="origin-badge ${label.cls}">${label.text}</span>
-      <span class="meta-badge">${(file.layout || '未知').toUpperCase()}</span>
-      <span>${formatBytes(file.size)}</span>
-      <span>${formatDate(file.createdAt)}</span>
+      <span class="origin-badge ${escapeHtml(label.cls)}">${escapeHtml(label.text)}</span>
+      <span class="meta-badge">${escapeHtml((file.layout || '未知').toUpperCase())}</span>
+      <span>${escapeHtml(formatBytes(file.size))}</span>
+      <span>${escapeHtml(formatDate(file.createdAt))}</span>
     `;
 
     infoWrap.appendChild(nameEl);
