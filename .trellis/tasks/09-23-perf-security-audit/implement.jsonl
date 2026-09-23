@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "内存与流式质量门槛（分卷/传输审计基准）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "DOM 高频路径与禁止模式基准"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "core→ui→storage 跨层数据流审计指引"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "恢复链路错误处理与有界等待基准"}

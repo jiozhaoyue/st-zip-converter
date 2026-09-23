@@ -1,2 +1,4 @@
 {"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "性能与禁止模式"}
 {"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "内存与流式质量门槛"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "有界等待/中止兜底核验基准"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层数据流核验基准"}
