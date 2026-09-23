@@ -221,3 +221,30 @@ rsync -av --delete --exclude='__pycache__' .trellis/scripts/ packages/cli/src/te
 ```
 
 **Gotcha**: Running rsync with wrong source/destination paths can create nested garbage directories (e.g., `.trellis/scripts/packages/cli/...`). Always double-check paths before running.
+
+---
+
+## 本仓复用契约（ST-zip-converter）
+
+下面是本项目已收敛出的「单一来源」清单——新增代码前先对照，**不要另起一份实现**。
+`src/ui/escape.js` 的模块注释即引用本文件作为「全仓只此一处实现」的依据，故本节随代码变动同步维护。
+
+| 关注点 | 唯一来源 | 自查方法 |
+| --- | --- | --- |
+| HTML 转义 / URL 校验 | `src/ui/escape.js`（`escapeHtml` 覆盖 `& < > " '`、`isSafeHttpUrl`、`trustedStaticMarkup`） | `grep -rn "trustedStaticMarkup(" src/ index.js` 列出全部豁免点；`log-console.js` 曾自带只转 `& < >` 的私有实现（缺引号转义）→ 已统一 |
+| zip **读** | `src/core/zip-io.js` 的 `zipIo.openReader()`（封装 `src/vendor/zip.js` + `src/vendor/fzstd.js`） | `new zip.ZipReader` / `new zip.BlobReader` 只应出现在 `src/core/zip-io.js` |
+| zip **写** | `zipIo.createWriter(target, { level })`（`ZipWriter` 只在它内部构造） | 调用方可自建 `zip.BlobWriter` 仅作**内存目的地**（`delta.js` / `splitter.js` / `worker-client.js` / `converter-worker.js` / `host-bridge.js` 均如此），随后仍须交给 `zipIo.createWriter` |
+| 目标布局枚举 | `src/core/transform.js` 的 `TARGETS` | UI 里不应硬编码 `'st' \| 'l' \| 'tt' \| 'pt'` 字面量 |
+| 宿主平台码 → 布局码 | `src/ui/host-bridge.js` 的 `hostLayoutCode()`（`luker → l`） | 宿主导出直出路径传参处必须见到它 |
+| 宿主环境嗅探 | `src/ui/host-bridge.js`（`detectHost` / `verifyHostPlatform` / 各端点封装） | `lukerContext` / `SillyTavern` 全局对象与 `/version` 的判定只应在桥接层；`src/core/` 只按**布局码**分支（`transform.js` 里的 `_compat/luker/` 是**产物路径名**，不是宿主嗅探） |
+| 备份类目判定 | `src/core/inspect.js`（`categoryOfHubPath` / `categoryOfEntry` / `isBackupChatOrSnapshot`） | 不要在多处重写类目字符串表 |
+| 备份内清单合成 | `src/core/transform.js` 的 `emitSynthesized` | 合成条目只允许出现在尾部合成块，且用固定时间戳 `FIXED_TIMESTAMP` |
+| 产物出口 | `src/ui/export-queue.js` 的 `ExportQueue` | 产物**生成**路径（转换 / 宿主拉取 / 增量 / 分卷）不得自动下载；下载动作只能由用户在待导出区或工作区列表显式触发 |
+| 宿主 UI 注入 | `src/ui/host-bridge.js` 的 `watchHostDom`（MutationObserver，200ms 去抖）+ `dataset.stZipInjected` | 不得各模块自开 `setInterval` 轮询 |
+| HTML 工作台模板 | `index.html`（独立态）与 `src/ui/workbench-template.js` 的 `getWorkbenchHtml()`（插件态） | **同一 UI 的两份副本**，结构改动必须同一提交内改两处：`grep -c "btn-convert" index.html src/ui/workbench-template.js` 两处均须 ≥ 1 |
+
+命令与阈值同样只许有一处定义：`package.json` 的 `scripts`（`test` / `build` / `check:css-scope` /
+`check:dom-injection` / `gen-fixtures`）与其对应的 `scripts/*.js` 守卫脚本。
+
+> `src/vendor/` 是**第三方本地副本**：只调用其现有 API，**不得**升级或就地改造
+> （用户通过酒馆「扩展管理器 Git URL 一键克隆」安装，不能要求跑 `npm install` / `npm run build`）。

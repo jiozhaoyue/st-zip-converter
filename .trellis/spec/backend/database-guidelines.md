@@ -1,65 +1,89 @@
-# Datapack Storage & Streaming Archive Guidelines
+# Datapack Storage & Streaming Archive Guidelines（数据包存储与流式 IO）
 
-> Data persistence, archive layouts, streaming IO contracts, and secret preservation.
+> zip 数据包布局、流式 IO 契约、客户端暂存与 secrets 保真。
 
 ---
 
 ## Overview
 
-This project does not use a relational database or SQL/NoSQL engine. The primary "storage" entities are zip backup packages exported by four tavern platforms:
-1. **SillyTavern (ST)**: Root-flattened directory layout with no manifest.
-2. **Luker (L)**: ST-compatible flattened layout with an auxiliary `manifest.json` (`schemaVersion: 1`).
-3. **TauriTavern (TT)**: Hierarchical `data/` root, user files in `data/default-user/`, system files in `data/_tauritavern/`.
-4. **PureTavern (PT)**: Expects TT-compatible layout (`data/default-user/`) or proprietary module archives. Cannot import flattened archives.
+本项目**不使用服务端数据库**。“存储”实体有三类：
+
+1. **用户数据包（zip）——事实源**，由四个酒馆平台导出：
+   - **SillyTavern (ST)**：zip 根摊平用户目录，**无** `manifest.json`。
+   - **Luker (L)**：同为摊平布局，但带 `manifest.json`（`schemaVersion` + `selection`）。
+   - **TauriTavern (TT)**：`data/` 根，用户文件在 `data/default-user/`（或其他 handle）下，系统文件在 `data/_tauritavern/`。
+   - **PureTavern (PT)**：接受 TT 兼容布局；PT **原生归档**（manifest 带 per-file `moduleId` / `sha256`）识别为 `pt-native`，当前**明确拒绝转换**并提示改导 TT 迁移包。
+   布局判定实现见 `src/core/detect.js`（`LAYOUTS` / `detectFromReader`）。
+2. **浏览器暂存（IndexedDB）**——工作区缓存，不是事实源。
+3. **可选 Authority 后端**——纯增强层，不可用时静默降级。
 
 ---
 
-## Streaming IO & Memory Budget
+## Streaming IO & Memory Model
 
-### 1. Lazy Stream Writing
-- **Never buffer the entire zip in memory**: Zip packages often exceed 1 GiB.
-- **Avoid `yazl.addBuffer` during batch conversion**: In Node.js, `yazl.addBuffer` dispatches asynchronous `deflateRaw` requests without backpressure, queuing buffers in memory and blowing heap limits (previously peaked at 884 MiB).
-- **Rule**: Always use `yazl.addReadStreamLazy` with deferred stream acquisition:
-  ```javascript
-  zipfile.addReadStreamLazy(entryName, {
-    mtime: entry.mtime,
-    mode: entry.mode,
-  }, (cb) => {
-    // Open lazy read stream only when yazl is ready to consume
-    cb(null, entry.openReadStream());
-  });
-  ```
-- **Heap Guarantee**: Maintains a working memory footprint of 74–250 MiB on multi-gigabyte archives. Must run cleanly under a 192 MiB V8 heap limit (verified by `test/termux.test.js`).
+### 1. 逐条目直通
+- **禁止把整个 zip 读进内存**：真实用户的包常在 1GiB 量级。
+- 大条目走 `addLazy` 惰性流直通：泵到该条目才打开源流（`src/core/transform.js` 的 `lazyOpen`）。
+- dry-run（`options.dryRun`）用 `NullZipWriter`：不打开任何数据流，只按声明大小计数（`src/core/null-writer.js`）。
+- 内存峰值 ≈ **最大单条目**，与整包体积无关。
+- **待验证**：具体峰值 MiB 数无自动化门禁，需 Playwright 基准实测（方法见 `quality-guidelines.md`）。
 
-### 2. Cursor Restrictions in `yauzl`
-- `yauzl` streams through the zip Central Directory sequentially.
-- **Rule**: Central Directory cursors cannot be rewound. Therefore:
-  - Format detection (`detectLayout`) and main conversion (`convert`) must open the zip file in separate independent passes.
-  - Never attempt to read entries while scanning directory metadata in the same pass.
+### 2. 游标不可倒回
+- zip 中央目录游标**不能重绕**，因此：
+  - 布局检测（`detectFromReader`）与主转换循环**必须分两次开包**：检测用 reader 在 `finally` 中 `close()`，随后重新 `openReader` 走主循环。
+  - PT 目标在迁移用户级扩展前，会额外再开一次 reader 预扫 `third-party/` 目录名。
+- 任何“边扫描目录元数据边读条目内容”的写法都无法工作。
+
+### 3. 写入并发
+- `src/core/zip-io.js` 的写入管线是并发滑动窗口 + `waitForSlot()` 背压；契约见 `quality-guidelines.md` 的「Zip IO 写入并发契约」，**禁止改回串行队列**。
 
 ---
 
 ## Storage & Persistence Policies
 
-### 1. Secrets Preservation (Non-negotiable)
-- `secrets.json` containing API keys (OpenAI, Claude, NovelAI, etc.) MUST NEVER be discarded, filtered, or altered in any conversion direction.
-- Bit-level identity is strictly verified in test suite (`test/verify-secrets.mjs`).
+### 1. 客户端暂存：IndexedDB（`src/storage/db.js`）
+- `DB_NAME = 'st_zip_converter_db'`，`DB_VERSION = 2`；stores：`files` / `workspace` / `preferences`。
+- `files` 记录带 `origin`（`ORIGINS`：`upload` / `host-export` / `converted` / `delta` / `split-part`）与可选 `group`（分卷组内关联）。
+- v1 → v2 迁移：`onupgradeneeded` 按 `role` 与元数据映射为 `origin`（`migrateRoleToOrigin`）；读取时 `normalizeRecord` 兜底补齐（兼容升级中断的残留记录）。
+- 大 Blob（`size >= LARGE_BLOB_THRESHOLD = 16MB`）写入经模块内 `writeQueue` 串行化，与转换热路径解耦。
+- 非浏览器环境：`isStorageSupported()` 为 false、`openDb()` 返回 `null`。
+- **定位**：缓存。事实源是用户自己的 zip 与宿主服务端目录，IndexedDB 可清理、可重建。
 
-### 2. Derived Cache Discard Rules
-- To save space and avoid cross-platform stale cache corruption, derived caches are stripped by default:
-  - `thumbnails/`, `backups/`, `vectors/`
-  - `data/_cache/`, `data/_css/`, `data/_errors/`
-  - `content.log`, `user/cache/`
-- When `--keep-all` is passed, these entries are preserved.
+### 2. 可选 Authority 后端（`src/storage/authority-store.js`）
+- 探测 `window.STAuthority.AuthoritySDK`（由宿主安装的 st-authority-sdk 扩展注入）；不可用时所有导出接口返回 `null` / `false`，**调用方无需分支**。
+- `createCheckpointAdapter()` 实现与 `TaskManager` 相同的 `{ save, load, remove }` 接缝；blob 分块落盘 + KV 存清单。
+- **纪律**：后端只作增强，不可用时静默降级，纯前端路径保持全功能。
 
-### 3. Extension Migration
-- **PT Target**: PureTavern strictly drops user-level `extensions/`. The converter transforms `extensions/<name>/` into `data/extensions/third-party/<name>/` and generates synthetic `data/_tauritavern/extension-sources/<name>.json`.
-- Root-level loose files in `third-party/` or orphaned metadata are dropped to prevent crash loops.
+### 3. Secrets Preservation（不可协商）
+- `secrets.json`（API 密钥）**任何方向、任何目标都不得被剥离、过滤或改写**。
+- 唯一例外：用户在类目勾选中**主动取消** `secrets`——此时产物不含该条目，并在报告 `filtered` 中留痕（`test/filter.test.js` 把关）。
+- 字节一致性由 `test/convert.test.js` 的 `Buffer.compare` 断言。
+
+### 4. Derived Cache Discard Rules
+默认丢弃派生/私有缓存（`transform.js` 的 `DERIVED_DIRS` / `TT_PRIVATE_PREFIXES` / `TT_PRIVATE_FILES`）：
+- `thumbnails/`、`vectors/`
+- TT：`data/_cache/`、`data/_css/`、`data/_errors/`、`data/content.log`（含 `.1`）
+- 保留开关均为 `convert()` 的 **options**（`keepAll` / `includeCache` / `includeBackups` / `includeAppPrivate` / `keepDevFiles`）——**不存在 `--keep-all` 这类 CLI 参数**。
+
+### 5. Luker 私有配置的兼容沙箱
+- 目标**不是** Luker 时，Luker 专属私有文件（`stats.json` / `macros.json` / `user_data.json` 等）被搬到 `_compat/luker/<原路径>` 而非丢弃；转回 Luker 时再解包回原位（`transform.js`；`test/private-configs.test.js` 把关）。
+
+### 6. Extension Migration
+- **PT / TT 目标**：用户级 `extensions/<name>/` 迁移为 `data/extensions/third-party/<name>/`，并产出 `data/_tauritavern/extension-sources/<scope>/<name>.json` 来源记录（源里已有记录则原样保留；否则仅在 `remoteUrl` / `homePage` 为 https 时合成，非 https 只记警告——PT 导入时会跳过该扩展）。
+- 与已有 third-party 同名冲突时保留 third-party 版本，丢弃用户级副本并逐条记录。
+- **ST / L 目标**：修正错误的 `third-party` 嵌套并摊平（`thirdPartyFlattenedCount`）。
+- 另有交付模式开关：`EXTENSION_MODES.MANIFEST`（只导出来源清单，不打包插件实体与 git packfile，防 408 超时）与 `EXTENSION_MODES.FULL`（完整离线包）。
+
+### 7. 合成条目
+- ST 目标会写入 `_convert/INSTALL.md`、`_convert/meta.json`、`_convert/extensions-manifest.json` 等说明性合成条目（`report.synthesized()` 记账）。
+- 所有合成条目使用固定时间戳 `2020-01-01T00:00:00.000Z` 并按名字排序，保证可复现。
 
 ---
 
 ## Common Pitfalls & Anti-patterns
 
-- **Forbidden**: `fs.readFileSync(zipPath)` or loading complete archives into memory.
-- **Forbidden**: Modifying entry CRC32 or byte contents during non-transform passes.
-- **Forbidden**: Amending manifest timestamps dynamically (use constant epoch `2020-01-01T00:00:00.000Z` for bit-for-bit reproducibility).
+- **禁止** `fs.readFileSync(zipPath)` 或把整包读进内存（`src/core/` 内也不允许任何 `node:` 导入）。
+- **禁止**在非转换环节改动条目字节或内容。
+- **禁止**动态改写合成条目的时间戳（必须用固定 epoch 常量，保证字节级可复现）。
+- **禁止**在 `src/core/` 中直接触碰存储（IndexedDB / OPFS / Authority）——一律经注入的 adapter 接缝。
+- **禁止**把 IndexedDB / 浏览器存储当成用户资产的事实源（用户的文件必须能落到宿主服务端原生目录）。

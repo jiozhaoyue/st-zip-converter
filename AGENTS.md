@@ -545,10 +545,12 @@ SillyTavern / Luker / TauriTavern / PureTavern 数据包互转工具，三形态
 ## 常用命令
 
 ```bash
-npm test          # Vitest 全量
+npm test          # Vitest 全量（34 文件 / 226 项）
 npx vitest run test/xxx.test.js   # 单文件
 npm run build     # vite build --base=./
 npm run dev       # vite 开发服务器（独立模式手测）
+npm run check:css-scope       # CSS 双前缀铁律守卫（PostCSS AST）
+npm run check:dom-injection   # DOM 注入守卫（innerHTML 未转义插值）
 ```
 
 ## 关键规则（踩过的坑，务必遵守）

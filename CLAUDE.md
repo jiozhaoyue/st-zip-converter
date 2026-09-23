@@ -9,11 +9,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 常用命令
 
 ```bash
-npm test                          # Vitest 全量（当前 187 项 / 30 文件）
+npm test                          # Vitest 全量（当前 226 passed / 2 skipped / 34 文件）
 npx vitest run test/xxx.test.js   # 单文件
 npx vitest run -t "用例名"         # 单条用例
 npm run dev                       # vite 开发服务器，独立模式手测（http://localhost:5173）
 npm run build                     # vite build --base=./（产出 GitHub Pages 静态站点）
+npm run check:css-scope           # CSS 双前缀铁律守卫（PostCSS AST）
+npm run check:dom-injection       # DOM 注入守卫（innerHTML 未转义插值）
 npm run gen-fixtures              # 重新生成测试固件 fixtures/
 ```
 
