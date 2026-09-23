@@ -1812,7 +1812,7 @@ body:has(> .app-container) {
 }
 
 @media (max-width: 768px) {
-  body {
+  body:has(> .app-container) {
     padding: 8px 6px;
   }
 
@@ -1821,111 +1821,136 @@ body:has(> .app-container) {
     gap: 12px;
   }
 
-  .app-header {
+  .app-container .app-header,
+  .st-converter-drawer-app .app-header {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
   }
 
-  .archive-manager-grid {
+  .app-container .archive-manager-grid,
+  .st-converter-drawer-app .archive-manager-grid {
     grid-template-columns: 1fr;
     gap: 12px;
   }
 
-  .controls-row {
+  .app-container .controls-row,
+  .st-converter-drawer-app .controls-row {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
   }
 
-  .target-select-group,
-  .compression-select-group,
-  .filename-input-group {
+  .app-container .target-select-group,
+  .st-converter-drawer-app .target-select-group,
+  .app-container .compression-select-group,
+  .st-converter-drawer-app .compression-select-group,
+  .app-container .filename-input-group,
+  .st-converter-drawer-app .filename-input-group {
     width: 100%;
     min-width: 0;
   }
 
-  .target-select-group .select-input,
-  .compression-select-group .select-input {
+  .app-container .target-select-group .select-input,
+  .st-converter-drawer-app .target-select-group .select-input,
+  .app-container .compression-select-group .select-input,
+  .st-converter-drawer-app .compression-select-group .select-input {
     flex: 1;
     width: 100%;
   }
 
-  .advanced-switches-group {
+  .app-container .advanced-switches-group,
+  .st-converter-drawer-app .advanced-switches-group {
     justify-content: flex-start;
     gap: 10px;
   }
 
-  .category-header {
+  .app-container .category-header,
+  .st-converter-drawer-app .category-header {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
   }
 
-  .category-actions {
+  .app-container .category-actions,
+  .st-converter-drawer-app .category-actions {
     width: 100%;
     justify-content: space-between;
   }
 
-  .plan-summary-bar {
+  .app-container .plan-summary-bar,
+  .st-converter-drawer-app .plan-summary-bar {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
   }
 
-  .host-category-grid {
+  .app-container .host-category-grid,
+  .st-converter-drawer-app .host-category-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .host-export-controls {
+  .app-container .host-export-controls,
+  .st-converter-drawer-app .host-export-controls {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .host-action-buttons {
+  .app-container .host-action-buttons,
+  .st-converter-drawer-app .host-action-buttons {
     flex-direction: column;
     width: 100%;
   }
 
-  .host-action-buttons button {
+  .app-container .host-action-buttons button,
+  .st-converter-drawer-app .host-action-buttons button {
     width: 100%;
     min-height: 44px;
   }
 
-  .log-console-body {
+  .app-container .log-console-body,
+  .st-converter-drawer-app .log-console-body {
     height: 38vh;
   }
 
-  .btn-archive-action {
+  .app-container .btn-archive-action,
+  .st-converter-drawer-app .btn-archive-action {
     min-height: 36px;
     padding: 6px 12px;
   }
 }
 
 @media (max-width: 480px) {
-  .category-actions {
+  .app-container .category-actions,
+  .st-converter-drawer-app .category-actions {
     flex-direction: column;
     gap: 6px;
   }
 
-  .btn-group-main,
-  .btn-group-quick {
+  .app-container .btn-group-main,
+  .st-converter-drawer-app .btn-group-main,
+  .app-container .btn-group-quick,
+  .st-converter-drawer-app .btn-group-quick {
     width: 100%;
     display: flex;
   }
 
-  .btn-group-main .btn-tool,
-  .btn-group-quick .btn-tool {
+  .app-container .btn-group-main .btn-tool,
+  .st-converter-drawer-app .btn-group-main .btn-tool,
+  .app-container .btn-group-quick .btn-tool,
+  .st-converter-drawer-app .btn-group-quick .btn-tool {
     flex: 1;
   }
 
-  .archive-card {
+  .app-container .archive-card,
+  .st-converter-drawer-app .archive-card {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
   }
 
-  .archive-buttons {
+  .app-container .archive-buttons,
+  .st-converter-drawer-app .archive-buttons {
     width: 100%;
     justify-content: flex-end;
   }
@@ -1949,7 +1974,9 @@ body:has(> .app-container) {
   box-sizing: border-box;
 }
 
-.st-converter-modal-overlay .app-container {
+/* 模态框内的工作台约束（独立态模态由 body:has 特例承载，不污染宿主） */
+body:has(> .st-converter-modal-overlay) .app-container,
+.st-converter-drawer-app .st-converter-modal-overlay .app-container {
   max-width: 1080px;
   width: 100%;
   max-height: 92vh;
@@ -2149,7 +2176,7 @@ body:has(> .app-container) {
 }
 
 /* 抽屉内部样式微调 */
-.st-converter-drawer-wrapper {
+.app-container .st-converter-drawer-wrapper, .st-converter-drawer-app .st-converter-drawer-wrapper {
   width: 100%;
 }
 

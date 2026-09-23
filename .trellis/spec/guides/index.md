@@ -81,6 +81,20 @@ This single habit prevents most "forgot to update X" bugs.
 
 ---
 
+## Sub-Agent Dispatch Rule (CRITICAL)
+
+> **派发子代理前必须核验模型，未指定时必须停下询问。**
+
+1. 子代理一律使用低能力小模型，当前指定 `glm-5.3-flash`（2026-09-23 起）；禁用 Kimi K3 与旗舰模型。
+2. 派发后立即核验实际生效模型（端点回执/日志）；若被路由到其他模型，立即停止并换模型重派。
+   实测事故：显式指定 `DeepSeek-V4-Flash[free]` 后上游仍路由到 `gpt-5.6-sol`（2026-09-23）。
+3. 未明确指定子代理模型时，**禁止**默认继承主线程旗舰模型；必须列出当前平台可用模型清单并请用户选定。
+4. 并发 ≤3（免费端点实测 6 并发熔断）；子代理任务必须自包含（范围/问题/期望输出）。
+
+详见 `AGENTS.md` L0-8。
+
+---
+
 ## How to Use This Directory
 
 1. **Before coding**: Skim the relevant thinking guide

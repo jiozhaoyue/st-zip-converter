@@ -141,4 +141,19 @@ A plugin `<style>` with unscoped `.menu_button { ... }` restyles EVERY button of
 **Absolute rule**: EVERY class selector in `style.css` must be prefixed with
 `.app-container ` (standalone ancestor) or `.st-converter-drawer-app ` (plugin mount).
 No exceptions for "plugin-only-looking" classes — the host uses the same design system.
-CI check: `grep '^\.' style.css | grep -vc 'app-container\|st-converter-drawer'` must print `0`.
+
+### Automated guard (2026-09-23): line-based grep is NOT sufficient
+
+The grep check only sees top-level rule lines. Bare selectors inside nested
+`@media` / `@supports` blocks, and any branch of a comma-separated selector list,
+escape it entirely (real regression: the two responsive `@media` blocks held bare
+`body`, `.app-header`, `.controls-row`, ... selectors).
+
+**Rule**: every selector — top-level or nested, every comma branch — must be rooted
+at `.app-container` / `.st-converter-drawer-app`, with only two intentional
+standalone exceptions: `body:has(> .app-container)` and `body:has(> .st-converter-modal-overlay)`.
+`@keyframes` percentage frames are not element selectors and are skipped.
+
+CI check: `npm run check:css-scope` (PostCSS AST walk, `scripts/css-scope.js` +
+`test/css-scope.test.js`) must pass. PostCSS is a devDependency used only for this
+parse-time guard; it never enters the browser runtime.
