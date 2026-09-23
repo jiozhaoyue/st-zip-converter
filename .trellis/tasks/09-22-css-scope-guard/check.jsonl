@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核验双容器作用域与宿主样式隔离"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核验前端测试和构建质量门槛"}

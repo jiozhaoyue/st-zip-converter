@@ -1,0 +1,31 @@
+{
+  "id": "extension-cloud-migration",
+  "name": "extension-cloud-migration",
+  "title": "扩展迁移与云端批量恢复优化",
+  "description": "统筹扩展清单与 Git、批量恢复、Authority 可选增强及性能安全审计",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "jiozhaoyue",
+  "assignee": "jiozhaoyue",
+  "createdAt": "2026-09-23",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-23-extension-manifest-git",
+    "09-23-batch-restore-refresh",
+    "09-23-authority-cloud-transfer",
+    "09-23-perf-security-audit"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

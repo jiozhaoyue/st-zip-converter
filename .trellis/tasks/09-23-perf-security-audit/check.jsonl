@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "性能与禁止模式"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "内存与流式质量门槛"}
