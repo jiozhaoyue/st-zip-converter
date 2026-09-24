@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
+- **Total Sessions**: 21
 - **Last Active**: 2026-09-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~609 | Active |
+| `journal-1.md` | ~699 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-09-24 | 性能止血收尾：取消入口补齐 + 响应体有界读取 + F2/F3 测试 | `d1a7f04`, `a046a25`, `3c65dac` | `fix/perf-hardening-transfer-memory` |
 | 19 | 2026-09-24 | 性能安全审计、注入面止血与 spec 全量刷新 | `ce1882e`, `7a22049`, `2a450bd`, `7161e25`, `848c189`, `d6d2b1b`, `990df0c` | `main` |
 | 18 | 2026-09-21 | 意图对齐、规则沉淀与两任务归档 | `19ab53b` | `main` |
 | 17 | 2026-09-07 | 统一工作区与待导出区落地(ui-unify)+父任务完结 | `c81b6f0` | `main` |

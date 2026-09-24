@@ -673,3 +673,27 @@ detectHost改为lukerContext优先协议(实测Luker同时暴露SillyTavern与lu
   spec 更新（代际分块命名 / `fetchWithTimeout`）→ `/trellis:finish-work`
 - `09-24-dual-entry-sync-standalone`：属架构取舍，实施前需先与用户确认方向（L0-5）
 - `09-22-extension-git-slim`：其 OQ-1（`minimal` 可行性 Dev 实测）未闭环
+
+
+## Session 21: 性能止血收尾：取消入口补齐 + 响应体有界读取 + F2/F3 测试
+<!-- trellis-session: v=2 fp=f59fedb846e65d1f -->
+
+**Date**: 2026-09-24
+**Task**: 性能止血收尾：取消入口补齐 + 响应体有界读取 + F2/F3 测试
+**Branch**: `fix/perf-hardening-transfer-memory`
+
+### Summary
+
+续做 09-24 性能止血任务并收尾归档。补 F2/F3 测试（authority-store +6 / restore-chain +11）；核验子代理两次 0 工具调用失败，按既定策略转主代理串行自核，发现并修复 3 处问题：response.json() 无兜底（新增 readJsonBounded）、putArtifact 读旧清单在 try 之外（kv.get 失败留孤儿块）、R1 的 UI 取消入口确认缺失；三项用户裁决落地（取消入口现在补齐 / UPLOAD_TIMEOUT_MS 可配置 / CLAUDE.md.bak 入 gitignore）。npm test 301 passed，守卫与构建通过，已推送 origin。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d1a7f04` | perf(transfer): 恢复链路有界等待 + 传输/分卷内存止血（WIP 交接） |
+| `a046a25` | docs(handoff): 登记推送未成功状态与 origin 核对结果 |
+| `3c65dac` | fix(transfer): 补齐恢复取消入口与响应体有界读取（自核修复 + F2/F3 测试） |
+
+### Status
+
+[OK] **Completed**
