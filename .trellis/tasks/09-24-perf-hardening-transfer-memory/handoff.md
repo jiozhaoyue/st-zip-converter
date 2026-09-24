@@ -2,7 +2,8 @@
 
 > **交接原因**：用户要求停止推进并落盘当前状态。
 > **交接时刻状态**：代码全部写完且**测试全绿**（284 passed / 2 skipped / 37 文件），
-> 守卫通过，**尚未提交**（改动全在工作区）。任务状态仍为 `in_progress`。
+> 守卫通过，**已提交为 `d1a7f04`**；**推送因网络不可达未成功**（详见第十节）。
+> 任务状态仍为 `in_progress`。
 
 ---
 
@@ -139,4 +140,25 @@ npx vitest run                    # 确认仍是 284 passed / 2 skipped（工作
 | Hash | 说明 |
 | --- | --- |
 | `661dbb8` | `feat(manifest): 扩展清单契约 v2——FULL 模式也产清单 + 恢复端三态引导`（已推送 origin，对应任务已归档） |
-| （待提交） | 本任务全部改动仍在工作区，**尚未提交**（见「三、改动文件清单」） |
+| `d1a7f04` | `perf(transfer): 恢复链路有界等待 + 传输/分卷内存止血（WIP 交接）`（**已提交，推送未成功**） |
+
+### ⚠ 待完成：推送 `d1a7f04`
+
+提交时本机网络不可达 GitHub，`git push` 连续三次失败：
+
+```
+fatal: unable to access 'https://github.com/jiozhaoyue/st-zip-converter.git/':
+schannel: failed to receive handshake, SSL/TLS connection failed
+```
+
+`git remote -v` 已核对：`origin` = `https://github.com/jiozhaoyue/st-zip-converter.git`（自有仓，
+**非 upstream**，符合 P-12 的推送前核对要求）。失败原因是网络握手，非配置问题。
+
+恢复网络后执行（L0-7 要求提交必推）：
+
+```bash
+cd D:/Repo/Tavern-repo/My-repo/ST-zip-converter
+git push -u origin fix/perf-hardening-transfer-memory
+```
+
+> 提交本身已安全落盘（`d1a7f04`），不会丢失；只差推送这一步。
