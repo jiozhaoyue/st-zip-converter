@@ -607,3 +607,69 @@ detectHost改为lukerContext优先协议(实测Luker同时暴露SillyTavern与lu
 - 09-24-perf-hardening-transfer-memory：恢复链路有界等待 + authority 去整包驻留 + 分卷即时释放
 - 09-24-dual-entry-sync-standalone：index.html 缺 #stash-list 导致独立态暂存区不渲染（L1-MR-10 违规）
 - .trellis/tasks 下有两处归档残留空壳目录待清理（待用户批准）
+
+## Session 20: 扩展清单契约 v2 落地 + 性能止血中途交接
+<!-- trellis-session: v=2 fp=session20-extension-manifest-and-perf -->
+
+**Date**: 2026-09-24
+**Task**: 09-23-extension-manifest-git（完成并归档）、09-24-perf-hardening-transfer-memory（中途交接）
+**Branch**: `feat/extension-manifest-contract`（已推送）→ `fix/perf-hardening-transfer-memory`（未提交）
+
+### Summary
+
+完成 `09-23-extension-manifest-git` 全流程（规划收尾 → 实施 → 验证 → 提交推送 → 归档）；
+随后推进 `09-24-perf-hardening-transfer-memory`，实施块 A–E 与 F1 全部完成、测试全绿，
+按用户要求在 F2/F3 之前落盘交接文档。
+
+### Main Changes
+
+**任务一：扩展清单契约 v2（已完成，commit `661dbb8`）**
+- 新增 `src/core/extension-manifest.js`（纯逻辑、无 DOM 依赖）作为清单契约唯一权威实现点：
+  `deriveExtensionEntry` 派生 `sourceKind`/`availability`/`notes`；`buildExtensionManifest` /
+  `buildOfficialIndex` / `normalizeManifestEntries` / `shouldAutoOpenInstaller`
+- 决策 D-1：FULL 模式也产出私有清单，条目标 `embedded`；D-6：FULL **不**产出官方
+  `extensions-index.json`（避免宿主重复在线安装）；D-4：仅存在可安装项时才自动弹窗
+- 顺带修正设计偏差：`design.md` 假设 `generatePlan` 已解析扩展元数据，实际只存在于
+  `transform.js` 主循环 → 在 `plan-preview.js` 补一趟轻量元数据扫描
+- UI 新增「仅导出扩展清单」只读按钮，双入口（`index.html` / `workbench-template.js`）同源同改
+- 测试 226→274 passed；任务已归档到 `archive/2026-09/`
+
+**任务二：性能止血（A–E + F1 完成，未提交）**
+- 新增 `src/ui/fetch-bounds.js`：`fetchWithTimeout` 把超时与外部 signal 合流到内部
+  controller，超时抛 `TimeoutError`、取消抛 `AbortError`（两者可判别，UI 给出不同文案）
+- `restoreToHost` 拆分外层（`restoreInFlight` 互斥）与 `restoreToHostInner`；
+  修掉伪成功（响应体不可解析曾 `catch` 成 `{success:true}`，现返回 `unconfirmed`)
+- `authority-store.putArtifact` 改 `blob.stream()` 逐块切分（峰值 `N + 2.33C` → `O(C)`），
+  加代际命名 + 失败回滚 + 新旧隔离；`getArtifact` 去掉整包 `merged` 副本
+- `index.js` 分卷路径 `finally` 释放 `entries` 并置空 `lastConvertedBlob`
+- `task-manager.js` 的 `pause()` 把 `controller.abort()` 移出 try——此前 KV 落盘失败会
+  跳过 abort 导致「暂停」静默失效（违反 L1-MR-1）
+- 新增 `test/restore-chain.test.js`（10 条）；修正 `durable-mirror.test.js` 两处硬编码块名断言
+  为清单驱动
+
+### Testing
+
+- `npm test`：**284 passed / 2 skipped / 37 文件**（基线 226/2/34，零回归）
+- `npm run check:css-scope` 通过；`npm run check:dom-injection` 通过（16 文件）
+- 任务一另经 `npm run build` 成功；任务二 **build 未跑**
+
+### Status
+
+- 任务一：**Completed**（已提交并推送、已归档）
+- 任务二：**Handed off**（`in_progress`，交接文档 `.trellis/tasks/09-24-perf-hardening-transfer-memory/handoff.md`）
+
+### Notes
+
+- 核验子代理在本会话中**两次因上下文耗尽未产出**（manifest-git 任务），当时按
+  `subagent-collaboration.md` G-5 降级为主代理串行自核；性能任务的正式核验**尚未做**
+- 交接前发现仓库根有未跟踪的 `CLAUDE.md.bak`（08:49，早于本会话），按 PARDON 门禁
+  未删除，已登记在交接文档第九节
+- 曾一度犯的错：`test/restore-chain.test.js` 的 mock fetch 不响应 `init.signal`，
+  与真实 fetch 语义不符导致测试自身挂死；已修正为「响应 abort 并 reject(AbortError)」
+
+### Next Steps
+
+- 任务二：补 F2/F3 测试 → 勾选 C/D/E/F 与 PRD 验收 → 跑 build → 提交推送 →
+  spec 更新（代际分块命名 / `fetchWithTimeout`）→ `/trellis:finish-work`
+- `09-24-dual-entry-sync-standalone`：属架构取舍，实施前需先与用户确认方向（L0-5）
+- `09-22-extension-git-slim`：其 OQ-1（`minimal` 可行性 Dev 实测）未闭环

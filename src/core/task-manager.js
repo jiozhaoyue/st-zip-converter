@@ -10,6 +10,8 @@
  * state: running | paused | aborted | done | failed
  */
 
+import { logger } from './logger.js';
+
 export const TASK_STATES = Object.freeze({
   RUNNING: 'running',
   PAUSED: 'paused',
@@ -107,9 +109,16 @@ export class TaskManager {
         if (opts.force
           || task._dirtyEntries >= CHECKPOINT_EVERY_ENTRIES
           || (task._dirtyEntries > 0 && now - task._lastFlushAt >= CHECKPOINT_EVERY_MS)) {
-          await this.adapter.save(id, manifest);
-          task._dirtyEntries = 0;
-          task._lastFlushAt = now;
+          try {
+            await this.adapter.save(id, manifest);
+            task._dirtyEntries = 0;
+            task._lastFlushAt = now;
+          } catch (err) {
+            // 后端落盘失败不得中断任务推进；重置节流窗口避免每个条目都重试一次失败写
+            task._dirtyEntries = 0;
+            task._lastFlushAt = now;
+            logger.warn('[task-manager] 断点节流落盘失败（不影响任务推进）:', err);
+          }
         }
       },
     };
@@ -118,6 +127,9 @@ export class TaskManager {
   /**
    * 暂停：触发 checkpoint 强制落盘 → abort → state=paused
    * 幂等：非 running 状态直接返回 false。
+   *
+   * 断点持久化失败（如 Authority KV 不可用/拒绝）**不得阻断暂停语义**——后端只是可选增强层，
+   * 内存中的 checkpoint 仍在，本次会话内续传不受影响（L1-MR-1 / 审计 F-B）。
    * @param {string} id
    * @returns {Promise<boolean>} 是否发生了暂停
    */
@@ -126,9 +138,14 @@ export class TaskManager {
     if (!task || task.state !== TASK_STATES.RUNNING) return false;
     task.state = TASK_STATES.PAUSED;
     if (task.checkpoint) {
-      await this.adapter.save(id, task.checkpoint);
-      task._dirtyEntries = 0;
+      try {
+        await this.adapter.save(id, task.checkpoint);
+        task._dirtyEntries = 0;
+      } catch (err) {
+        logger.warn('[task-manager] 断点持久化失败，暂停仍生效（内存断点保留）:', err);
+      }
     }
+    // 必须在 try 之外：否则落盘失败会让 abort 被跳过，任务实际未暂停
     task.controller.abort();
     return true;
   }
@@ -136,6 +153,8 @@ export class TaskManager {
   /**
    * 中止：abort + 清理断点清单与半成品，state=aborted
    * 幂等：非 running/paused 状态直接返回 false。
+   *
+   * 先置状态并 abort（主路径），再尽力清理持久化断点——清理失败不阻断中止。
    * @param {string} id
    * @returns {Promise<boolean>}
    */
@@ -143,13 +162,16 @@ export class TaskManager {
     const task = this.tasks.get(id);
     if (!task) return false;
     if (task.state !== TASK_STATES.RUNNING && task.state !== TASK_STATES.PAUSED) return false;
-    if (task.state === TASK_STATES.RUNNING) {
-      task.state = TASK_STATES.ABORTED;
+    const wasRunning = task.state === TASK_STATES.RUNNING;
+    task.state = TASK_STATES.ABORTED;
+    if (wasRunning) {
       task.controller.abort();
-    } else {
-      task.state = TASK_STATES.ABORTED;
     }
-    await this.adapter.remove(id);
+    try {
+      await this.adapter.remove(id);
+    } catch (err) {
+      logger.warn('[task-manager] 断点清理失败，中止已生效:', err);
+    }
     return true;
   }
 
@@ -167,22 +189,34 @@ export class TaskManager {
 
   /**
    * 任务完成：清理断点清单，state=done
+   * 清理失败不阻断（后端为可选增强层）。
    */
   async complete(id) {
     const task = this.tasks.get(id);
     if (!task) return;
     task.state = TASK_STATES.DONE;
-    await this.adapter.remove(id);
+    try {
+      await this.adapter.remove(id);
+    } catch (err) {
+      logger.warn('[task-manager] 断点清理失败，任务已完成:', err);
+    }
   }
 
   /**
    * 任务失败：可续传任务保留清单（state=failed），不可续传清理
+   * 清理失败不阻断（后端为可选增强层）。
    */
   async fail(id, keepCheckpoint = false) {
     const task = this.tasks.get(id);
     if (!task) return;
     task.state = TASK_STATES.FAILED;
-    if (!keepCheckpoint) await this.adapter.remove(id);
+    if (!keepCheckpoint) {
+      try {
+        await this.adapter.remove(id);
+      } catch (err) {
+        logger.warn('[task-manager] 断点清理失败，任务已标记失败:', err);
+      }
+    }
   }
 
   /**

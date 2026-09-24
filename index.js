@@ -43,6 +43,7 @@ import {
   verifyHostPlatform,
   fetchHostBackup,
   restoreToHost,
+  isRestoreInFlight,
   getHandle,
   registerMenuButton,
   mountNativeBackupButton,
@@ -389,6 +390,7 @@ async function main(appRoot = document.getElementById('app')) {
       containerEl: exportQueuePanel,
       queue: exportQueue,
       isHostAvailable: host.isPlugin,
+      restoreInFlight: isRestoreInFlight(),
       onRestoreToHost: (item) => {
         openRestoreModal({ name: item.name, blob: item.blob, size: item.blob.size });
       },
@@ -1090,6 +1092,11 @@ async function main(appRoot = document.getElementById('app')) {
   if (btnConfirmRestore) {
     btnConfirmRestore.addEventListener('click', async () => {
       if (!pendingRestoreFile) return;
+      // 并发互斥：恢复在途时拒绝再次发起（两个事务并发写同一用户目录，宿主侧行为未定义）
+      if (isRestoreInFlight()) {
+        alert('已有恢复任务正在进行，请等待其完成后再试');
+        return;
+      }
       const fileToRestore = pendingRestoreFile;
       const modeRadio = document.querySelector('input[name="restore-mode"]:checked');
       const mode = modeRadio ? modeRadio.value : 'merge';
@@ -1101,9 +1108,17 @@ async function main(appRoot = document.getElementById('app')) {
         view.setProgress(15, `正在恢复写入数据包至宿主 (${mode === 'merge' ? '增量合并' : '全量覆盖'})...`);
         logger.info(`向宿主发起数据包恢复请求: ${fileToRestore.name}, 模式: ${mode}`);
 
-        await restoreToHost(fileToRestore.blob, { mode, platform: host.platform });
-        view.setProgress(100, `恭喜！数据包已成功恢复写入到当前酒馆用户！`);
-        logger.success(`恢复完成！宿主酒馆数据已更新。`);
+        const restoreResult = await restoreToHost(fileToRestore.blob, { mode, platform: host.platform });
+        // 三态区分（审计 R-15：响应体不可解析时不得谎报成功）
+        if (restoreResult && restoreResult.unconfirmed) {
+          view.setProgress(100, `请求已发出，但结果未确认`);
+          logger.warn(`恢复请求已发出，但响应体不可解析（${restoreResult.reason || '未知原因'}）——`
+            + '宿主可能仍在处理，请稍后核对数据。');
+          alert('恢复请求已发出，但未能确认结果。\n宿主可能仍在处理，请稍后核对数据。');
+        } else {
+          view.setProgress(100, `恭喜！数据包已成功恢复写入到当前酒馆用户！`);
+          logger.success(`恢复完成！宿主酒馆数据已更新。`);
+        }
       } catch (err) {
         view.setProgress(100, `恢复写入失败: ${err.message}`);
         logger.error('恢复写入宿主过程发生错误', err);
@@ -1111,6 +1126,7 @@ async function main(appRoot = document.getElementById('app')) {
       } finally {
         btnConfirmRestore.disabled = false;
         pendingRestoreFile = null;
+        refreshExportQueueUI();
       }
     });
   }
@@ -1259,36 +1275,48 @@ async function main(appRoot = document.getElementById('app')) {
         view.setProgress(95, `正在按 ${thresholdMB} MB 阈值执行智能独立分包...`);
         logger.info(`启动智能分包引擎: 单包阈值 ${thresholdMB} MB`);
 
-        const reader = await zipIo.openReader(resultBlob);
+        // entries 会持有**全部条目的 data**，是分卷路径的主要内存驻留源；
+        // 无论成功失败都必须在 finally 中释放（审计 S-01 / S-02）。
         const entries = [];
-        for await (const e of reader.entries()) {
-          if (e.isDirectory) { e.skip(); continue; }
-          entries.push({ path: e.fileName, data: await e.read(), size: e.uncompressedSize });
-        }
-        await reader.close();
+        try {
+          const reader = await zipIo.openReader(resultBlob);
+          try {
+            for await (const e of reader.entries()) {
+              if (e.isDirectory) { e.skip(); continue; }
+              entries.push({ path: e.fileName, data: await e.read(), size: e.uncompressedSize });
+            }
+          } finally {
+            await reader.close();
+          }
 
-        const splitResult = await splitArchiveEntries(entries, {
-          thresholdMB,
-          target,
-          handle: currentHandle,
-          filenameTemplate: template,
-        });
-
-        // 分卷统一进待导出区（来源=分卷）
-        for (const p of splitResult.parts) {
-          exportQueue.enqueue({
-            name: p.partName,
-            blob: p.blob,
-            targetLayout: target,
-            origin: 'split-part',
-            ephemeral: true,
+          const splitResult = await splitArchiveEntries(entries, {
+            thresholdMB,
+            target,
+            handle: currentHandle,
+            filenameTemplate: template,
           });
-        }
-        refreshExportQueueUI();
-        view.renderReport(report);
 
-        view.setProgress(100, `外部数据已切分为 ${splitResult.totalParts} 个分卷，进入待导出区统一处置！`);
-        logger.success(`外部 Zip 分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})，可在待导出区批量下载或存入工作区`);
+          // 分卷统一进待导出区（来源=分卷）
+          for (const p of splitResult.parts) {
+            exportQueue.enqueue({
+              name: p.partName,
+              blob: p.blob,
+              targetLayout: target,
+              origin: 'split-part',
+              ephemeral: true,
+            });
+          }
+          refreshExportQueueUI();
+          view.renderReport(report);
+
+          view.setProgress(100, `外部数据已切分为 ${splitResult.totalParts} 个分卷，进入待导出区统一处置！`);
+          logger.success(`外部 Zip 分卷完成: 共 ${splitResult.totalParts} 个独立包 (${formatBytes(splitResult.totalBytes)})，可在待导出区批量下载或存入工作区`);
+        } finally {
+          // 释放逐条目 data 引用（成功与失败路径都要走到）
+          entries.length = 0;
+        }
+        // 分卷已接管整包（各 part 进待导出区），原始整包不再有任何消费方 → 立即释放
+        lastConvertedBlob = null;
         return;
       }
 

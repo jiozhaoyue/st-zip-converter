@@ -225,10 +225,14 @@ export class ExportQueue {
  * @param {HTMLElement} params.containerEl
  * @param {ExportQueue} params.queue
  * @param {boolean} [params.isHostAvailable]
+ * @param {boolean} [params.restoreInFlight] 是否有恢复事务在途（在途时禁用全部「写回宿主」入口）
  * @param {function(object): void} [params.onRestoreToHost] (item) => void
  * @param {function(): void} [params.onWorkspaceChanged] 工作区列表刷新回调
  */
-export function renderExportQueue({ containerEl, queue, isHostAvailable = false, onRestoreToHost, onWorkspaceChanged }) {
+export function renderExportQueue({
+  containerEl, queue, isHostAvailable = false, restoreInFlight = false,
+  onRestoreToHost, onWorkspaceChanged,
+}) {
   if (!containerEl) return;
   const selected = new Set();
 
@@ -304,11 +308,17 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
         if (typeof onWorkspaceChanged === 'function') onWorkspaceChanged();
       }));
       if (isHostAvailable && typeof onRestoreToHost === 'function') {
-        selBar.appendChild(mkSelBtn('<i class="fa-solid fa-rotate"></i> 写回宿主', '', () => {
+        // 并发互斥：恢复在途时禁用写回入口，避免两个 restore 事务并发写同一用户目录
+        const btnRestore = mkSelBtn('<i class="fa-solid fa-rotate"></i> 写回宿主', '', () => {
           const first = [...selected][0];
           const item = queue.items.find((it) => it.id === first);
           if (item) onRestoreToHost(item);
-        }));
+        });
+        if (restoreInFlight) {
+          btnRestore.disabled = true;
+          btnRestore.title = '已有恢复任务正在进行，请等待其完成';
+        }
+        selBar.appendChild(btnRestore);
       }
       selBar.appendChild(mkSelBtn('<i class="fa-solid fa-trash"></i> 移除', '', () => {
         for (const id of [...selected]) { selected.delete(id); queue.remove(id); }
@@ -370,7 +380,12 @@ export function renderExportQueue({ containerEl, queue, isHostAvailable = false,
       btnStash.disabled = Boolean(item.storedId);
       btns.appendChild(btnStash);
       if (isHostAvailable && typeof onRestoreToHost === 'function') {
-        btns.appendChild(mkBtn('restore', '<i class="fa-solid fa-rotate"></i> 写回宿主', '', () => onRestoreToHost(item)));
+        const btnRestoreRow = mkBtn('restore', '<i class="fa-solid fa-rotate"></i> 写回宿主', '', () => onRestoreToHost(item));
+        if (restoreInFlight) {
+          btnRestoreRow.disabled = true;
+          btnRestoreRow.title = '已有恢复任务正在进行，请等待其完成';
+        }
+        btns.appendChild(btnRestoreRow);
       }
       btns.appendChild(mkBtn('delete', '移除', '', () => { selected.delete(item.id); queue.remove(item.id); }));
       row.appendChild(btns);

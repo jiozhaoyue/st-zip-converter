@@ -1,1 +1,4 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "内存门槛核验"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门槛：npm test 基线、两条守卫与禁止模式（无界等待）"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "下载生命周期与内存回收约定核验"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Authority 降级纪律与存储契约零回归核验"}
+{"file": ".trellis/tasks/09-24-perf-hardening-transfer-memory/design.md", "reason": "验收锚点：峰值公式、代际语义与回退要求"}

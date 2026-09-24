@@ -113,13 +113,42 @@ function base64ToUint8(b64) {
   return out;
 }
 
-/** blob → Uint8Array（File/Blob 统一走 arrayBuffer） */
-async function blobToBytes(blob) {
-  return new Uint8Array(await blob.arrayBuffer());
+/** 同进程内的代际计数（与时间戳组合，保证同一毫秒内的多次写入也互不覆盖） */
+let genCounter = 0;
+
+/** 生成写入代际标识（同一产物的不同写入批次互不覆盖，便于失败回滚与新旧隔离） */
+function nextGeneration() {
+  genCounter += 1;
+  return `${Date.now().toString(36)}_${genCounter.toString(36)}`;
+}
+
+/** 分块名（含代际，避免新旧批次混写；读取端只认清单，不解析命名） */
+function partNameOf(name, gen, index) {
+  return `${name}__part_${gen}_${String(index).padStart(6, '0')}`;
+}
+
+/** 尽力删除一组分块（用于失败回滚与旧代际清理；单块失败不阻断） */
+async function deleteParts(client, parts) {
+  if (!Array.isArray(parts) || typeof client?.storage?.blob?.delete !== 'function') return;
+  for (const part of parts) {
+    try {
+      await client.storage.blob.delete({ id: part.id, name: part.name });
+    } catch { /* 单块删除失败不阻断 */ }
+  }
 }
 
 /**
- * 分块写入产物到 Authority blob 存储（按块 base64，清单存 KV）
+ * 分块写入产物到 Authority blob 存储（按块 base64，清单存 KV）——**流式切分，不整包驻留**。
+ *
+ * 内存模型（审计 F-A / F-C）：按 `blob.stream()` 逐块读取，只持有「不足一块」的余量，
+ * 峰值 ≈ `O(CHUNK_SIZE)`，与产物体积无关；不再出现整包 `arrayBuffer()` 与整包 base64 中间串。
+ *
+ * 失败清理与新旧隔离（审计 F-D / F-F）：
+ * 1. 逐块写入**新代际**分块名（`__part_<gen>_<NNNNNN>`）；
+ * 2. 全部成功后写清单（清单里的 `parts` 指向新代际）；
+ * 3. 清单写入成功后，按**旧清单记录的 parts** 删除旧代际分块（不解析命名规律）；
+ * 4. 任一步失败 → 删除本次已写分块后抛错；清单仍指向旧代际，旧数据保持可读。
+ *
  * @param {string} name 逻辑名（同名单块覆盖，隔离由 Authority 按用户+扩展保证）
  * @param {Blob|File} blob 产物
  * @param {{ chunkSize?: number, onProgress?: (done:number,total:number)=>void }} [opts]
@@ -129,38 +158,101 @@ export async function putArtifact(name, blob, opts = {}) {
   const client = await getAuthorityClient();
   if (!client) return null;
   const chunkSize = opts.chunkSize || CHUNK_SIZE;
-  const bytes = await blobToBytes(blob);
-  const total = Math.max(1, Math.ceil(bytes.length / chunkSize));
+  const contentType = blob.type || 'application/octet-stream';
+  const size = blob.size || 0;
+  // 分块总数由声明体积预先算出（不必先读完整包才知道长度）
+  const total = Math.max(1, Math.ceil(size / chunkSize));
+  const gen = nextGeneration();
   const parts = [];
-  for (let i = 0; i < total; i++) {
-    const partName = `${name}__part_${String(i).padStart(6, '0')}`;
-    const content = uint8ToBase64(bytes.subarray(i * chunkSize, (i + 1) * chunkSize));
+  let writtenBytes = 0;
+
+  /**
+   * 写出一个完整分块。
+   * @param {Uint8Array} bytes 恰好 chunkSize（末块可短）
+   */
+  const putBlock = async (bytes) => {
+    const index = parts.length;
+    const partName = partNameOf(name, gen, index);
+    const content = uint8ToBase64(bytes);
     const put = await client.storage.blob.put({
       name: partName,
       content,
       encoding: 'base64',
-      contentType: blob.type || 'application/octet-stream',
+      contentType,
     });
     // put 返回形状未固化：优先用返回 id，否则按名读取
     const id = (put && typeof put === 'object' && (put.id ?? put.blobId)) || partName;
     parts.push({ id, name: partName });
-    if (opts.onProgress) opts.onProgress(i + 1, total);
+    if (opts.onProgress) opts.onProgress(parts.length, total);
+  };
+
+  try {
+    const reader = blob.stream().getReader();
+    let pending = new Uint8Array(chunkSize);
+    let pendingLen = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value && value.length > 0) {
+        let offset = 0;
+        while (offset < value.length) {
+          const room = chunkSize - pendingLen;
+          const take = Math.min(room, value.length - offset);
+          pending.set(value.subarray(offset, offset + take), pendingLen);
+          pendingLen += take;
+          offset += take;
+          writtenBytes += take;
+          // 填满一块即写出并释放
+          if (pendingLen === chunkSize) {
+            await putBlock(pending);
+            pending = new Uint8Array(chunkSize);
+            pendingLen = 0;
+          }
+        }
+      }
+      if (done) break;
+    }
+    // 余量（末块）
+    if (pendingLen > 0 || parts.length === 0) {
+      await putBlock(pending.subarray(0, pendingLen));
+    }
+  } catch (err) {
+    // 回滚：删除本次已写分块，清单不动 → 旧代际数据仍可读
+    await deleteParts(client, parts);
+    throw err;
   }
+
   const manifest = {
     name,
-    size: bytes.length,
-    contentType: blob.type || 'application/octet-stream',
+    size: writtenBytes,
+    contentType,
     chunkSize,
-    chunks: total,
+    chunks: parts.length,
     parts,
+    gen,
     savedAt: Date.now(),
   };
-  await kvSet(client, KV_MANIFEST_PREFIX + name, manifest);
-  return { name, size: bytes.length, chunks: total };
+
+  // 旧代际清理：读旧清单 → 写新清单 → 删旧块（顺序不可颠倒）
+  const previous = await kvGet(client, KV_MANIFEST_PREFIX + name);
+  try {
+    await kvSet(client, KV_MANIFEST_PREFIX + name, manifest);
+  } catch (err) {
+    // 清单写失败：本次分块成为孤儿 → 清理后抛错
+    await deleteParts(client, parts);
+    throw err;
+  }
+  if (previous && Array.isArray(previous.parts)) {
+    await deleteParts(client, previous.parts);
+  }
+
+  return { name, size: writtenBytes, chunks: parts.length };
 }
 
 /**
  * 读取分块产物并重组为 Blob
+ *
+ * 内存模型（审计 F-C）：边读边产出**分块 Blob**，最后交给 `new Blob([...])` 由浏览器
+ * 管理底层存储；**不再**把全部块先拼成一份整包 `Uint8Array`（少一次整包拷贝）。
  * @returns {Promise<Blob|null>} null=不存在或 Authority 不可用
  */
 export async function getArtifact(name) {
@@ -168,7 +260,7 @@ export async function getArtifact(name) {
   if (!client) return null;
   const manifest = await kvGet(client, KV_MANIFEST_PREFIX + name);
   if (!manifest || !Array.isArray(manifest.parts)) return null;
-  const buffers = [];
+  const chunkBlobs = [];
   for (const part of manifest.parts) {
     const got = await client.storage.blob.get({ id: part.id, name: part.name });
     // 兼容多种返回形状：base64 字符串 / { content } / ArrayBuffer|Uint8Array / Blob
@@ -179,22 +271,20 @@ export async function getArtifact(name) {
       const raw = got.content ?? got.data ?? got.bytes ?? got;
       if (typeof raw === 'string') {
         chunkBytes = base64ToUint8(raw);
+      } else if (raw instanceof Blob) {
+        // 已经是 Blob：直接入列，省去一次字节拷贝
+        chunkBlobs.push(raw);
+        continue;
       } else if (raw instanceof ArrayBuffer) {
         chunkBytes = new Uint8Array(raw);
-      } else if (raw instanceof Blob) {
-        chunkBytes = await blobToBytes(raw);
       } else if (raw && raw.buffer instanceof ArrayBuffer) {
         chunkBytes = new Uint8Array(raw.buffer, raw.byteOffset || 0, raw.byteLength);
       }
     }
     if (!chunkBytes) return null;
-    buffers.push(chunkBytes);
+    chunkBlobs.push(chunkBytes);
   }
-  const totalLen = buffers.reduce((n, b) => n + b.length, 0);
-  const merged = new Uint8Array(totalLen);
-  let off = 0;
-  for (const b of buffers) { merged.set(b, off); off += b.length; }
-  return new Blob([merged], { type: manifest.contentType || 'application/octet-stream' });
+  return new Blob(chunkBlobs, { type: manifest.contentType || 'application/octet-stream' });
 }
 
 /**
@@ -226,15 +316,7 @@ export async function deleteArtifact(name) {
   const client = await getAuthorityClient();
   if (!client) return false;
   const manifest = await kvGet(client, KV_MANIFEST_PREFIX + name);
-  if (Array.isArray(manifest?.parts)) {
-    for (const part of manifest.parts) {
-      try {
-        if (typeof client.storage.blob.delete === 'function') {
-          await client.storage.blob.delete({ id: part.id, name: part.name });
-        }
-      } catch { /* 单块删除失败不阻断清单清理 */ }
-    }
-  }
+  await deleteParts(client, manifest?.parts);
   await client.storage.kv.set({ key: KV_MANIFEST_PREFIX + name, value: null });
   return true;
 }

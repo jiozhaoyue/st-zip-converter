@@ -1,5 +1,5 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "内存/流式质量门槛与禁止模式"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "有界等待/rAF 合帧/守卫命令"}
-{"file": ".trellis/tasks/archive/2026-09/09-23-perf-security-audit/research/00-audit-index.md", "reason": "审计汇总索引：立即修复档的性能项清单"}
-{"file": ".trellis/tasks/archive/2026-09/09-23-perf-security-audit/research/02-authority-transfer.md", "reason": "F-A~F-J 传输内存与失败清理证据"}
-{"file": ".trellis/tasks/archive/2026-09/09-23-perf-security-audit/research/03-splitter-memory.md", "reason": "S-01~S-11 分卷内存驻留证据"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "有界等待铁律、rAF 合帧、转义层契约与零回归基线"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "宿主注入规范、下载生命周期与内存回收约定、导出队列模式"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "宿主端点调用契约与平台码双轨制"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "存储分层、Authority 适配器降级纪律与流式 IO 契约"}
+{"file": ".trellis/tasks/09-24-perf-hardening-transfer-memory/design.md", "reason": "有界等待封装、并发互斥、去整包驻留与代际清理方案"}

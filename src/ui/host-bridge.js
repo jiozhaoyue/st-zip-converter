@@ -14,6 +14,25 @@ import {
   normalizeManifestEntries,
   shouldAutoOpenInstaller,
 } from '../core/extension-manifest.js';
+import {
+  DEFAULT_FETCH_TIMEOUT_MS,
+  SHORT_FETCH_TIMEOUT_MS,
+  TimeoutError,
+  fetchWithTimeout,
+} from './fetch-bounds.js';
+
+/**
+ * 恢复在途标志（并发互斥）。
+ *
+ * 两个 `restoreToHost` 并发写同一用户目录时宿主侧行为未定义，故在途时直接拒绝第二次调用。
+ * UI 层经 `isRestoreInFlight()` 查询以禁用全部「写回宿主」入口。
+ */
+let restoreInFlight = false;
+
+/** @returns {boolean} 是否有恢复事务正在进行 */
+export function isRestoreInFlight() {
+  return restoreInFlight;
+}
 
 /**
  * 安全渲染状态文本：图标拆为独立节点，文本走 textContent。
@@ -184,20 +203,28 @@ export async function validateBackupShape(blob, platform) {
 }
 
 /**
- * 获取宿主 CSRF Token
+ * 获取宿主 CSRF Token（短超时兜底，避免宿主挂起时永久 pending）
  */
-export async function getCsrfToken() {
-  const response = await fetch('/csrf-token', { credentials: 'same-origin' });
+export async function getCsrfToken({ signal } = {}) {
+  const response = await fetchWithTimeout('/csrf-token', { credentials: 'same-origin' }, {
+    timeoutMs: SHORT_FETCH_TIMEOUT_MS,
+    signal,
+    label: '获取 CSRF token',
+  });
   if (!response.ok) throw new Error(`获取 CSRF token 失败: ${response.status}`);
   const data = await response.json();
   return data.token;
 }
 
 /**
- * 获取当前登录用户句柄
+ * 获取当前登录用户句柄（短超时兜底）
  */
-export async function getHandle() {
-  const response = await fetch('/api/users/me', { credentials: 'same-origin' });
+export async function getHandle({ signal } = {}) {
+  const response = await fetchWithTimeout('/api/users/me', { credentials: 'same-origin' }, {
+    timeoutMs: SHORT_FETCH_TIMEOUT_MS,
+    signal,
+    label: '获取当前用户',
+  });
   if (!response.ok) throw new Error(`获取当前用户失败: ${response.status}`);
   const data = await response.json();
   return data.handle;
@@ -451,14 +478,36 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
 /**
  * 直接调用恢复 API 将目标包恢复/写入到当前酒馆宿主
  * 支持增量合并 (mode: 'merge') 与全量覆盖 (mode: 'overwrite')
+ *
+ * 有界等待（L1-MR-7）：凭证请求走短超时；上传由 `signal` 兜底（大包上传本就可能
+ * 超过任何固定阈值，故默认不设硬超时——见 design.md §2.2）。
+ * 并发互斥：在途时拒绝第二次调用，避免两个 restore 事务并发写同一用户目录。
+ *
  * @param {Blob} zipBlob
  * @param {object} [options]
  * @param {'merge'|'overwrite'} [options.mode='merge'] 恢复模式
  * @param {string} [options.platform='st'] 宿主类型
+ * @param {AbortSignal} [options.signal] 外部取消信号
+ * @param {number} [options.timeoutMs=0] 上传超时毫秒；`0` 表示不设硬超时
+ * @returns {Promise<object>} 宿主持久化的响应体；响应体不可解析时为
+ *   `{ success: false, unconfirmed: true, reason }`
  */
-export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st' } = {}) {
+export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st', signal, timeoutMs = 0 } = {}) {
+  if (restoreInFlight) {
+    throw new Error('已有恢复任务正在进行，请等待其完成后再试');
+  }
+  restoreInFlight = true;
+  try {
+    return await restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs });
+  } finally {
+    restoreInFlight = false;
+  }
+}
+
+/** `restoreToHost` 的实现体（互斥标志由外层 `try/finally` 保证复位）。 */
+async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }) {
   logger.info(`准备向宿主 [${platform.toUpperCase()}] 恢复写入数据包 (模式: ${mode === 'merge' ? '增量合并' : '全量覆盖'})...`);
-  const [token, handle] = await Promise.all([getCsrfToken(), getHandle()]);
+  const [token, handle] = await Promise.all([getCsrfToken({ signal }), getHandle({ signal })]);
 
   const formData = new FormData();
   formData.append('avatar', zipBlob, 'backup.zip');
@@ -466,14 +515,14 @@ export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st' }
   formData.append('mode', mode);
   formData.append('incremental', mode === 'merge' ? 'true' : 'false');
 
-  const response = await fetch('/api/users/restore', {
+  const response = await fetchWithTimeout('/api/users/restore', {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
       'X-CSRF-Token': token,
     },
     body: formData,
-  });
+  }, { timeoutMs, signal, label: '恢复数据包至宿主' });
 
   if (!response.ok) {
     let detail = '';
@@ -488,7 +537,14 @@ export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st' }
     throw err;
   }
 
-  const result = await response.json().catch(() => ({ success: true }));
+  // 响应体解析失败**不得**当作成功（审计 R-15：伪成功会让用户误以为数据已恢复）
+  let result;
+  try {
+    result = await response.json();
+  } catch (err) {
+    logger.warn('宿主恢复响应体解析失败，无法确认结果（请求已发出）:', err);
+    return { success: false, unconfirmed: true, reason: '响应体不可解析' };
+  }
   logger.success(`数据包恢复至当前用户 (${handle}) 成功！模式: ${mode === 'merge' ? '增量合并' : '全量覆盖'}`);
 
   // 检查包内扩展清单 _convert/extensions-manifest.json，据归一后的状态决定是否自动呼出安装器

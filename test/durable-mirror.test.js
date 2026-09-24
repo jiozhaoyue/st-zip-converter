@@ -65,9 +65,14 @@ describe('export-queue 入库 → Authority 持久归档镜像', () => {
     expect(item.storedId).toBe('stored-1');
     expect(item.ephemeral).toBe(false);
     await flushAsync();
-    // 镜像落盘：blob part + KV 清单
-    expect(client._blobs.has('out-l.zip__part_000000')).toBe(true);
-    expect(client._kv.has('blob-manifest:out-l.zip')).toBe(true);
+    // 镜像落盘：blob part + KV 清单。
+    // 断言走清单驱动（不绑死分块命名格式——命名含代际标识，属实现细节）。
+    const manifest = client._kv.get('blob-manifest:out-l.zip');
+    expect(manifest).toBeTruthy();
+    expect(manifest.parts.length).toBeGreaterThan(0);
+    for (const part of manifest.parts) {
+      expect(client._blobs.has(part.name)).toBe(true);
+    }
   });
 
   it('Authority 不可用时 stash 正常完成且不报错', async () => {
@@ -103,13 +108,24 @@ describe('export-queue 入库 → Authority 持久归档镜像', () => {
     expect(manifestCount()).toBe(1);
   });
 
-  it('putArtifact 直连：同名覆盖保留最新产物', async () => {
+  it('putArtifact 直连：同名覆盖保留最新产物且清理旧代际分块', async () => {
     const client = mockClient();
     __setAuthorityClientForTest(client);
     await putArtifact('a.zip', new Blob(['v1']));
+    const firstParts = client._kv.get('blob-manifest:a.zip').parts.map((p) => p.name);
+
     await putArtifact('a.zip', new Blob([new Uint8Array(1024)]));
-    expect(client._blobs.has('a.zip__part_000000')).toBe(true);
     const manifest = client._kv.get('blob-manifest:a.zip');
+
+    // 清单指向最新产物
     expect(manifest.size).toBe(1024);
+    expect(manifest.gen).toBeTruthy();
+    for (const part of manifest.parts) {
+      expect(client._blobs.has(part.name)).toBe(true);
+    }
+    // 旧代际分块已清理（无孤儿块）
+    for (const oldName of firstParts) {
+      expect(client._blobs.has(oldName)).toBe(false);
+    }
   });
 });
