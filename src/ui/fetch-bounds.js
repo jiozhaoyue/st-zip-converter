@@ -34,6 +34,17 @@ export const SHORT_FETCH_TIMEOUT_MS = 10_000;
 export const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
 
 /**
+ * 大包恢复上传的超时（毫秒）——**唯一调整点**。
+ *
+ * `0`（默认）= 不设硬超时，仅由「用户取消」与外部 `signal` 兜底。理由（design.md §2.2）：
+ * 120MB 包在慢速上行下超过任何固定阈值都属正常，硬超时会打断**正常**恢复。
+ *
+ * 改为正数即给出硬上限（同时作用于 `host-bridge.js` 的默认值与 `index.js` 的显式传参），
+ * 代价是慢速上行的大包可能被误杀——请连同提示文案一并评估。
+ */
+export const UPLOAD_TIMEOUT_MS = 0;
+
+/**
  * 带超时与外部 signal 兜底的 fetch。
  *
  * `timeoutMs <= 0` 表示不设超时（仅靠 `signal` 兜底）——用于大包上传这类
@@ -96,6 +107,62 @@ export async function fetchWithTimeout(url, init = {}, opts = {}) {
     if (timer !== null) clearTimeout(timer);
     if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
   }
+}
+
+/**
+ * 有界读取响应的 JSON 体。
+ *
+ * 存在原因：`fetch` resolve 只代表**响应头**到达，体可能仍在传输。`fetchWithTimeout` 在
+ * resolve 时已于 `finally` 中摘掉外部 signal 监听并清掉定时器，因此**此后**的
+ * `await response.json()` 既无超时、也不再响应取消——正落在 L1-MR-7 的「无界等待」里。
+ *
+ * 本函数为该次体读取补回两条兜底（超时 / 外部 signal，任一触发即 settle）。
+ * @param {Response} response
+ * @param {object} [opts]
+ * @param {number} [opts.timeoutMs=SHORT_FETCH_TIMEOUT_MS] 体读取超时；`<= 0` 表示不设超时
+ * @param {AbortSignal} [opts.signal] 外部取消信号
+ * @param {string} [opts.label='读取响应体'] 出错信息中的操作名
+ * @returns {Promise<unknown>} 解析后的 JSON
+ * @throws {TimeoutError} 超时
+ * @throws {Error} 外部 signal 触发的中止（`name` 为 `AbortError`）或 `response.json()` 自身抛错
+ */
+export function readJsonBounded(response, { timeoutMs = SHORT_FETCH_TIMEOUT_MS, signal, label = '读取响应体' } = {}) {
+  if (signal?.aborted) return Promise.reject(makeAbortError(label));
+
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    const cleanup = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (signal) signal.removeEventListener('abort', onAbort);
+    };
+    const settle = (fn, value) => {
+      cleanup();
+      fn(value);
+    };
+
+    function onAbort() {
+      settle(reject, makeAbortError(label));
+    }
+
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        settle(reject, new TimeoutError(
+          `${label}超时（${Math.round(timeoutMs / 1000)} 秒无响应）`,
+          { label, timeoutMs },
+        ));
+      }, timeoutMs);
+    }
+
+    // 无论谁先 settle，都经 settle() 收尾；后到的结果被 Promise 语义自然忽略
+    response.json().then(
+      (value) => settle(resolve, value),
+      (err) => settle(reject, err),
+    );
+  });
 }
 
 /**

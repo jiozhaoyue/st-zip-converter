@@ -69,9 +69,31 @@
 
 - [x] F1 新增 `test/restore-chain.test.js`：超时抛错 / abort 生效 / 合流 /
       伪成功已修 / 并发互斥 + 复位。
-- [ ] F2 扩展 `test/authority-store.test.js`：写入无整包 `arrayBuffer`；代际命名与清单指向；
-      中途失败回滚；KV 失败不阻断暂停。
-- [ ] F3 KV 写失败单测：mock `kv.set` reject → 断言 `pause()` 返回 true 且 `signal.aborted` 为真。
+- [x] F2 扩展 `test/authority-store.test.js`：写入无整包 `arrayBuffer`；代际命名与清单指向；
+      中途失败回滚。（KV 失败不阻断暂停见 F3，同文件）
+- [x] F3 KV 写失败单测：mock `kv.set` reject → 断言 `pause()` 返回 true 且 `signal.aborted` 为真。
+
+### G. 自核补修 + 用户裁决落地（2026-09-24 续做）
+
+> 核验子代理（`trellis-check`）两次只输出开场白、0 次工具调用即结束，无产出
+> （与 `handoff.md` 记录的同一现象）。按交接文档既定降级策略（G-5）转为主代理串行自核，
+> 发现下列 3 处问题并修复。
+
+- [x] G1 **响应体读取无兜底**：`restoreToHost` 的两处 `await response.json()` 不在有界覆盖内
+      ——`fetchWithTimeout` 在 headers 到达时已 `finally` 摘掉外部 signal 监听并清定时器，
+      此后体读取**既无超时也不响应取消**（L1-MR-7）。新增 `readJsonBounded()` 补回两条兜底。
+- [x] G2 **`putArtifact` 读旧清单在 try 之外**：`kv.get` 抛错会留下孤儿块，违反 design 声称的
+      「任一步失败即回滚」。把「读旧清单 + 写新清单」并入同一 `try`。
+- [x] G3 **取消入口缺失**（R1 后半句，用户裁决「现在补齐」）：`host-bridge.js` 持有在途控制器 +
+      导出 `cancelRestoreInFlight()`；外部 `signal` 手动合流转发；`export-queue.js` 在途时渲染
+      「取消恢复」按钮（置于空状态提前返回之前，空队列也可见）；`index.js` 区分
+      `AbortError` 文案（「已取消 + 请核对数据」而非「失败」），并在发起后刷新待导出区。
+      落点选在 `host-bridge.js` 而非 index.js 局部变量：**Node 下可单测**。
+- [x] G4 **`UPLOAD_TIMEOUT_MS` 可配置**（用户裁决「设为可配置」）：`fetch-bounds.js` 导出唯一
+      调整点（默认 `0` = 不设硬超时）；`restoreToHost` 默认值与 `index.js` 显式传参同源。
+- [x] G5 `CLAUDE.md.bak`（用户裁决「加入 .gitignore」）：`.gitignore` 追加 `CLAUDE.md.bak` / `*.md.bak`。
+- [x] G6 补测：`authority-store.test.js` +1（读旧清单失败回滚）、`restore-chain.test.js` +11
+      （响应体有界 7 + 取消入口 3 + 响应体挂起集成 1）。
 
 ## 验证命令
 

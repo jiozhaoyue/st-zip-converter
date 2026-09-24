@@ -233,11 +233,13 @@ export async function putArtifact(name, blob, opts = {}) {
   };
 
   // 旧代际清理：读旧清单 → 写新清单 → 删旧块（顺序不可颠倒）
-  const previous = await kvGet(client, KV_MANIFEST_PREFIX + name);
+  // **读旧清单也必须在 try 内**：读失败同样不得留下孤儿块（与「任一步失败即回滚」一致）
+  let previous = null;
   try {
+    previous = await kvGet(client, KV_MANIFEST_PREFIX + name);
     await kvSet(client, KV_MANIFEST_PREFIX + name, manifest);
   } catch (err) {
-    // 清单写失败：本次分块成为孤儿 → 清理后抛错
+    // 清单读/写失败：本次分块成为孤儿 → 清理后抛错；清单未改，旧代际数据仍可读
     await deleteParts(client, parts);
     throw err;
   }

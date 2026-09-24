@@ -226,12 +226,13 @@ export class ExportQueue {
  * @param {ExportQueue} params.queue
  * @param {boolean} [params.isHostAvailable]
  * @param {boolean} [params.restoreInFlight] 是否有恢复事务在途（在途时禁用全部「写回宿主」入口）
+ * @param {function(): void} [params.onCancelRestore] 取消在途恢复（仅 `restoreInFlight` 时渲染入口）
  * @param {function(object): void} [params.onRestoreToHost] (item) => void
  * @param {function(): void} [params.onWorkspaceChanged] 工作区列表刷新回调
  */
 export function renderExportQueue({
   containerEl, queue, isHostAvailable = false, restoreInFlight = false,
-  onRestoreToHost, onWorkspaceChanged,
+  onCancelRestore, onRestoreToHost, onWorkspaceChanged,
 }) {
   if (!containerEl) return;
   const selected = new Set();
@@ -266,6 +267,29 @@ export function renderExportQueue({
       header.appendChild(batchBar);
     }
     containerEl.appendChild(header);
+
+    // 恢复在途：提供取消入口（审计 R-01 / R1）——大包上传可能持续数分钟，
+    // 此前用户唯一能做的只有刷新页面。空队列时同样要出现，故置于空状态提前返回之前。
+    if (restoreInFlight && typeof onCancelRestore === 'function') {
+      const cancelBar = document.createElement('div');
+      cancelBar.className = 'eq-batch-bar eq-restore-bar';
+      const btnCancel = document.createElement('button');
+      btnCancel.type = 'button';
+      btnCancel.className = 'menu_button btn-tool';
+      btnCancel.innerHTML = trustedStaticMarkup('<i class="fa-solid fa-ban"></i> 取消恢复');
+      btnCancel.title = '中止正在进行的恢复写入（宿主可能已收到部分数据，取消后请核对）';
+      btnCancel.addEventListener('click', () => {
+        if (confirm('确定取消正在进行的恢复写入吗？\n宿主可能已收到部分数据，取消后请核对数据完整性。')) {
+          onCancelRestore();
+        }
+      });
+      cancelBar.appendChild(btnCancel);
+      const hint = document.createElement('span');
+      hint.className = 'eq-selected-label';
+      hint.textContent = '恢复写入进行中…';
+      cancelBar.appendChild(hint);
+      containerEl.appendChild(cancelBar);
+    }
 
     if (queue.items.length === 0) {
       const empty = document.createElement('div');

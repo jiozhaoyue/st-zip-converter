@@ -46,3 +46,7 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# 本地文档备份（非项目产物，勿入库）
+CLAUDE.md.bak
+*.md.bak
+

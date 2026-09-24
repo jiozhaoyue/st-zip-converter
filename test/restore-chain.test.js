@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SHORT_FETCH_TIMEOUT_MS, TimeoutError, fetchWithTimeout } from '../src/ui/fetch-bounds.js';
+import {
+  SHORT_FETCH_TIMEOUT_MS,
+  TimeoutError,
+  fetchWithTimeout,
+  readJsonBounded,
+} from '../src/ui/fetch-bounds.js';
 
 /**
  * 恢复链路有界等待与并发互斥单测（审计 R-01 / R-02 / R-05 / R-12 / R-15）。
@@ -39,8 +44,30 @@ function jsonFetch(body, { ok = true, status = 200 } = {}) {
   }));
 }
 
+/**
+ * 凭证请求立即返回、上传请求挂起的 fetch 替身。
+ * 挂起的上传**必须响应 `init.signal`**（真实 fetch 语义），否则取消断言永远等不到 settle。
+ */
+function hangingUploadFetch() {
+  return vi.fn((url, init = {}) => {
+    if (String(url).includes('csrf-token')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ token: 't' }) });
+    }
+    if (String(url).includes('/api/users/me')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ handle: 'u' }) });
+    }
+    return new Promise((_, reject) => {
+      const signal = init.signal;
+      if (!signal) return; // 无 signal：真挂起（反例用）
+      if (signal.aborted) { reject(makeAbortError()); return; }
+      signal.addEventListener('abort', () => reject(makeAbortError()), { once: true });
+    });
+  });
+}
+
 afterEach(() => {
   globalThis.fetch = realFetch;
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -153,6 +180,60 @@ describe('restoreToHost：并发互斥（R-12）', () => {
   });
 });
 
+describe('restoreToHost：取消入口（R-01）', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('cancelRestoreInFlight 中止在途上传，抛出 AbortError 且事后复位', async () => {
+    globalThis.fetch = hangingUploadFetch();
+    const { restoreToHost, cancelRestoreInFlight, isRestoreInFlight } =
+      await import('../src/ui/host-bridge.js');
+
+    // 无在途恢复时取消为无操作
+    expect(cancelRestoreInFlight()).toBe(false);
+
+    const p = restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'st' });
+    await new Promise((r) => setTimeout(r, 20)); // 推进到上传阶段
+    expect(isRestoreInFlight()).toBe(true);
+
+    expect(cancelRestoreInFlight()).toBe(true);
+    // 取消抛 AbortError（UI 据此给「已取消 + 请核对数据」文案，而非「失败」）
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    expect(isRestoreInFlight()).toBe(false);
+    expect(cancelRestoreInFlight()).toBe(false); // 控制器已释放，不会误取消下一个任务
+  });
+
+  it('外部 signal 与取消入口合流：传 signal 仍能中止上传', async () => {
+    globalThis.fetch = hangingUploadFetch();
+    const { restoreToHost, isRestoreInFlight } = await import('../src/ui/host-bridge.js');
+    const controller = new AbortController();
+
+    const p = restoreToHost(new Blob(['x']), {
+      mode: 'merge', platform: 'st', signal: controller.signal,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(isRestoreInFlight()).toBe(true);
+
+    controller.abort();
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    expect(isRestoreInFlight()).toBe(false);
+  });
+
+  it('外部 signal 已取消时立即中止，不发起请求', async () => {
+    const spy = hangingUploadFetch();
+    globalThis.fetch = spy;
+    const { restoreToHost } = await import('../src/ui/host-bridge.js');
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'st', signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
 describe('restoreToHost：修掉伪成功（R-15）', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -178,5 +259,81 @@ describe('restoreToHost：修掉伪成功（R-15）', () => {
     expect(result.success).toBe(false);
     expect(result.unconfirmed).toBe(true);
     expect(result.reason).toBeTruthy();
+  });
+
+  it('响应体挂起时按短超时 settle 为 unconfirmed（不得永久 pending，L1-MR-7）', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('csrf-token')) {
+        return { ok: true, status: 200, json: async () => ({ token: 't' }) };
+      }
+      if (String(url).includes('/api/users/me')) {
+        return { ok: true, status: 200, json: async () => ({ handle: 'u' }) };
+      }
+      // 响应头已到、响应体永不返回——正是「无界等待」的形态
+      return { ok: true, status: 200, json: () => new Promise(() => {}) };
+    });
+
+    const { restoreToHost } = await import('../src/ui/host-bridge.js');
+    const p = restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'st' });
+    await vi.advanceTimersByTimeAsync(SHORT_FETCH_TIMEOUT_MS + 1);
+    await expect(p).resolves.toMatchObject({ success: false, unconfirmed: true });
+  });
+});
+
+describe('readJsonBounded：响应体读取的有界兜底（L1-MR-7）', () => {
+  /** 体永不返回的响应替身 */
+  const hangingBody = () => ({ ok: true, status: 200, json: () => new Promise(() => {}) });
+
+  it('正常响应体解析后原样返回', async () => {
+    const res = { ok: true, status: 200, json: async () => ({ success: true, n: 1 }) };
+    await expect(readJsonBounded(res, { timeoutMs: 50 })).resolves.toEqual({ success: true, n: 1 });
+  });
+
+  it('体挂起时抛 TimeoutError，不永久 pending', async () => {
+    const err = await readJsonBounded(hangingBody(), { timeoutMs: 20, label: '读取恢复结果' })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(TimeoutError);
+    expect(err.label).toBe('读取恢复结果');
+    // 挂起响应体在超时后应被判定为「非 JSON 错误」
+    expect(err).not.toBeInstanceOf(SyntaxError);
+  });
+
+  it('外部 signal 取消时抛 AbortError（与超时区分）', async () => {
+    const controller = new AbortController();
+    const p = readJsonBounded(hangingBody(), {
+      timeoutMs: 5000, signal: controller.signal, label: '读取恢复结果',
+    });
+    controller.abort();
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('外部已取消时立即抛错，不求值响应体', async () => {
+    const json = vi.fn(() => new Promise(() => {}));
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      readJsonBounded({ ok: true, status: 200, json }, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it('timeoutMs <= 0 表示不设超时（仅 signal 兜底）', async () => {
+    const res = { ok: true, status: 200, json: async () => ({ ok: 1 }) };
+    await expect(readJsonBounded(res, { timeoutMs: 0 })).resolves.toEqual({ ok: 1 });
+  });
+
+  it('正常 settle 后不残留定时器、不残留 abort 监听', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const res = { ok: true, status: 200, json: async () => ({ ok: 1 }) };
+    await readJsonBounded(res, { timeoutMs: 10_000, signal: controller.signal });
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it('响应体自身抛错时原样透传（不吞成超时）', async () => {
+    const res = { ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token'); } };
+    await expect(readJsonBounded(res, { timeoutMs: 5000 })).rejects.toBeInstanceOf(SyntaxError);
   });
 });

@@ -18,7 +18,9 @@ import {
   DEFAULT_FETCH_TIMEOUT_MS,
   SHORT_FETCH_TIMEOUT_MS,
   TimeoutError,
+  UPLOAD_TIMEOUT_MS,
   fetchWithTimeout,
+  readJsonBounded,
 } from './fetch-bounds.js';
 
 /**
@@ -29,9 +31,31 @@ import {
  */
 let restoreInFlight = false;
 
+/**
+ * 在途恢复的内部取消控制器。
+ *
+ * 存在原因（审计 R-01）：大包上传可能持续数分钟，此前用户**唯一能做的只有刷新页面**。
+ * 内部持有控制器而非要求调用方自建，是为了让「取消」在无 DOM 的 Node 环境下也可被测试，
+ * 同时收敛成单一取消入口（`cancelRestoreInFlight`）。
+ */
+let restoreAbort = null;
+
 /** @returns {boolean} 是否有恢复事务正在进行 */
 export function isRestoreInFlight() {
   return restoreInFlight;
+}
+
+/**
+ * 取消在途的恢复写入（R1「UI 提供取消入口」）。
+ *
+ * 取消是**请求级**的：已上传的数据宿主可能已部分落盘，故调用方必须提示用户
+ * 「宿主可能仍在处理，请稍后核对数据」。无在途恢复时为无操作。
+ * @returns {boolean} 是否确实取消了一个在途恢复
+ */
+export function cancelRestoreInFlight() {
+  if (!restoreAbort) return false;
+  restoreAbort.abort();
+  return true;
 }
 
 /**
@@ -479,27 +503,40 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
  * 直接调用恢复 API 将目标包恢复/写入到当前酒馆宿主
  * 支持增量合并 (mode: 'merge') 与全量覆盖 (mode: 'overwrite')
  *
- * 有界等待（L1-MR-7）：凭证请求走短超时；上传由 `signal` 兜底（大包上传本就可能
- * 超过任何固定阈值，故默认不设硬超时——见 design.md §2.2）。
+ * 有界等待（L1-MR-7）：凭证请求走短超时；响应体读取走 `readJsonBounded`；
+ * 上传超时由 `UPLOAD_TIMEOUT_MS` 配置（默认 `0` = 不设硬超时，见 design.md §2.2）。
  * 并发互斥：在途时拒绝第二次调用，避免两个 restore 事务并发写同一用户目录。
+ * 取消：内部控制器 + `cancelRestoreInFlight()`；外部 `signal` 亦被合流转发。
  *
  * @param {Blob} zipBlob
  * @param {object} [options]
  * @param {'merge'|'overwrite'} [options.mode='merge'] 恢复模式
  * @param {string} [options.platform='st'] 宿主类型
- * @param {AbortSignal} [options.signal] 外部取消信号
- * @param {number} [options.timeoutMs=0] 上传超时毫秒；`0` 表示不设硬超时
+ * @param {AbortSignal} [options.signal] 外部取消信号（与 `cancelRestoreInFlight()` 等效合流）
+ * @param {number} [options.timeoutMs=UPLOAD_TIMEOUT_MS] 上传超时毫秒；`0` 表示不设硬超时
  * @returns {Promise<object>} 宿主持久化的响应体；响应体不可解析时为
  *   `{ success: false, unconfirmed: true, reason }`
  */
-export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st', signal, timeoutMs = 0 } = {}) {
+export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st', signal, timeoutMs = UPLOAD_TIMEOUT_MS } = {}) {
   if (restoreInFlight) {
     throw new Error('已有恢复任务正在进行，请等待其完成后再试');
   }
   restoreInFlight = true;
+  const controller = new AbortController();
+  restoreAbort = controller;
+  // 外部 signal 与内部取消控制器合流（手动转发，与 fetch-bounds 同一取舍：环境行为一致优先）
+  const onExternalAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onExternalAbort, { once: true });
+  }
   try {
-    return await restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs });
+    return await restoreToHostInner(zipBlob, {
+      mode, platform, signal: controller.signal, timeoutMs,
+    });
   } finally {
+    if (signal) signal.removeEventListener('abort', onExternalAbort);
+    restoreAbort = null;
     restoreInFlight = false;
   }
 }
@@ -527,10 +564,13 @@ async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }
   if (!response.ok) {
     let detail = '';
     try {
-      const errJson = await response.json();
+      // 体读取同样要兜底：错误响应体也可能挂起（L1-MR-7）
+      const errJson = await readJsonBounded(response, {
+        timeoutMs: SHORT_FETCH_TIMEOUT_MS, signal, label: '读取恢复错误响应',
+      });
       detail = errJson.error ?? '';
     } catch {
-      // 忽略非 JSON
+      // 忽略非 JSON / 体读取超时
     }
     const err = new Error(`恢复失败 (${response.status})${detail ? `: ${detail}` : ''}`);
     logger.error('恢复数据包至宿主酒馆失败', err);
@@ -540,9 +580,12 @@ async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }
   // 响应体解析失败**不得**当作成功（审计 R-15：伪成功会让用户误以为数据已恢复）
   let result;
   try {
-    result = await response.json();
+    result = await readJsonBounded(response, {
+      timeoutMs: SHORT_FETCH_TIMEOUT_MS, signal, label: '读取恢复结果',
+    });
   } catch (err) {
-    logger.warn('宿主恢复响应体解析失败，无法确认结果（请求已发出）:', err);
+    // 解析失败与体读取超时/取消都归「未确认」：请求已发出，但结果无从得知
+    logger.warn('宿主恢复响应体读取失败，无法确认结果（请求已发出）:', err);
     return { success: false, unconfirmed: true, reason: '响应体不可解析' };
   }
   logger.success(`数据包恢复至当前用户 (${handle}) 成功！模式: ${mode === 'merge' ? '增量合并' : '全量覆盖'}`);

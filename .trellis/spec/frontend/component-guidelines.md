@@ -111,6 +111,80 @@ document.querySelectorAll('.userBackupButton').forEach((anchor) => {
 4. **高频回调必须 rAF 合帧**：进度回调、队列批量渲染等高频 DOM 写入先经 `requestAnimationFrame` 合并（最新值胜出），禁止逐 chunk/逐条目同步写 DOM（实测累积出 14 个 80–107ms 长任务、宿主整页卡顿）。现存实现锚点：`export-queue.js:401`、`log-console.js:298`、`view.js:56`。
 5. **有界等待**：任何 `await`（`fetch` / 媒体事件 / 渲染挂载 promise）都必须经**超时或 abort 信号**兜底 settle，禁止让 promise 永远 pending（历史事故：`IframeRenderer.render` 只等 `onload`，iframe 被 destroy 后永久悬置）。
 
+### Bounded Fetch Contract (有界 fetch 契约 · 2026-09-24)
+
+> 定稿于任务 `09-24-perf-hardening-transfer-memory`（审计 R-01 / R-02 / R-05 / R-15）。
+> 触发场景：新增或改动任何网络 `await`。
+
+**模块与导出**（`src/ui/fetch-bounds.js`；放 UI 层因其依赖 Web API `fetch`，`src/core/` 仍禁 Web/存储依赖）
+
+```js
+export class TimeoutError extends Error {}        // name === 'TimeoutError'
+export const SHORT_FETCH_TIMEOUT_MS = 10_000;     // 凭证类短请求
+export const DEFAULT_FETCH_TIMEOUT_MS = 120_000;  // 通用默认
+export const UPLOAD_TIMEOUT_MS = 0;               // 大包上传（0 = 不设硬超时）；唯一调整点
+
+fetchWithTimeout(url, init = {}, { timeoutMs, signal, label } = {})
+  → Promise<Response>
+
+readJsonBounded(response, { timeoutMs, signal, label } = {})
+  → Promise<unknown>   // 响应体读取的有界兜底
+```
+
+> **为什么需要 `readJsonBounded`**：`fetch` resolve 只代表**响应头**到达。`fetchWithTimeout`
+> 在 resolve 时已 `finally` 摘掉外部 signal 监听并清掉定时器，因此其后的
+> `await response.json()` **既无超时也不再响应取消**——正落在 L1-MR-7 里。
+> 凡「已拿到 Response 再读体」的地方都必须经 `readJsonBounded`，不得裸 `await response.json()`。
+
+**语义表**
+
+| 条件 | 行为 |
+| --- | --- |
+| `timeoutMs > 0` 且超时 | 内部 abort → 抛 `TimeoutError`（带 `label` / `timeoutMs`，供 UI 区分文案） |
+| `timeoutMs === 0` | **不设硬超时**，仅由外部 `signal` 兜底（长上传用，见下） |
+| 外部 `signal` abort | 抛 `AbortError`（与超时区分：文案「取消」vs「超时」） |
+| 外部 `signal` 已 abort | **入口短路**——直接抛错，不发起请求 |
+| 正常返回 | `finally` 中**必定** `clearTimeout`（否则 Vitest 进程挂住） |
+
+**合流实现**：手动 `addEventListener('abort', …)` 把外部 signal 转发到内部 controller，
+**不用** `AbortSignal.any`——手动转发在全部目标环境行为一致，省掉特征检测与回退两条路径。
+`restoreToHost` 的外部 `signal` 用同一手法转发到它持有的在途控制器。
+
+**恢复链路逐点（`src/ui/host-bridge.js`）**
+
+| 请求 | 兜底方式 |
+| --- | --- |
+| `getCsrfToken()` / `getHandle()` | `SHORT_FETCH_TIMEOUT_MS` |
+| `POST /api/users/restore`（大包上传） | `UPLOAD_TIMEOUT_MS`（默认 `0`）+ 取消入口 |
+| 成功/失败两条响应体读取 | `readJsonBounded`（`SHORT_FETCH_TIMEOUT_MS`） |
+
+> **上传为什么默认不设硬超时**：120MB 包在慢速上行下超过任何固定阈值都属正常，硬超时会打断
+> **正常**恢复。验收口径「超时**或** AbortSignal」由取消入口与 `signal` 满足。
+> 设上限只需改 `UPLOAD_TIMEOUT_MS` 一处（`restoreToHost` 默认值与 `index.js` 显式传参同源）。
+
+**取消入口（R-01）**：在途控制器由 `host-bridge.js` **持有**（不在 UI 层），
+导出 `cancelRestoreInFlight()`；待导出区在 `restoreInFlight` 时渲染「取消恢复」按钮
+（置于空状态提前返回**之前**——空队列也必须可见）。取消抛 `AbortError`，
+UI 文案必须是「已取消 + 宿主可能仍在处理，请稍后核对数据」，**不得**报「失败」。
+落点在 host-bridge 的原因：无 DOM 的 Node 环境下该路径**可被单测覆盖**。
+
+**并发互斥**：`restoreInFlight` 模块级标志 + `isRestoreInFlight()` 导出；`restoreToHost` 入口判重
+（在途则抛错），`try/finally` 保证复位；UI 侧在途时禁用**全部**「写回宿主」入口
+（`export-queue.js` 每行按钮 + 选中批操作条；`index.js` 的 `#btn-confirm-restore`）。
+
+**伪成功禁令**：响应体 `response.json()` 解析失败**禁止** catch 成 `{ success: true }`。
+正确返回 `{ success: false, unconfirmed: true, reason }`，UI 三态文案：成功 / 未确认（宿主可能仍在处理）/ 失败。
+
+**测试点（`test/restore-chain.test.js`）**
+
+- mock fetch 真挂起（且**必须响应 `init.signal`**，否则测试自身挂死）→ 断言按 `timeoutMs` 抛 `TimeoutError`。
+- `timeoutMs=0` + 无 signal → 不抛超时；正常响应后 `vi.getTimerCount() === 0`（无残留定时器）。
+- 体读取：挂起 → `TimeoutError`；`signal` 取消 → `AbortError`；已取消 → 不求值 `json()`；体自身抛错原样透传。
+- 在途第二次 `restoreToHost` → reject `/已有恢复任务正在进行/`；首次 settle 后标志复位（含抛错路径）。
+- 取消入口：`cancelRestoreInFlight()` 无在途时返回 `false`；在途时返回 `true` 且 promise 抛 `AbortError`，
+  事后控制器释放（再调仍为 `false`）；外部 `signal` 合流路径同样可中止。
+- 响应体解析失败 → `success === false && unconfirmed === true`；响应体挂起 → 短超时后同样 `unconfirmed`。
+
 ---
 
 ## Platform-Specific Notices in UI (平台差异提示)

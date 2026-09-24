@@ -54,6 +54,70 @@
 - `createCheckpointAdapter()` 实现与 `TaskManager` 相同的 `{ save, load, remove }` 接缝；blob 分块落盘 + KV 存清单。
 - **纪律**：后端只作增强，不可用时静默降级，纯前端路径保持全功能。
 
+#### 2.1 分块产物传输契约（代际命名 · 流式切分 · 失败回滚）
+
+> 2026-09-24 定稿（任务 `09-24-perf-hardening-transfer-memory`，审计 F-A / F-C / F-D / F-F）。
+> 触发场景：任何改动 `putArtifact` / `getArtifact` / `deleteArtifact` 的实现或调用方。
+
+**签名**
+
+```js
+putArtifact(name, blob, opts = {})   // opts: { chunkSize?, onProgress?(done,total) }
+  → Promise<{ name, size, chunks } | null>   // null = Authority 不可用
+getArtifact(name)                     → Promise<Blob | null>
+deleteArtifact(name)                  → Promise<boolean>
+```
+
+**清单（KV `blob-manifest:<name>`）字段**
+
+| 字段 | 语义 |
+| --- | --- |
+| `name` / `size` / `contentType` / `chunkSize` / `chunks` | 逻辑名、实际写入字节数、块大小、块数 |
+| `parts[]` | `{ id, name }`——**读取端唯一依据**，禁止解析命名规律反推 |
+| `gen` | 写入代际标识（`<base36 时间戳>_<进程内自增>`）；同名不同批次互不覆盖 |
+| `savedAt` | 落盘时间戳 |
+
+**分块命名**：`<name>__part_<gen>_<NNNNNN>`（序号 6 位补零）。命名含代际是**实现细节**，
+消费者只准按清单 `parts[].name` 取块（`test/durable-mirror.test.js` 已按清单驱动断言）。
+
+**顺序契约（不可颠倒）**
+
+```
+① blob.stream() 逐块读 → 每满 CHUNK_SIZE(4MB) 写一个【新代际】分块
+② 全部块写成功后 → 写清单（清单 parts 指向新代际）
+③ 清单写成功后 → 读旧清单，按旧 parts[].name 删旧代际块（不解析命名）
+```
+
+**内存模型**：写入路径**禁止整包 `arrayBuffer()` / `text()`**。峰值 ≈ `O(CHUNK_SIZE)`，
+与产物体积无关（审计公式：由 `N + 2.33C` 降至 `O(C)`，N = 整包字节，C = 块大小）。
+读取路径**禁止**先拼整包 `Uint8Array`；分块 Blob 直接入列交 `new Blob([...])`。
+
+**失败与错误矩阵**
+
+| 条件 | 行为 |
+| --- | --- |
+| Authority 不可用 | 全部接口返回 `null` / `false`，不抛错 |
+| 某分块 `blob.put` reject | 删除本次已写分块 → **抛错**；清单不动，旧代际仍可读 |
+| 读旧清单 `kv.get` reject | 删除本次全部分块 → **抛错**（读旧清单也在同一 `try` 内，否则留孤儿块） |
+| 清单 `kv.set` reject | 删除本次全部分块（防孤儿）→ **抛错**；旧代际仍可读 |
+| 旧代际清理失败 | 单块失败仅忽略，不阻断（孤儿块可接受，数据可读优先） |
+| `getArtifact` 清单缺失 / 块缺失 | 返回 `null`，不抛错 |
+
+**Good / Base / Bad**
+
+- Good：同名重传 → 新代际分块落盘 → 清单换指 → 旧代际清理，全程无孤儿块、无新旧混合。
+- Base：首次写入（无旧清单）→ 只走 ①②，跳过 ③。
+- Bad：复用旧 part 名覆盖写 → 中途失败会让清单指向半新半旧的块（**数据损坏且无法察觉**）。
+
+**测试点（`test/authority-store.test.js` / `test/durable-mirror.test.js`）**
+
+- 探针对象对 `arrayBuffer` / `text` 直接抛错 → 写入路径回归到整包读取时**当场失败**。
+- 同名两次写入：分块名互不重叠、清单 `gen` 变化、旧代际块已清理。
+- 第 N 次 `blob.put` reject：本批已写块全部回滚，清单仍是旧对象引用，`getArtifact` 仍可读。
+- 首次 `kv.set` reject：`_blobs` / `_kv` 均为空（无孤儿）。
+- `kv.get`（读旧清单）reject：本批块全部回滚，清单未改动，解除注入后旧产物仍可读。
+- `getArtifact` 兼容返回形状：base64 字符串 / `{ content }` / ArrayBuffer / Uint8Array / Blob。
+
 ### 3. Secrets Preservation（不可协商）
 - `secrets.json`（API 密钥）**任何方向、任何目标都不得被剥离、过滤或改写**。
 - 唯一例外：用户在类目勾选中**主动取消** `secrets`——此时产物不含该条目，并在报告 `filtered` 中留痕（`test/filter.test.js` 把关）。

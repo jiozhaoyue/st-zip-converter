@@ -44,6 +44,7 @@ import {
   fetchHostBackup,
   restoreToHost,
   isRestoreInFlight,
+  cancelRestoreInFlight,
   getHandle,
   registerMenuButton,
   mountNativeBackupButton,
@@ -56,6 +57,7 @@ import {
   supportsOpfs,
   FULL_SELECTION,
 } from './src/ui/host-bridge.js';
+import { UPLOAD_TIMEOUT_MS } from './src/ui/fetch-bounds.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
 import { getWorkbenchHtml } from './src/ui/workbench-template.js';
@@ -391,6 +393,11 @@ async function main(appRoot = document.getElementById('app')) {
       queue: exportQueue,
       isHostAvailable: host.isPlugin,
       restoreInFlight: isRestoreInFlight(),
+      onCancelRestore: () => {
+        if (cancelRestoreInFlight()) {
+          logger.warn('用户取消了在途恢复写入——宿主可能已收到部分数据，请稍后核对');
+        }
+      },
       onRestoreToHost: (item) => {
         openRestoreModal({ name: item.name, blob: item.blob, size: item.blob.size });
       },
@@ -1108,7 +1115,13 @@ async function main(appRoot = document.getElementById('app')) {
         view.setProgress(15, `正在恢复写入数据包至宿主 (${mode === 'merge' ? '增量合并' : '全量覆盖'})...`);
         logger.info(`向宿主发起数据包恢复请求: ${fileToRestore.name}, 模式: ${mode}`);
 
-        const restoreResult = await restoreToHost(fileToRestore.blob, { mode, platform: host.platform });
+        // `restoreToHost` 的同步段会置位在途标志，故先拿到 promise 再刷新，
+        // 待导出区才会渲染出「取消恢复」入口（审计 R-01：大包上传此前无法中途取消）
+        const restorePromise = restoreToHost(fileToRestore.blob, {
+          mode, platform: host.platform, timeoutMs: UPLOAD_TIMEOUT_MS,
+        });
+        refreshExportQueueUI();
+        const restoreResult = await restorePromise;
         // 三态区分（审计 R-15：响应体不可解析时不得谎报成功）
         if (restoreResult && restoreResult.unconfirmed) {
           view.setProgress(100, `请求已发出，但结果未确认`);
@@ -1120,9 +1133,16 @@ async function main(appRoot = document.getElementById('app')) {
           logger.success(`恢复完成！宿主酒馆数据已更新。`);
         }
       } catch (err) {
-        view.setProgress(100, `恢复写入失败: ${err.message}`);
-        logger.error('恢复写入宿主过程发生错误', err);
-        alert(`恢复失败: ${err.message}`);
+        if (err?.name === 'AbortError') {
+          // 取消是**请求级**的：宿主可能已收到部分数据，必须提示核对而非报「失败」
+          view.setProgress(100, '恢复写入已取消');
+          logger.warn('恢复写入已由用户取消——宿主可能已收到部分数据，请稍后核对');
+          alert('恢复已取消。\n宿主可能仍在处理，请稍后核对数据。');
+        } else {
+          view.setProgress(100, `恢复写入失败: ${err.message}`);
+          logger.error('恢复写入宿主过程发生错误', err);
+          alert(`恢复失败: ${err.message}`);
+        }
       } finally {
         btnConfirmRestore.disabled = false;
         pendingRestoreFile = null;
