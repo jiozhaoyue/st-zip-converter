@@ -1,1 +1,4 @@
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "布局与零回归核验"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门槛：npm test 基线、两条守卫、转义层契约与禁止模式"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "CSS 作用域铁律与双入口同源同改核验"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "布局与零回归核验、合成条目复现性约束"}
+{"file": ".trellis/tasks/09-23-extension-manifest-git/research/00-manifest-git-contract-evidence.md", "reason": "缺口清单与验收锚点"}

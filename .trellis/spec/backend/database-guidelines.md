@@ -74,6 +74,44 @@
 - **ST / L 目标**：修正错误的 `third-party` 嵌套并摊平（`thirdPartyFlattenedCount`）。
 - 另有交付模式开关：`EXTENSION_MODES.MANIFEST`（只导出来源清单，不打包插件实体与 git packfile，防 408 超时）与 `EXTENSION_MODES.FULL`（完整离线包）。
 
+### 6.1 扩展清单契约（schema v2 · `src/core/extension-manifest.js`）
+
+> 2026-09-24 新增（任务 `09-23-extension-manifest-git`）。**唯一权威实现点**，生成端与恢复端都经此模块，
+> 不得在别处重复实现状态判定。
+
+**两种产物，两种用途**：
+
+| 产物 | 路径 | 产出条件 | 语义 |
+| --- | --- | --- | --- |
+| 私有清单 | `_convert/extensions-manifest.json` | **FULL 与 MANIFEST 都产出** | 转换器自用：恢复端据此引导安装或更新 |
+| 官方索引 | `extensions-index.json` | **仅 MANIFEST** | 宿主 Content Downloader 的「按 URL 在线下载」格式 |
+
+> **官方索引为什么 FULL 不产出**：该索引语义是「按 URL 在线下载」，而 FULL 包内已有扩展实体，
+> 宿主若照索引再装一遍会造成重复安装与潜在覆盖（决策 D-6）。
+
+**条目状态字段（派生，调用方不得传入）**：
+
+```
+sourceKind:   'git'（gitMeta.remoteUrl 或 sourceRecord.remote_url）
+            | 'homepage'（manifest.homePage）
+            | 'unknown'
+availability: mode === 'full'                        → 'embedded'（包内已有实体）
+              mode === 'manifest' && isInstallableUrl → 'installable'
+              否则                                     → 'unavailable'
+notes:        仅在有值时输出（unavailable / homepage 来源两种情况）
+```
+
+**归一与兼容（`normalizeManifestEntries`）**：v1 旧清单（无 `availability`）按 `mode` 推断；
+非法取值回退同一规则；**非 http(s) URL 强制 `unavailable`**（不依赖点击时才失败）。
+
+**恢复端触发（决策 D-4）**：只有存在 `installable` 条目时才自动弹出安装器
+（`shouldAutoOpenInstaller`）；全部 `embedded` / `unavailable` 时仅写日志，不打扰用户。
+
+**安全纪律**：包内 JSON 字段（`displayName` / `notes` / `url` / `name`）一律
+`createElement + textContent`；`isInstallableUrl` 与 `src/ui/escape.js` 的 `isSafeHttpUrl`
+**同规则**（核心层不得依赖 UI 层，故两处各持一份实现，回归由
+`test/extension-manifest.test.js` 把关）。
+
 ### 7. 合成条目
 - ST 目标会写入 `_convert/INSTALL.md`、`_convert/meta.json`、`_convert/extensions-manifest.json` 等说明性合成条目（`report.synthesized()` 记账）。
 - 所有合成条目使用固定时间戳 `2020-01-01T00:00:00.000Z` 并按名字排序，保证可复现。

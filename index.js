@@ -30,6 +30,7 @@ import {
   listStoredFiles,
 } from './src/storage/db.js';
 import { generateDeltaArchive } from './src/core/delta.js';
+import { buildExtensionManifest } from './src/core/extension-manifest.js';
 import { TaskManager, TASK_STATES } from './src/core/task-manager.js';
 import { renderStashList, filterStashFiles } from './src/ui/stash-list.js';
 import { ExportQueue, renderExportQueue } from './src/ui/export-queue.js';
@@ -331,6 +332,57 @@ async function main(appRoot = document.getElementById('app')) {
   // 当前 OPFS 半成品归属（中止/丢弃时清理）
   let opfsCleanupId = null;
   let opfsCleanupName = null;
+
+  // 最近一次规划结果（供「仅导出扩展清单」复用扩展元数据，避免二次解析源包）
+  let latestPlan = null;
+  const btnExportExtManifest = document.getElementById('btn-export-ext-manifest');
+
+  /** 无扩展可导出时禁用按钮并给出提示（含未选源包的情形）。 */
+  function syncExportExtManifestButton() {
+    if (!btnExportExtManifest) return;
+    const count = latestPlan?.extensions?.length || 0;
+    btnExportExtManifest.disabled = count === 0;
+    btnExportExtManifest.title = count === 0
+      ? (currentFile ? '未检测到扩展' : '请先选择源数据包')
+      : `导出 ${count} 个扩展的只读清单 (JSON，不含扩展代码)`;
+  }
+
+  /**
+   * 只读清单导出：产出一份 JSON 清单进待导出区，不写包、不触发安装面板。
+   * 这是清单契约的「审阅/分享」入口（决策 D-2）。
+   */
+  async function exportExtensionManifestOnly() {
+    const extensions = latestPlan?.extensions || [];
+    if (extensions.length === 0) {
+      logger.warn('未检测到扩展，无法导出清单');
+      return;
+    }
+    const mode = getExtensionMode();
+    const manifest = buildExtensionManifest({
+      extensions,
+      mode,
+      generatedAt: new Date().toISOString(),
+    });
+    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    exportQueue.enqueue({
+      name: `extensions-manifest-${stamp}.json`,
+      blob,
+      targetLayout: targetSelect ? targetSelect.value : '',
+      origin: 'converted',
+      ephemeral: true,
+    });
+    refreshExportQueueUI();
+    logger.success(`已生成只读扩展清单：${extensions.length} 个扩展（模式 ${mode}）——可在待导出区下载或存入工作区`);
+  }
+
+  if (btnExportExtManifest) {
+    btnExportExtManifest.addEventListener('click', () => {
+      exportExtensionManifestOnly();
+    });
+    syncExportExtManifestButton();
+  }
+
   function refreshExportQueueUI() {
     if (!exportQueuePanel) return;
     renderExportQueue({
@@ -442,6 +494,8 @@ async function main(appRoot = document.getElementById('app')) {
       });
 
       renderCategoryStats(plan);
+      latestPlan = plan;
+      syncExportExtManifestButton();
 
       // 持久化当前工作区状态
       if (currentFileId) {

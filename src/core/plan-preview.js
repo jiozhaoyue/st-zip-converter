@@ -6,8 +6,18 @@
 import { zipIo } from './zip-io.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
 import { CATEGORIES, CATEGORY_LABELS, categoryOfHubPath, isBackupChatOrSnapshot } from './inspect.js';
-import { routeSource, targetEntryPath, TARGETS, isJunkOrDevFile, EXTENSION_MODES } from './transform.js';
+import {
+  routeSource, targetEntryPath, TARGETS, isJunkOrDevFile, EXTENSION_MODES, parseJsonSafe,
+} from './transform.js';
+import {
+  extensionFolderName,
+  extensionRelativePath,
+  extractGitBranch,
+  extractGitRemoteUrl,
+} from './extension-manifest.js';
 import { isTavernBuiltinAsset } from './builtin-assets.js';
+
+const TEXT_DECODER = new TextDecoder();
 
 export const ACTIONS = Object.freeze({
   COPY: 'COPY',             // 原位或同名直通复制
@@ -141,6 +151,12 @@ export async function generatePlan(source, target, {
 
   const synthesizedItems = [];
 
+  // 扩展元数据收集（供「仅导出扩展清单」只读选项使用）。
+  // 只解析 manifest.json 与 .git 元数据条目，**不读扩展实体文件**——峰值仍≈最大单条目。
+  const extensionManifests = new Map();
+  const extensionGitMeta = new Map();
+  const extensionSources = new Map();
+
   try {
     for await (const entry of scanner.entries()) {
       if (entry.isDirectory) {
@@ -153,6 +169,27 @@ export async function generatePlan(source, target, {
 
       const routed = routeSource(entry.fileName, detection.layout);
       const category = classifyItemCategory(routed.hubPath, routed.kind);
+
+      // 0. 扩展元数据解析（与 transform.js 主循环同源的解析规则）。
+      // 注意：不 continue——元数据条目仍要参与下方的类目计数与动作预测，
+      // 否则会回归（这些条目本来就算在 extensions 类目里）。
+      if (routed.kind === 'extension-source') {
+        const record = parseJsonSafe(await entry.read());
+        if (record) extensionSources.set(routed.source.name, { record });
+      } else if (routed.kind === 'extension-pkg') {
+        const folder = extensionFolderName(routed.hubPath);
+        const relPath = extensionRelativePath(routed.hubPath);
+        if (folder && relPath === 'manifest.json' && !extensionManifests.has(folder)) {
+          const parsed = parseJsonSafe(await entry.read());
+          if (parsed) extensionManifests.set(folder, parsed);
+        } else if (folder && relPath.endsWith('.git/config')) {
+          const url = extractGitRemoteUrl(TEXT_DECODER.decode(await entry.read()));
+          if (url) extensionGitMeta.set(folder, { ...(extensionGitMeta.get(folder) || {}), remoteUrl: url });
+        } else if (folder && relPath.endsWith('.git/HEAD')) {
+          const branch = extractGitBranch(TEXT_DECODER.decode(await entry.read()));
+          if (branch) extensionGitMeta.set(folder, { ...(extensionGitMeta.get(folder) || {}), branch });
+        }
+      }
 
       let action = ACTIONS.ROUTE;
       let targetPath = null;
@@ -326,5 +363,16 @@ export async function generatePlan(source, target, {
     categories,
     synthesizedItems,
     actionStats,
+    // 扩展元数据（供「仅导出扩展清单」只读选项复用，避免二次解析）
+    extensions: [...new Set([
+      ...extensionManifests.keys(),
+      ...extensionSources.keys(),
+      ...extensionGitMeta.keys(),
+    ])].sort().map((name) => ({
+      name,
+      manifest: extensionManifests.get(name) || {},
+      gitMeta: extensionGitMeta.get(name) || {},
+      sourceRecord: extensionSources.get(name)?.record || {},
+    })),
   };
 }

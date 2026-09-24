@@ -144,6 +144,16 @@ const L_EXTENSION_ALIASES = [
   'third-party',
 ];
 
+/**
+ * 转换器私有元数据路径:L 的 resolveAllowedRestorePath 不会路由它们,
+ * 但这不是数据丢失——`_convert/` 是转换器自身的说明/清单命名空间,
+ * 转换器产出的导入说明(`INSTALL_MD`)同样要求用户"除 _convert/ 外"覆盖。
+ * 与 manifest.json 的排除同理,仅用于把断言聚焦在**用户数据**上。
+ */
+function isConverterPrivateMeta(entryPath) {
+  return entryPath === 'manifest.json' || entryPath.startsWith('_convert/');
+}
+
 function lResolve(entryPath) {
   const parts = entryPath.split('/').filter(Boolean);
   const candidates = [];
@@ -166,15 +176,15 @@ function lResolve(entryPath) {
 describe('L 目标:restoreUserBackupArchive 后缀匹配镜像', () => {
   it('l→l:每个条目都能命中 L 的恢复目标(否则 L 会静默跳过它)', async () => {
     const files = await convertFixture(lEntries(), TARGETS.L);
-    // manifest.json 是 L 导出格式的标记与保真元数据,L 导入时按其规则跳过(
-    // resolveAllowedRestorePath 显式排除),不算数据丢失。
-    const misses = [...files.keys()].filter((name) => name !== 'manifest.json' && lResolve(name) === null);
+    // manifest.json 是 L 导出格式的标记与保真元数据,_convert/ 是转换器私有元数据,
+    // L 导入时按其规则跳过(resolveAllowedRestorePath 显式排除),不算数据丢失。
+    const misses = [...files.keys()].filter((name) => !isConverterPrivateMeta(name) && lResolve(name) === null);
     expect(misses, `以下条目 L 恢复时不会落地: ${misses.join(', ')}`).toEqual([]);
   });
 
   it('tt→l:剥前缀后同样全部命中', async () => {
     const files = await convertFixture(ttEntries(), TARGETS.L);
-    const misses = [...files.keys()].filter((name) => name !== 'manifest.json' && lResolve(name) === null);
+    const misses = [...files.keys()].filter((name) => !isConverterPrivateMeta(name) && lResolve(name) === null);
     expect(misses, `以下条目 L 恢复时不会落地: ${misses.join(', ')}`).toEqual([]);
   });
 });

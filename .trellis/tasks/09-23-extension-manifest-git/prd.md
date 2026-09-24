@@ -20,18 +20,32 @@
 
 ## Acceptance Criteria
 
-- [ ] 清单 schema / 生成规则 / 恢复引导语义成文，并有对应单测计划。
-- [ ] 与 `09-22-extension-git-slim` 的 keep/strip/minimal 策略关系明确，不重复实现或冲突。
-- [ ] 对无 URL、重复名称、已安装、安装失败、Luker 平铺异常等边界有明确验收。
-- [ ] README/用户说明计划列出，避免用户误以为清单包已经包含扩展代码。
+- [x] 清单 schema / 生成规则 / 恢复引导语义成文，并有对应单测计划。
+      → `design.md` §2/§3/§5；`test/extension-manifest.test.js` + `test/restore-manifest.test.js`。
+- [x] 与 `09-22-extension-git-slim` 的 keep/strip/minimal 策略关系明确，不重复实现或冲突。
+      → 不实现 `gitMode`（全仓 grep 无命中）；`research/00` 第 5 节给出互补不重叠结论。
+- [x] 对无 URL、重复名称、已安装、安装失败、Luker 平铺异常等边界有明确验收。
+      → 无 URL ⇒ `unavailable` + notes；重复/已安装 ⇒ 既有「本地已安装」徽标逻辑保留；
+      Luker 平铺由 `thirdPartyFlattenedCount` 既有路径处理（未改动）。
+- [x] README/用户说明计划列出，避免用户误以为清单包已经包含扩展代码。
+      → README 新增「扩展打包模式（清单包不含扩展代码）」整节 + 恢复面板三态表。
+
+## 交付状态（2026-09-24）
+
+已完成实施并全量验证：`npm test` 274 passed / 2 skipped（基线 226/2，零回归）、
+`check:css-scope` 与 `check:dom-injection` 通过、`npm run build` 成功、双入口自查 1/1。
+核验证据见 `implement.md` 的「验证结果」与「主代理自核验」两节。
 
 ## Out of Scope
 
 - 不改变宿主扩展安装端点，不绕过宿主权限，不直接写实例目录。
 - 不在本子任务中实现浏览器端 Git repack/shallow shrink。
 
-## Open Questions
+## Open Questions（2026-09-24 已全部裁定）
 
-- OQ-1：清单模式是否增加“只导出列表、不安装”的只读选项，供用户审阅/分享。
-- OQ-2：无 URL 扩展是否从 FULL 包回退提取 `.git/config`，或仅显示“无法在线安装”。
-- OQ-3：恢复后是否应自动触发安装器，还是改为用户确认后触发。
+- OQ-1 → **采纳**：新增「仅导出扩展清单」只读选项，产物进待导出区、不触发安装（决策 D-2）。
+- OQ-2 → **不采纳** `.git/config` 回退提取：无 URL 一律显式标 `availability = unavailable`，不伪造（决策 D-3）。
+- OQ-3 → **保持自动弹出**，但只列「可在线安装」项；已内嵌实体与无 URL 项不提供勾选（决策 D-4）。
+
+> 决策详情与代码锚点见本任务 `research/00-manifest-git-contract-evidence.md` 第 6 节。
+> 技术方案见 `design.md`，执行步骤见 `implement.md`。

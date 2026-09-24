@@ -302,6 +302,45 @@ describe('轻量清单模式 (Manifest-Only Mode - 防 408 超时)', () => {
     expect(manifestJson.total).toBe(1);
     expect(manifestJson.extensions[0].name).toBe('test-extension');
     expect(manifestJson.extensions[0].displayName).toBe('Test Extension');
+    // schema v2：新增状态字段（决策 D-1/D-3）
+    expect(manifestJson.schemaVersion).toBe(2);
+    expect(manifestJson.extensions[0].availability).toBe('installable');
+    expect(manifestJson.extensions[0].sourceKind).toBe('homepage');
+  });
+
+  it('extensionMode: full 也产出私有清单但**不产出**官方索引（决策 D-1 / D-6）', async () => {
+    const { files } = await runConvert(stEntries(), TARGETS.L, { extensionMode: 'full' });
+
+    // FULL 保留扩展实体（原有行为不变）
+    expect(files.has('extensions/test-extension/index.js')).toBe(true);
+
+    // 新增：私有清单在 FULL 模式也产出，条目标 embedded
+    expect(files.has('_convert/extensions-manifest.json')).toBe(true);
+    const manifestJson = JSON.parse(files.get('_convert/extensions-manifest.json').toString('utf8'));
+    expect(manifestJson.mode).toBe('full');
+    expect(manifestJson.schemaVersion).toBe(2);
+    expect(manifestJson.total).toBe(1);
+    expect(manifestJson.extensions[0].availability).toBe('embedded');
+
+    // 关键：官方索引仅 MANIFEST 产出——否则宿主 Content Downloader 会重复安装
+    expect(files.has('extensions-index.json')).toBe(false);
+  });
+
+  it('无可用 URL 的扩展在清单中标 unavailable 且不写入官方索引', async () => {
+    const noUrlEntries = stEntries().map(([name, data]) => {
+      if (name !== 'extensions/test-extension/manifest.json') return [name, data];
+      const manifest = JSON.parse(data.toString('utf8'));
+      delete manifest.homePage;
+      return [name, Buffer.from(JSON.stringify(manifest), 'utf8')];
+    });
+
+    const { files } = await runConvert(noUrlEntries, TARGETS.L, { extensionMode: 'manifest' });
+    const manifestJson = JSON.parse(files.get('_convert/extensions-manifest.json').toString('utf8'));
+    expect(manifestJson.extensions[0].availability).toBe('unavailable');
+    expect(manifestJson.extensions[0].notes).toContain('无法在线安装');
+
+    // 官方索引不可含空 URL 条目：全部不可安装 → 整个索引不产出
+    expect(files.has('extensions-index.json')).toBe(false);
   });
 });
 

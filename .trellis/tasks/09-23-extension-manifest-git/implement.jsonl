@@ -1,2 +1,4 @@
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "数据包布局与流式IO"}
-{"file": "docs/research/luker-extension-mechanics-and-git-prune.md", "reason": "Luker扩展识别与Git调研"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "转义层契约、双入口同源同改、守卫命令与零回归基线"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "宿主注入规范、CSS 作用域、导出队列模式与双副本偏差现状"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "数据包布局、扩展迁移语义、合成条目契约"}
+{"file": ".trellis/tasks/09-23-extension-manifest-git/research/00-manifest-git-contract-evidence.md", "reason": "全部代码锚点、检索结论与 D-1~D-7 决策记录"}

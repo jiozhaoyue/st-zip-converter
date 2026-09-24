@@ -8,6 +8,12 @@ import { zipIo } from '../core/zip-io.js';
 import * as zip from '../vendor/zip.js';
 import { getWorkbenchHtml } from './workbench-template.js';
 import { isSafeHttpUrl, trustedStaticMarkup } from './escape.js';
+import {
+  AVAILABILITY,
+  isInstallableUrl,
+  normalizeManifestEntries,
+  shouldAutoOpenInstaller,
+} from '../core/extension-manifest.js';
 
 /**
  * 安全渲染状态文本：图标拆为独立节点，文本走 textContent。
@@ -485,7 +491,7 @@ export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st' }
   const result = await response.json().catch(() => ({ success: true }));
   logger.success(`数据包恢复至当前用户 (${handle}) 成功！模式: ${mode === 'merge' ? '增量合并' : '全量覆盖'}`);
 
-  // 检查是否包含轻量清单 _convert/extensions-manifest.json，若包含则自动触发扩展安装器
+  // 检查包内扩展清单 _convert/extensions-manifest.json，据归一后的状态决定是否自动呼出安装器
   try {
     const reader = await zipIo.openReader(zipBlob);
     try {
@@ -493,9 +499,25 @@ export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st' }
         if (entry.fileName === '_convert/extensions-manifest.json') {
           const text = new TextDecoder().decode(await entry.read());
           const manifest = JSON.parse(text);
-          if (Array.isArray(manifest.extensions) && manifest.extensions.length > 0) {
-            logger.info(`检测到包内包含 ${manifest.extensions.length} 个扩展清单，正在呼出扩展安装面板...`);
-            renderExtensionInstallerModal(manifest.extensions);
+          const entries = normalizeManifestEntries(manifest);
+          if (entries.length > 0) {
+            const embeddedCount = entries.filter((e) => e.availability === AVAILABILITY.EMBEDDED).length;
+            const installableCount = entries.filter((e) => e.availability === AVAILABILITY.INSTALLABLE).length;
+            const unavailableCount = entries.filter((e) => e.availability === AVAILABILITY.UNAVAILABLE).length;
+            if (shouldAutoOpenInstaller(entries)) {
+              logger.info(
+                `检测到包内 ${entries.length} 个扩展清单（可在线安装 ${installableCount} 个），正在呼出扩展安装面板...`,
+              );
+              renderExtensionInstallerModal(entries, undefined, { embeddedCount, unavailableCount });
+            } else {
+              // 无可在线安装项：不打扰用户，仅提示并提供手动入口（决策 D-4）
+              logger.info(
+                `本包含 ${entries.length} 个扩展，其中 0 个可在线安装`
+                + `${embeddedCount > 0 ? `（${embeddedCount} 个实体已随恢复写入）` : ''}`
+                + `${unavailableCount > 0 ? `，${unavailableCount} 个缺少可用 Git URL` : ''}。`
+                + '如需重装，请从扩展设置抽屉手动开始。',
+              );
+            }
           }
           break;
         }
@@ -617,9 +639,12 @@ export async function deleteExtensionViaHost(extensionName, isGlobal = false) {
 
 /**
  * 弹出扩展清单安装器现代化面板
- * @param {Array<any>} extensions 清单中记录的扩展数组
+ *
+ * 只对**可在线安装**条目提供勾选；「包内已含实体」与「无法在线安装」两类仅作只读展示
+ * （决策 D-4/D-6，见 `.trellis/tasks/09-23-extension-manifest-git/design.md` §5.3）。
+ * @param {Array<any>} extensions 清单条目数组（建议先经 `normalizeManifestEntries` 归一）
  * @param {() => void} [onFinish] 全部安装完毕或用户关闭后的回调
- * @param {object} [options={}] 扩展选项 (如 targetPlatform)
+ * @param {object} [options={}] 扩展选项（`targetPlatform` / `embeddedCount` / `unavailableCount`）
  */
 export async function renderExtensionInstallerModal(extensions, onFinish, options = {}) {
   if (typeof document === 'undefined') return;
@@ -657,10 +682,14 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
       <div>
         <h3 style="margin: 0; font-size: 1.15rem; color: #89b4fa; display: flex; align-items: center; gap: 8px;">
-          <i class="fa-solid fa-puzzle-piece"></i> 扩展安装器 (轻量清单模式)
+          <i class="fa-solid fa-puzzle-piece"></i> 扩展安装器
         </h3>
         <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #a6adc8;">
-          数据包已恢复。以下是包内记录的扩展，酒馆将以 <strong>depth: 1</strong> 浅克隆自动拉取，杜绝 408 并保留一键更新能力。
+          数据包已恢复。以下扩展将由酒馆以 <strong>depth: 1</strong> 浅克隆在线拉取，保留一键更新能力。
+        </p>
+        <p style="margin: 2px 0 0 0; font-size: 0.78rem; color: #f9e2af;">
+          <i class="fa-solid fa-circle-info"></i> 在线安装需要<b>网络连通</b>、宿主<b>扩展安装端点可用</b>（部分部署或权限配置会禁用它），
+          且<b>扩展仓库可访问</b>（私有仓需手动处理）。
         </p>
       </div>
       <button id="ext-modal-close" style="background: transparent; border: none; color: #a6adc8; font-size: 1.5rem; cursor: pointer; padding: 4px 8px;">&times;</button>
@@ -718,6 +747,15 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
   extensions.forEach((ext, idx) => {
     const folder = ext.id || ext.name;
     const isInstalled = installedNames.has(folder);
+
+    // 三类状态（design.md §5.3）：只有 available 的条目可勾选。
+    // availability 缺失（旧清单未归一路径）时按「有可用 URL 即可安装」兜底。
+    const availability = ext.availability
+      || (isInstallableUrl(ext.url) ? AVAILABILITY.INSTALLABLE : AVAILABILITY.UNAVAILABLE);
+    const isEmbedded = availability === AVAILABILITY.EMBEDDED;
+    const isUnavailable = availability === AVAILABILITY.UNAVAILABLE;
+    const selectable = !isEmbedded && !isUnavailable;
+
     const itemEl = document.createElement('div');
     itemEl.style.cssText = `
       display: flex; align-items: center; gap: 12px; padding: 8px 12px;
@@ -730,8 +768,10 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     const chk = document.createElement('input');
     chk.type = 'checkbox';
     chk.id = `ext-chk-${idx}`;
-    chk.checked = !isInstalled;
-    chk.style.cursor = 'pointer';
+    chk.checked = selectable && !isInstalled;
+    chk.disabled = !selectable;
+    chk.style.cursor = selectable ? 'pointer' : 'not-allowed';
+    if (!selectable) chk.style.opacity = '0.35';
 
     const mainCol = document.createElement('div');
     mainCol.style.cssText = 'flex: 1; min-width: 0;';
@@ -750,10 +790,23 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     titleRow.appendChild(folderEl);
 
     const stateEl = document.createElement('span');
-    stateEl.style.cssText = isInstalled
-      ? 'font-size: 0.72rem; padding: 1px 6px; background: #45475a; color: #a6adc8; border-radius: 4px;'
-      : 'font-size: 0.72rem; padding: 1px 6px; background: rgba(137,180,250,0.2); color: #89b4fa; border-radius: 4px;';
-    stateEl.textContent = isInstalled ? '本地已安装' : '待安装';
+    let stateText;
+    let stateStyle;
+    if (isEmbedded) {
+      stateText = '包内已含';
+      stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: rgba(166,227,161,0.2); color: #a6e3a1; border-radius: 4px;';
+    } else if (isUnavailable) {
+      stateText = '无法在线安装';
+      stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: rgba(243,139,168,0.2); color: #f38ba8; border-radius: 4px;';
+    } else if (isInstalled) {
+      stateText = '本地已安装';
+      stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: #45475a; color: #a6adc8; border-radius: 4px;';
+    } else {
+      stateText = '待安装';
+      stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: rgba(137,180,250,0.2); color: #89b4fa; border-radius: 4px;';
+    }
+    stateEl.style.cssText = stateStyle;
+    stateEl.textContent = stateText;
     titleRow.appendChild(stateEl);
 
     mainCol.appendChild(titleRow);
@@ -775,6 +828,14 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
 
     mainCol.appendChild(metaRow);
 
+    // 派生提示（如「清单未记录可用的 Git URL」）：来自包内 JSON，一律 textContent
+    if (ext.notes) {
+      const noteEl = document.createElement('div');
+      noteEl.style.cssText = 'font-size: 0.75rem; color: #f9e2af; margin-top: 2px;';
+      noteEl.textContent = ext.notes;
+      mainCol.appendChild(noteEl);
+    }
+
     const itemStatusEl = document.createElement('span');
     itemStatusEl.id = `ext-item-status-${idx}`;
     itemStatusEl.style.cssText = 'font-size: 0.8rem; color: #6c7086;';
@@ -789,6 +850,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       checkbox: itemEl.querySelector(`#ext-chk-${idx}`),
       statusEl: itemEl.querySelector(`#ext-item-status-${idx}`),
       isInstalled,
+      selectable,
     });
   });
 
@@ -831,13 +893,13 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
 
   modalBox.querySelector('#ext-select-missing').addEventListener('click', () => {
     itemsState.forEach((item) => {
-      item.checkbox.checked = !item.isInstalled;
+      if (item.selectable) item.checkbox.checked = !item.isInstalled;
     });
   });
 
   modalBox.querySelector('#ext-select-all').addEventListener('click', () => {
     itemsState.forEach((item) => {
-      item.checkbox.checked = true;
+      if (item.selectable) item.checkbox.checked = true;
     });
   });
 
@@ -848,7 +910,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
   });
 
   startBtn.addEventListener('click', async () => {
-    const selected = itemsState.filter((item) => item.checkbox.checked);
+    const selected = itemsState.filter((item) => item.checkbox.checked && item.selectable);
     if (selected.length === 0) {
       alert('请至少勾选一个待安装的扩展');
       return;
@@ -859,7 +921,6 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     cancelBtn.disabled = true;
     forceReplaceChk.disabled = true;
     itemsState.forEach((item) => { item.checkbox.disabled = true; });
-
     const progressContainer = modalBox.querySelector('#ext-progress-bar-container');
     const progressStatus = modalBox.querySelector('#ext-progress-status');
     const progressNum = modalBox.querySelector('#ext-progress-num');
@@ -880,7 +941,8 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       setStatusContent(statusEl, 'fa-solid fa-spinner fa-spin', '克隆中...', '#89b4fa');
 
       try {
-        if (!ext.url || !/^https?:\/\//i.test(ext.url)) {
+        // 与核心层 extension-manifest.js 的 isInstallableUrl 同一规则，避免两套判定分叉
+        if (!isInstallableUrl(ext.url)) {
           throw new Error('缺少有效的 Git HTTP(S) URL');
         }
         await installExtensionViaHost({

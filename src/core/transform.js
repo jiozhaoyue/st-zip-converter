@@ -4,6 +4,24 @@ import { detectFromReader, LAYOUTS } from './detect.js';
 import { zipIo } from './zip-io.js';
 import { categoryOfHubPath, isBackupChatOrSnapshot } from './inspect.js';
 import { isTavernBuiltinAsset } from './builtin-assets.js';
+import {
+  buildExtensionManifest,
+  buildOfficialIndex,
+  deriveExtensionEntry,
+  extensionFolderName,
+  extensionRelativePath,
+  extractGitBranch,
+  extractGitRemoteUrl,
+} from './extension-manifest.js';
+
+// 扩展路径 / Git 解析 helper 已迁至 extension-manifest.js（清单契约的唯一权威实现点）。
+// 此处再导出，保持既有引用路径可用。
+export {
+  extractGitRemoteUrl,
+  extractGitBranch,
+  extensionFolderName,
+  extensionRelativePath,
+};
 
 /**
  * 转换管线:源布局规范化为 hub(ST 摊平)→ 逐条目按目标适配写出。
@@ -119,34 +137,6 @@ export function isJunkOrDevFile(hubPath, { keepDevFiles = false, keepAll = false
   }
 
   return false;
-}
-
-export function extractGitRemoteUrl(configText) {
-  if (!configText) return null;
-  const match = configText.match(/\[remote\s+["']origin["']\][\s\S]*?url\s*=\s*([^\r\n]+)/i)
-    || configText.match(/url\s*=\s*([^\r\n]+)/i);
-  return match ? match[1].trim() : null;
-}
-
-export function extractGitBranch(headText) {
-  if (!headText) return null;
-  const match = headText.match(/ref:\s*refs\/heads\/([^\r\n]+)/i);
-  return match ? match[1].trim() : null;
-}
-
-export function extensionFolderName(hubPath) {
-  if (!hubPath.startsWith('extensions/')) return '';
-  const rest = hubPath.slice('extensions/'.length);
-  const slash = rest.indexOf('/');
-  return slash > 0 ? rest.slice(0, slash) : rest;
-}
-
-export function extensionRelativePath(hubPath) {
-  if (!hubPath.startsWith('extensions/')) return '';
-  const rest = hubPath.slice('extensions/'.length);
-  const slash = rest.indexOf('/');
-  if (slash <= 0) return rest;
-  return rest.slice(slash + 1);
 }
 
 const INSTALL_MD = `# 手动导入说明(ST 目标)
@@ -740,71 +730,54 @@ async function emitSynthesized(writer, report, context, target, selection, { ext
     report.synthesized('manifest.json');
   }
 
-  // 汇总所有已知扩展
+  // 汇总所有已知扩展（状态字段由 extension-manifest.js 派生，保证两条产出路径同源）
   const allExtNames = new Set([
     ...context.extensionManifests.keys(),
     ...context.extensionSources.keys(),
     ...context.extensionGitMeta.keys(),
   ]);
 
-  const extItems = [];
-  for (const name of [...allExtNames].sort()) {
-    const manifest = context.extensionManifests.get(name) || {};
-    const gitMeta = context.extensionGitMeta.get(name) || {};
-    const srcRecord = context.extensionSources.get(name)?.record || {};
-    const url = gitMeta.remoteUrl || srcRecord.remote_url || (typeof manifest.homePage === 'string' ? manifest.homePage.trim() : '');
-    const branch = gitMeta.branch || srcRecord.reference || 'main';
-    const commit = gitMeta.commit || srcRecord.installed_commit || '';
-    const displayName = manifest.display_name || name;
-    const description = manifest.description || '';
-    extItems.push({
-      id: name,
-      name,
-      displayName,
-      description,
-      url,
-      branch,
-      commit,
-      version: manifest.version || '1.0.0',
-      type: 'extension',
-      manifest,
-    });
-  }
+  const extInputs = [...allExtNames].sort().map((name) => ({
+    name,
+    manifest: context.extensionManifests.get(name) || {},
+    gitMeta: context.extensionGitMeta.get(name) || {},
+    sourceRecord: context.extensionSources.get(name)?.record || {},
+  }));
 
-  // 仅在 ST / L 目标且启用清单模式时，生成结构化清单与官方 Content Downloader 索引
+  // 清单在 FULL 与 MANIFEST **两种模式**下都产出（决策 D-1）；
+  // 官方索引仅 MANIFEST 产出（决策 D-6，避免宿主对已内嵌实体重复安装）。
   const shouldEmitManifest = (target === TARGETS.ST || target === TARGETS.L)
-    && extensionMode === EXTENSION_MODES.MANIFEST;
+    && (extensionMode === EXTENSION_MODES.MANIFEST || extensionMode === EXTENSION_MODES.FULL);
 
-  if (extItems.length > 0 && (!selection || selection.extensions !== false) && shouldEmitManifest) {
-    // 1. 生成与 SillyTavern 官方 Content (assets) 下载规范完全兼容的 extensions-index.json
-    const officialIndex = {
-      extension: extItems.map(({ id, displayName, name, description, url, branch, commit, type }) => ({
-        id,
-        name: displayName || name,
-        description,
-        url,
-        branch,
-        commit,
-        type,
-      })),
-    };
-    await writer.add('extensions-index.json', encodeJson(officialIndex));
-    report.synthesized('extensions-index.json');
+  if (extInputs.length > 0 && (!selection || selection.extensions !== false) && shouldEmitManifest) {
+    const isManifestMode = extensionMode === EXTENSION_MODES.MANIFEST;
 
-    // 2. 生成转换器结构化清单供宿主插件自动恢复
-    const convertManifest = {
-      converter: 'st-zip-converter',
-      generatedAt: FIXED_TIMESTAMP,
+    // 1. 官方 Content Downloader 索引：**仅轻量清单模式**产出
+    if (isManifestMode) {
+      const officialIndex = buildOfficialIndex(
+        extInputs.map((input) => deriveExtensionEntry({ ...input, mode: extensionMode })),
+      );
+      if (officialIndex) {
+        await writer.add('extensions-index.json', encodeJson(officialIndex));
+        report.synthesized('extensions-index.json');
+      }
+    }
+
+    // 2. 转换器私有清单：两种模式都产出，供宿主插件恢复时引导安装或更新
+    const convertManifest = buildExtensionManifest({
+      extensions: extInputs,
       mode: extensionMode,
-      total: extItems.length,
-      extensions: extItems,
-    };
+      generatedAt: FIXED_TIMESTAMP,
+    });
     await writer.add('_convert/extensions-manifest.json', encodeJson(convertManifest));
     report.synthesized('_convert/extensions-manifest.json');
 
     report.warn(
-      `已启用轻量清单模式：已记录 ${extItems.length} 个扩展清单（未打包实体代码与 Git packfile），`
-      + '已生成 extensions-index.json 与 _convert/extensions-manifest.json。',
+      isManifestMode
+        ? `已启用轻量清单模式：已记录 ${extInputs.length} 个扩展清单（未打包实体代码与 Git packfile），`
+          + '已生成 extensions-index.json 与 _convert/extensions-manifest.json。'
+        : `完整离线包已含 ${extInputs.length} 个扩展实体：包内同时写入 _convert/extensions-manifest.json，`
+          + '仅用于恢复后的更新引导（不生成 extensions-index.json，以免宿主重复在线安装）。',
     );
   }
 
