@@ -1062,3 +1062,105 @@ T2 的已确认（裁决 1–15）、T4 的已出、**T3 的 ③ 扩展管理建
 ### Next Steps
 
 - 待用户裁决 T3 的 ③ 扩展管理建议（推荐 ③-B+③-C）；裁决后父任务可归档；随后分支合入 main
+
+
+## Session 25: 四片合入 main + 新增第 4 条守卫（控件消费点）+ 父任务 8/8 收口
+<!-- trellis-session: v=2 fp=301bed0be348ea87 -->
+
+**Date**: 2026-09-25
+**Task**: 四片合入 main + 新增第 4 条守卫（控件消费点）+ 父任务 8/8 收口
+**Branch**: `main`
+
+### Summary
+
+把 T1-T4 的分支整体快进合入 main（并在产物中核实 @vite-ignore 与骨架未被破坏）；用 T4 的手法把全部 32 个控件核了一遍，确认唯一死控件就是已移除的那个，随后按裁决新增第 4 条守卫 check:control-consumer（强制声明消费点、覆盖 id/name/class 三类、防 group 兜底绕过、僵尸条目也违规，并如实写明「只强制声明不验证为真」的局限）；落实用户三项裁决——T3 的 ③ 选 ③-B 保留现状并写入记录、父任务 8/8 AC 达成并归档、Real 实例更新到 main、两个已合入分支本地+远程删除。如实记录 Dev 8003 因宿主自身 TLS 错误崩溃退出。
+
+### Main Changes
+
+本轮完成三件事：把四个子任务的分支整体合入 main、新增第 4 条静态守卫、落实用户三项裁决并收口父任务。
+
+## 合入 main
+
+四片（T1–T4）齐备，按用户先前裁决「待四片齐备后再一次性合入 main」执行。
+`main` 历史**无 merge commit**（线性），故用 `--ff-only` 快进：`3a98fb3` → `f12eaa2`（33 个提交）。
+合并后在 main 上跑全量 + 三守卫 + **构建**，并核了两件容易被忽略的事：
+
+- 产物里 `"/scripts/storage-inspector.js"` 仍是**字面量**（`@vite-ignore` 生效，未被 Vite 解析/打包）；
+- `dist/index.html` 仍是 21 行骨架、零业务节点 id。
+
+## 死控件的系统排查与守卫
+
+用 T4 沉淀的手法把**其余控件全部核了一遍**：13 个输入控件 + 19 个按钮，逐个查消费点
+（含 `file-input` 经 `file-drop.js`、`.btn-quick` 三个类目快捷按钮经 `category-filter.js:99`
+的事件委托读 `dataset.preset`）。结论：**唯一死控件就是 T4 已移除的那个**，其余全部有真实消费点。
+
+随后按用户裁决新增第 4 条守卫 `npm run check:control-consumer`
+（`scripts/control-consumer-guard.js`）。关键设计：
+
+- **不靠「搜不到引用」**——那个死开关**确实被引用过**（元素查找/事件绑定/摘要文字），
+  弱判据抓不住。改为**强制显式声明**：新增控件必须写下「谁读它的值」。
+- 覆盖本仓全部三类控件：`<id>`、`name:<n>`（无 id 的单选组）、
+  `group:.<class>`（既无 id 也无 name，按类选择器批量绑定）。
+- **防绕过**：`group:` 键只对「无 id 且无 name」的控件生效——否则一条 `group:.menu_button`
+  就能兜底整张表；有 id 却被 group: 兜底、或多 group 匹配，都判违规。
+- 声明表含**僵尸条目**同样违规（防声明表腐烂）。
+- **如实写明局限**：只强制「声明存在」，**不验证声明为真**。语义验证需变量追踪、误报率高，
+  有意不做（写进了脚本注释、spec、PRD 的 Out of Scope）。
+
+验证：CLI 负向实测（临时插未声明控件 → `workbench-template.js:4` + 退出码 1，还原后回 0）；
+单测 12 用例含 4 条负向且**断言违规行号**；`npm test` 41 文件 / **358 passed**；
+四条守卫全部退出码 0；**产品代码零改动**（`src/` `index.js` `style.css` 未动，已核）。
+
+## 用户三项裁决的落实
+
+1. **T3 的 ③ 选 ③-B「保留现状」** → 写入 T3 `implement.md` 4.4（含 ③-C 登记为可选增强不实施），
+   父任务 AC3 回填为达成 → 父任务 **8/8 AC 全部达成**并归档。
+2. **Real 实例更新到 main** → `git pull --ff-only` 至 `7220716`，`status` 干净，
+   与 main 逐提交一致。
+3. **删除已合入分支** → `feat/control-consumer-guard` 与 `fix/perf-hardening-transfer-memory`
+   本地 + 远程均已删除（删前逐个核过「该分支领先 main 为 0」）。
+
+归档时两个任务分别被元数据门禁拦下：守卫任务的 `branch` 与 `base_branch` 都是 `main`
+（PR 不能指向自身），父任务则**未记录分支**。处置：先把**真实工作分支名**登记进记录
+（`feat/control-consumer-guard` / `fix/perf-hardening-transfer-memory`），再归档即通过。
+
+## 一个必须说明的事故：Dev 8003 崩了
+
+我先前汇报「Dev 8003 保留运行」**不准确**——它已崩溃退出。查后台日志，原因是
+**宿主自身**的 generation 路径抛出未处理的 TLS 错误
+（`ERR_TLS_CERT_ALTNAME_INVALID`：第三方 AI 端点 `ai.loveyy.qzz.io` 的证书 CN 与 IP 不匹配）
+后进程 `exit 1`。与本次插件改动无关（插件是纯前端，不碰 generation），
+但实例确实已停，需要时得重启。
+
+## 当前状态
+
+- `main` = `c73c394`（含守卫与两次归档），已推送；工作区干净；无活动任务
+- 未归档任务仅剩 09-22/09-23 的四项既有规划（非本轮范围）
+- Real 与 Dev 插件均为 `main` 态；**Dev 8003 进程未运行**
+
+## 下一步（可选）
+
+- 需要复验时重启 Dev 8003（`Instance/Dev/Luker`，`NODE_ENV=production node server.js`，起效约 26s）
+- 若日后要做 ③-C（自绘弹层加原生安装器入口），需另开任务，且先实机验证
+  `openThirdPartyExtensionMenu(suggestUrl)` 是否真的预填 URL
+- 既有规划任务 09-22-extension-git-slim / 09-23-* 仍在 planning
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7220716` | feat(guard): 新增第 4 条静态守卫——控件消费点（防死控件复发） |
+| `df9fe41` | docs(task): 记录用户对 ③ 的裁决（③-B 保留现状）+ 父任务 8/8 AC 达成 |
+
+### Testing
+
+- [OK] npm test 41 文件 / 358 passed / 2 skipped；四条守卫（css-scope/dom-injection/template-source/control-consumer）全部退出码 0；守卫 CLI 负向实测输出 workbench-template.js:4 且退出码 1；npm run build 通过且产物保留运行期 import 字面量；产品代码零改动
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 复用验时重启 Dev 8003；③-C 若要做需另开任务并先验 suggestUrl 预填；既有 09-22/09-23 规划任务仍在 planning

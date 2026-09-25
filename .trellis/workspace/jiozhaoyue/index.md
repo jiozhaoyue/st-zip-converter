@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-09-25
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1064 | Active |
+| `journal-1.md` | ~1166 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-09-25 | 四片合入 main + 新增第 4 条守卫（控件消费点）+ 父任务 8/8 收口 | `7220716`, `df9fe41` | `main` |
 | 24 | 2026-09-25 | T4 上下传收敛：揪出「增量合并」死开关 + 概念消歧 + spec 拆分防截断 | `69827c9`, `4bcf119`, `7c05883` | `fix/perf-hardening-transfer-memory` |
 | 23 | 2026-09-25 | T3 Luker 原生对接：备份锚点取证翻案 + 存储 Inspector 接入 + selection 显式化 | `1d80631`, `b49a409`, `d65ef96`, `4cb1b94` | `fix/perf-hardening-transfer-memory` |
 | 22 | 2026-09-25 | T2 收尾：分包归一化抽纯函数 + 宿主原生确认弹窗 + 按钮工厂 + spec 沉淀与归档 | `0256f9b`, `e7cd79d`, `6506c52`, `8041bc4` | `fix/perf-hardening-transfer-memory` |
