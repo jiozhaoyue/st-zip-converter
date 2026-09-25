@@ -111,6 +111,47 @@ export const FULL_SELECTION = Object.freeze({
 });
 
 /**
+ * 宿主平台代码 → `/api/users/backup` 是否支持 **selection 透传**。
+ *
+ * **显式声明，不做布尔推导**（R4.1）。此前该判断是 `index.js` 里的一行
+ * `host.platform === 'luker'`——新增宿主时会**静默**走入错误分支，
+ * 且看不出「其它宿主到底是不支持还是没验过」。
+ *
+ * 语义差异：
+ * - `st`：端点不支持 selection → 必须请求全量包，类目筛选在**插件内过滤**生效。
+ * - `luker`：端点原生支持 selection → **直接透传**勾选。
+ * - `tt` / `pt`：**未取证**，按保守处理（不支持 → 全量 + 插件内过滤）——
+ *   结果正确，只是多传一些字节。
+ *
+ * 未列出的宿主同样按「不支持」处理；调用方可通过 `known: false` 区分
+ * 「确认不支持」与「未取证」。
+ */
+const BACKUP_SELECTION_SUPPORT = Object.freeze({
+  st: false,
+  luker: true,
+  tt: false,
+  pt: false,
+});
+
+/**
+ * 求值宿主 `/api/users/backup` 的 selection 能力——**唯一求值点**（R4.1）。
+ *
+ * @param {'st'|'luker'|'standalone'|string} platform detectHost() 平台代码
+ * @returns {{ supported: boolean, known: boolean, reason: string }}
+ *   `supported` 是否可透传 selection；
+ *   `known` 该宿主是否已取证（false = 走保守路径）；
+ *   `reason` **状态读数**（非解释性文案，可直接展示）
+ */
+export function hostSelectionCapability(platform) {
+  const declared = BACKUP_SELECTION_SUPPORT[platform];
+  return {
+    supported: declared === true,
+    known: declared !== undefined,
+    reason: declared === true ? '宿主透传勾选' : '全量导出后插件内过滤',
+  };
+}
+
+/**
  * 检测当前运行环境
  *
  * 判定协议（顺序不可颠倒，Luker 前端同时暴露两个全局对象）：

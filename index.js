@@ -46,6 +46,7 @@ import {
   isRestoreInFlight,
   cancelRestoreInFlight,
   confirmDialog,
+  hostSelectionCapability,
   isStorageInspectorAvailable,
   openStorageInspector,
   getHandle,
@@ -861,15 +862,17 @@ async function main(appRoot = document.getElementById('app')) {
       view.setProgress(10, `正在向宿主 ${host.platform.toUpperCase()} 请求数据包...`);
       logger.info(`向宿主请求导出数据包，勾选类目: ${Object.keys(selection).filter((k) => selection[k]).join(', ')}`);
 
+      // 宿主 selection 能力：由 host-bridge 的**显式声明表**求值，不在业务层推导（R4.1）。
       // ST 宿主的 /api/users/backup 端点不支持 selection（全量 glob 导出）：
       // 必须请求全量包，类目筛选由下方 needsTransform 分支在插件内过滤生效；
       // Luker 宿主端点原生支持 selection，直接透传。
-      const hostSupportsSelection = host.platform === 'luker';
+      const selectionCap = hostSelectionCapability(host.platform);
+      const hostSupportsSelection = selectionCap.supported;
       const endpointSelection = hostSupportsSelection
         ? selection
         : { ...FULL_SELECTION };
       if (!hostSupportsSelection) {
-        logger.info('ST 宿主端点仅支持全量导出，类目筛选将在导出后由插件内过滤执行');
+        logger.info(`宿主端点不做 selection 透传（${selectionCap.reason}），类目筛选将在导出后由插件内过滤执行`);
       }
 
       // Luker 服务端 selection.settings 会隐含打包 backups/ 目录（历史快照，

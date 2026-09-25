@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { detectHost, verifyHostPlatform, hostLayoutCode } from '../src/ui/host-bridge.js';
+import { detectHost, verifyHostPlatform, hostLayoutCode, hostSelectionCapability } from '../src/ui/host-bridge.js';
 
 // 模拟浏览器全局环境的可写快照
 const g = globalThis;
@@ -185,5 +185,51 @@ describe('hostLayoutCode 宿主平台→转换器布局代码映射', () => {
     expect(hostLayoutCode('tt')).toBe('tt');
     expect(hostLayoutCode('pt')).toBe('pt');
     expect(hostLayoutCode('')).toBe('');
+  });
+});
+
+describe('hostSelectionCapability 宿主 selection 能力（显式声明表，R4.1）', () => {
+  it('luker 支持透传勾选', () => {
+    const cap = hostSelectionCapability('luker');
+    expect(cap.supported).toBe(true);
+    expect(cap.known).toBe(true);
+    expect(cap.reason).toBe('宿主透传勾选');
+  });
+
+  it('st 不支持（端点仅全量 glob 导出，须插件内过滤）', () => {
+    const cap = hostSelectionCapability('st');
+    expect(cap.supported).toBe(false);
+    expect(cap.known).toBe(true);
+    expect(cap.reason).toBe('全量导出后插件内过滤');
+  });
+
+  it('tt / pt 未取证 → 走保守路径且 known 为 true（已声明为不支持）', () => {
+    for (const platform of ['tt', 'pt']) {
+      const cap = hostSelectionCapability(platform);
+      expect(cap.supported).toBe(false);
+      expect(cap.known).toBe(true);
+    }
+  });
+
+  it('未列出的宿主 → supported false 且 known false（区分「确认不支持」与「未取证」）', () => {
+    for (const platform of ['standalone', 'garbage', '', undefined, null]) {
+      const cap = hostSelectionCapability(platform);
+      expect(cap.supported).toBe(false);
+      expect(cap.known).toBe(false);
+    }
+  });
+
+  it('未知宿主必须走保守路径：结果与 ST 一致（全量 + 插件内过滤），不得乐观放行', () => {
+    const unknown = hostSelectionCapability('some-future-host');
+    const st = hostSelectionCapability('st');
+    expect(unknown.supported).toBe(st.supported);
+    expect(unknown.reason).toBe(st.reason);
+  });
+
+  it('reason 是可直接展示的状态读数（非空字符串）', () => {
+    for (const platform of ['st', 'luker', 'tt', 'pt', 'standalone']) {
+      expect(typeof hostSelectionCapability(platform).reason).toBe('string');
+      expect(hostSelectionCapability(platform).reason.length).toBeGreaterThan(0);
+    }
   });
 });
