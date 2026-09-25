@@ -196,6 +196,87 @@ export async function confirmDialog(message) {
 }
 
 /**
+ * 宿主存储面板模块的加载地址（**宿主根绝对路径**）。
+ *
+ * 为何不走 `getContext()`：Luker 的 `public/scripts/storage-inspector.js` 虽导出
+ * `openStorageInspector` / `mountStorageInspector` / `createStorageInspector`，
+ * 但**没有 `window` 挂载、也没有放进 `getContext()`**（2026-09-25 由 GitHub 源码 +
+ * 8003 实机双向核实），全仓唯一调用方是宿主自己的 `public/scripts/user.js:17`。
+ *
+ * 为何用根绝对路径而非相对路径：宿主把 `public/` 挂在站点根，故该路径与插件自身
+ * 安装位置无关（ST 在 `public/scripts/extensions/third-party/**`、
+ * Luker 在 `data/<user>/extensions/**` 平铺），跨宿主可用。
+ * 实测 `GET https://127.0.0.1:8003/scripts/storage-inspector.js` → **HTTP 200 / 16.4KB**。
+ */
+const STORAGE_INSPECTOR_MODULE_URL = '/scripts/storage-inspector.js';
+
+/** 模块加载的单次尝试缓存（成功或失败都只试一次；浏览器 module map 本身也会缓存失败） */
+let storageInspectorModulePromise = null;
+
+/**
+ * 加载宿主 Storage Inspector 模块。任何失败都返回 `null`，**绝不抛出**。
+ * @returns {Promise<object|null>} 模块命名空间，或 null
+ */
+function loadStorageInspectorModule() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return Promise.resolve(null); // 独立态 / Node：无宿主模块可加载
+  }
+  if (!storageInspectorModulePromise) {
+    // @vite-ignore：该路径由宿主在运行期提供，不得被 Vite 打包期解析
+    storageInspectorModulePromise = import(/* @vite-ignore */ STORAGE_INSPECTOR_MODULE_URL)
+      .catch((err) => {
+        console.warn('[st-zip-converter] 宿主存储面板模块不可用，降级隐藏入口：', err);
+        return null;
+      });
+  }
+  return storageInspectorModulePromise;
+}
+
+/**
+ * 判定宿主 Storage Inspector 模块命名空间是否可用（纯函数，便于单测）。
+ *
+ * 判据是「导出确实是函数」而非「模块能加载」——宿主版本升级后导出名可能变化，
+ * 只判断加载成功会让 `btn.hidden = false` 暴露一个点了没反应的死按钮。
+ *
+ * @param {object|null|undefined} mod 动态 import 得到的模块命名空间
+ * @returns {boolean}
+ */
+export function hasStorageInspector(mod) {
+  return typeof mod?.openStorageInspector === 'function';
+}
+
+/**
+ * 探测宿主原生存储面板是否可用（决定 `#btn-storage-inspector` 是否解除 hidden）。
+ * @returns {Promise<boolean>}
+ */
+export async function isStorageInspectorAvailable() {
+  return hasStorageInspector(await loadStorageInspectorModule());
+}
+
+/**
+ * 唤起宿主原生存储面板（Luker Storage Inspector）。
+ *
+ * `dataSource` 形状取自宿主源码契约（`storage-inspector.js`）：
+ *   `@param {{kind:'self'} | {kind:'any', target:string}} dataSource`
+ * 官方调用点即 `openStorageInspector({ kind: 'self' })`（`user.js:2361`）——
+ * **不需要**构造 `RestProvider` 实例，函数内部自行 `new RestProvider(dataSource)`。
+ * 该面板的 mutator 是 `ThrowingMutator`，即**只读**，不会写宿主数据。
+ *
+ * @returns {Promise<boolean>} 是否成功唤起（false 时调用方保持静默——按钮本就不该可见）
+ */
+export async function openStorageInspector() {
+  const mod = await loadStorageInspectorModule();
+  if (!hasStorageInspector(mod)) return false;
+  try {
+    await mod.openStorageInspector({ kind: 'self' });
+    return true;
+  } catch (err) {
+    console.warn('[st-zip-converter] 唤起宿主存储面板失败：', err);
+    return false;
+  }
+}
+
+/**
  * 通过服务端 /version 端点二次校验宿主类型
  *
  * 实测响应形状（research/host-probe-results.md）：

@@ -46,6 +46,8 @@ import {
   isRestoreInFlight,
   cancelRestoreInFlight,
   confirmDialog,
+  isStorageInspectorAvailable,
+  openStorageInspector,
   getHandle,
   registerMenuButton,
   mountNativeBackupButton,
@@ -253,6 +255,23 @@ async function main(appRoot = document.getElementById('app')) {
 
     const fnEl = document.getElementById('fold-summary-filename');
     if (fnEl) fnEl.textContent = filenameTemplateInput?.value || '';
+  }
+
+  /**
+   * 宿主原生存储面板入口（`#btn-storage-inspector`，仅抽屉态渲染）。
+   *
+   * T2 按用户裁决 13 移除了自绘双行配额条，只留这枚按钮的外观，**行为归本任务**。
+   * 语义：宿主提供原生 Storage Inspector 才解除 `hidden`；不提供则整块保持隐藏，
+   * **不出现死按钮**，也**不恢复自绘配额条**（用户裁决 13 不可回退）。
+   * 唤起失败时保持静默——按钮本就不该可见，无需用户可见报错。
+   */
+  function setupStorageInspectorButton() {
+    const btn = document.getElementById('btn-storage-inspector');
+    if (!btn) return; // 独立态 / 模态态不渲染该按钮
+    btn.addEventListener('click', () => { void openStorageInspector(); });
+    void isStorageInspectorAvailable().then((available) => {
+      if (available) btn.hidden = false;
+    });
   }
 
   document.querySelectorAll('input[name="extension-mode"]').forEach((el) => {
@@ -1427,6 +1446,7 @@ async function main(appRoot = document.getElementById('app')) {
   // 10. 页面启动时无损恢复工作区状态与初始化文件名预览
   updateFilenamePreview();
   updateFoldSummaries();
+  setupStorageInspectorButton();
 
   if (isStorageSupported()) {
     try {
