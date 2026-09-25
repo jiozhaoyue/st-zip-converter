@@ -5,6 +5,7 @@
  */
 
 import { ACTION_LABELS, ACTIONS } from '../core/plan-preview.js';
+import { actionTokenVar } from './action-colors.js';
 
 function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -174,13 +175,14 @@ export function createCategoryDetailList({ categoryKey, items, excludedPaths, ac
         metaWrap.appendChild(warnBadge);
       }
 
-      const actionInfo = ACTION_LABELS[item.action] || { label: item.action, color: '#6b7280' };
+      const actionInfo = ACTION_LABELS[item.action] || { label: item.action };
+      const actionColor = actionTokenVar(actionInfo.token);
       const actionPill = document.createElement('span');
       actionPill.className = `action-pill pill-${item.action.toLowerCase()}`;
       actionPill.textContent = actionInfo.label;
       actionPill.title = actionInfo.desc || item.action;
-      actionPill.style.borderColor = actionInfo.color;
-      actionPill.style.color = actionInfo.color;
+      actionPill.style.borderColor = actionColor;
+      actionPill.style.color = actionColor;
 
       const sizeSpan = document.createElement('span');
       sizeSpan.className = 'file-size-span';

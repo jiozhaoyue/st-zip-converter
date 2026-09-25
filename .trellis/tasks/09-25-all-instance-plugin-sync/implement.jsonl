@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "R5 要在此扩展对话框适配器：现行 confirmDialog 契约、getContext().Popup 取能力的唯一合法路径、降级矩阵与测试要求都在这里，改动须与之一致"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "宿主 DOM 注入的幂等/自愈语义、makeHostButton 工厂、CSS 作用域契约（主体检查 + id 双条件）、四条守卫命令与历史事故——R4/R7 的判据与命名同构参照"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门槛与自查口径，阶段 7 全量验证按此执行"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "R4 涉及 src/core/plan-preview.js 产出 UI 颜色字面量的跨层越界，修法须符合分层思考指南"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "语义色收敛到单一 semanticColor() 属复用收敛，避免两处各写一份字面量"}
+{"file": ".trellis/tasks/09-25-all-instance-plugin-sync/research/FINDINGS.md", "reason": "本次全部实测读数（自包含）：插件 DOM 写入 17/22425、CSS 343 规则 0 越界、toastr 与本插件无关的三条证据、仪器自身的坑与复跑命令"}

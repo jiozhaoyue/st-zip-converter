@@ -29,13 +29,36 @@ export const ACTIONS = Object.freeze({
   FILTER: 'FILTER',         // 用户手动反选排除
 });
 
+/**
+ * 动作**语义 token**（不是颜色）。
+ *
+ * 为什么要有这层：`src/core/` 按项目分层是**纯逻辑层，不得产出呈现层的东西**。
+ * 原实现直接在 `ACTION_LABELS` 里写 `color: '#f59e0b'` 等六个色值，UI 层再把它们塞进
+ * `style.borderColor`——等于把一整套品牌色板藏在 core 里（2026-09-25 实测发现：
+ * 它在宿主酒馆里根本不跟主题，且与 `style.css` 的令牌块构成了**第二套**配色来源）。
+ *
+ * 现在 core 只给语义 token，颜色由呈现层解析：`src/ui/action-colors.js` 的
+ * `actionTokenVar()` 把 token 映射到 `style.css` 容器令牌块里的 `--st-action-*`。
+ */
+export const ACTION_TOKENS = Object.freeze({
+  COPY: 'copy',
+  ROUTE: 'route',
+  MIGRATE: 'migrate',
+  SYNTHESIZE: 'synth',
+  DROP: 'drop',
+  FILTER: 'filter',
+});
+
+/** 未知动作的兜底 token（原实现是散在 UI 里的 `color: '#9ca3af'` / `'#6b7280'` 字面色） */
+export const ACTION_TOKEN_FALLBACK = ACTION_TOKENS.FILTER;
+
 export const ACTION_LABELS = Object.freeze({
-  [ACTIONS.COPY]: { label: '直通', color: '#10b981', desc: '原样复制到目标包' },
-  [ACTIONS.ROUTE]: { label: '路由', color: '#3b82f6', desc: '路径映射至目标布局' },
-  [ACTIONS.MIGRATE]: { label: '迁移', color: '#8b5cf6', desc: '适配目标平台的结构迁移' },
-  [ACTIONS.SYNTHESIZE]: { label: '合成', color: '#f59e0b', desc: '由互转引擎全新合成' },
-  [ACTIONS.DROP]: { label: '丢弃', color: '#ef4444', desc: '不兼容或冗余缓存，安全剔除' },
-  [ACTIONS.FILTER]: { label: '排除', color: '#6b7280', desc: '用户手动取消勾选' },
+  [ACTIONS.COPY]: { label: '直通', token: ACTION_TOKENS.COPY, desc: '原样复制到目标包' },
+  [ACTIONS.ROUTE]: { label: '路由', token: ACTION_TOKENS.ROUTE, desc: '路径映射至目标布局' },
+  [ACTIONS.MIGRATE]: { label: '迁移', token: ACTION_TOKENS.MIGRATE, desc: '适配目标平台的结构迁移' },
+  [ACTIONS.SYNTHESIZE]: { label: '合成', token: ACTION_TOKENS.SYNTHESIZE, desc: '由互转引擎全新合成' },
+  [ACTIONS.DROP]: { label: '丢弃', token: ACTION_TOKENS.DROP, desc: '不兼容或冗余缓存，安全剔除' },
+  [ACTIONS.FILTER]: { label: '排除', token: ACTION_TOKENS.FILTER, desc: '用户手动取消勾选' },
 });
 
 // 扩展特殊类目：缓存、备份快照与应用私有

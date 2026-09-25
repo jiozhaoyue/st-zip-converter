@@ -1,5 +1,6 @@
 import { CATEGORIES, CATEGORY_LABELS } from '../core/inspect.js';
 import { ACTION_LABELS, SPECIAL_CATEGORIES, SPECIAL_LABELS } from '../core/plan-preview.js';
+import { actionTokenVar } from './action-colors.js';
 import { createCategoryDetailList } from './file-tree-picker.js';
 
 const CATEGORY_ICONS = {
@@ -127,15 +128,16 @@ export function renderCategoryStats(planOrInspectResult) {
       actionBadgesEl.innerHTML = '';
       for (const [actionKey, count] of Object.entries(planOrInspectResult.actionStats)) {
         if (count > 0) {
-          const info = ACTION_LABELS[actionKey] || { label: actionKey, color: '#9ca3af' };
+          const info = ACTION_LABELS[actionKey] || { label: actionKey };
+          const actionColor = actionTokenVar(info.token);
           const badge = document.createElement('button');
           badge.type = 'button';
           const isActive = activeActionFilter === actionKey;
           badge.className = `action-summary-pill pill-${actionKey.toLowerCase()} ${isActive ? 'active' : ''}`;
           badge.textContent = `${info.label} ${count}`;
-          badge.style.borderColor = info.color;
-          badge.style.color = isActive ? '#fff' : info.color;
-          if (isActive) badge.style.background = info.color;
+          badge.style.borderColor = actionColor;
+          badge.style.color = isActive ? '#fff' : actionColor;
+          if (isActive) badge.style.background = actionColor;
           badge.title = `点击${isActive ? '取消' : '按'}「${info.label}」动作筛选文件明细`;
 
           badge.addEventListener('click', (e) => {

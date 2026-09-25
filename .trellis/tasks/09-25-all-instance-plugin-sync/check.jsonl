@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核对 R4/R7：CSS 作用域契约（主体不得为 body/html/:root、根须 id 双条件）、四条守卫的判据与退出码语义；新守卫须同构"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "核对 R5：对话框适配器的契约、降级矩阵与 7 条测试要求，逐条比对实现与测试是否落地"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "收口前的质量门与自查清单口径"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核对 R4 对 src/core/plan-preview.js 的改动没有把呈现依赖重新引入纯逻辑层"}
+{"file": ".trellis/tasks/09-25-all-instance-plugin-sync/research/FINDINGS.md", "reason": "核对验收读数是否与本文件一致（22425/17/0/0、343/0、toastr 三条证据），并复核「负例自检是否真的能抓到违规」——不得以 0 违规直接判定通过"}

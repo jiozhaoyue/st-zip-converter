@@ -1,5 +1,6 @@
 import { logger, LOG_LEVELS } from '../core/logger.js';
 import { escapeHtml, trustedStaticMarkup } from './escape.js';
+import { alertDialog } from './host-bridge.js';
 
 /**
  * 实时日志与审计抽屉控制台 (UI)
@@ -207,7 +208,7 @@ export function setupLogConsole(containerElement) {
         btnCopy.innerHTML = '<i class="fa-solid fa-check"></i> 已复制!';
         setTimeout(() => { btnCopy.innerHTML = trustedStaticMarkup(origHtml); }, 1800);
       } catch {
-        alert('复制失败，请手动在控制台选取');
+        await alertDialog('复制失败，请手动在控制台选取');
       }
     });
   }
@@ -222,7 +223,7 @@ export function setupLogConsole(containerElement) {
       const a = document.createElement('a');
       a.href = url;
       a.download = `st-zip-converter-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
-      document.body.appendChild(a);
+      document.body.appendChild(a); // dom-scope:allow 下载锚点：临时 <a> 必须挂进文档 click() 才会触发下载，紧随其后即 removeChild
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);

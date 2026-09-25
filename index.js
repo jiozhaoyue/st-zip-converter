@@ -48,6 +48,7 @@ import {
   cancelRestoreInFlight,
   isRestoreUnsupported,
   getRestoreUnsupportedReason,
+  alertDialog,
   confirmDialog,
   hostSelectionCapability,
   isStorageInspectorAvailable,
@@ -69,7 +70,6 @@ import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
 import { getWorkbenchHtml } from './src/ui/workbench-template.js';
 import { splitArchiveEntries, normalizeSplitMb } from './src/core/splitter.js';
-import { renderSplitDeliveryModal } from './src/ui/split-deliver-modal.js';
 import { zipIo } from './src/core/zip-io.js';
 
 function formatTimestamp() {
@@ -83,9 +83,20 @@ function formatBytes(bytes) {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-async function main(appRoot = document.getElementById('app')) {
-  const root = appRoot || document.getElementById('app');
-  if (!root) return;
+/**
+ * 工作台初始化。**容器必须显式传入**（R6）。
+ *
+ * 原签名是 `main(appRoot = document.getElementById('app'))`：插件态下若宿主页面上存在
+ * 任意第三方 `#app`，兜底会先命中它，整棵工作台挂进别人的容器。容器来源收敛为两条唯一路径：
+ * 独立态 = `index.html` 的 `#app` 骨架；插件态 = `mountSettingsDrawer` 回调传入的抽屉 `#app`。
+ * @param {HTMLElement|undefined} appRoot 承载工作台的容器元素
+ */
+async function main(appRoot) {
+  const root = appRoot;
+  if (!root) {
+    logger.warn('main() 未收到容器元素，工作台不初始化（容器来源必须显式传入，不再做裸 #app 兜底）');
+    return;
+  }
 
   const host = detectHost();
   const view = createViewController();
@@ -907,7 +918,7 @@ async function main(appRoot = document.getElementById('app')) {
     const isIncremental = hostIncrementalCheck ? hostIncrementalCheck.checked : false;
     if (isIncremental && !currentBaseZip) {
       logger.error('差量补丁模式开启，必须先选择一个已有基准 ZIP！');
-      alert('【差量补丁提示】\n差量补丁模式必须选择一个已有 ZIP 作为基准包！\n请在面板中点击“选择本地基准 ZIP”或从上传暂存区选取基准包。');
+      void alertDialog('【差量补丁提示】\n差量补丁模式必须选择一个已有 ZIP 作为基准包！\n请在面板中点击“选择本地基准 ZIP”或从上传暂存区选取基准包。');
       if (hostBaseZipSection) hostBaseZipSection.style.display = 'block';
       updateBaseZipStatusUI();
       return;
@@ -1227,11 +1238,11 @@ async function main(appRoot = document.getElementById('app')) {
   // 7. 还原确认模态弹窗逻辑
   function openRestoreModal(archiveFile) {
     if (!host.isPlugin) {
-      alert('还原/写入功能仅在作为 SillyTavern 或 Luker 扩展插件运行且已登录时可用。');
+      void alertDialog('还原/写入功能仅在作为 SillyTavern 或 Luker 扩展插件运行且已登录时可用。');
       return;
     }
     if (isRestoreUnsupported()) {
-      alert(getRestoreUnsupportedReason());
+      void alertDialog(getRestoreUnsupportedReason());
       return;
     }
     pendingRestoreBatch = null;
@@ -1251,11 +1262,11 @@ async function main(appRoot = document.getElementById('app')) {
    */
   function openBatchRestoreModal(items) {
     if (!host.isPlugin) {
-      alert('还原/写入功能仅在作为 SillyTavern 或 Luker 扩展插件运行且已登录时可用。');
+      void alertDialog('还原/写入功能仅在作为 SillyTavern 或 Luker 扩展插件运行且已登录时可用。');
       return;
     }
     if (isRestoreUnsupported()) {
-      alert(getRestoreUnsupportedReason());
+      void alertDialog(getRestoreUnsupportedReason());
       return;
     }
     if (!items || items.length === 0) return;
@@ -1288,7 +1299,7 @@ async function main(appRoot = document.getElementById('app')) {
    */
   async function runBatchRestore(items, mode) {
     if (isRestoreInFlight()) {
-      alert('已有恢复任务正在进行，请等待其完成后再试');
+      void alertDialog('已有恢复任务正在进行，请等待其完成后再试');
       return;
     }
     const targets = items.map((it) => ({ id: it.id, name: it.name, blob: it.blob }));
@@ -1335,7 +1346,7 @@ async function main(appRoot = document.getElementById('app')) {
         + `${state.unconfirmedCount ? `，未确认 ${state.unconfirmedCount}` : ''}（部分数据已生效）`);
       logger.warn('批量恢复未全部成功——逐项原因见待导出区，可「重试失败项」');
     }
-    if (isRestoreUnsupported()) alert(getRestoreUnsupportedReason());
+    if (isRestoreUnsupported()) void alertDialog(getRestoreUnsupportedReason());
     refreshExportQueueUI();
   }
 
@@ -1353,7 +1364,7 @@ async function main(appRoot = document.getElementById('app')) {
       if (!batchItems && !fileToRestore) return;
       // 并发互斥：恢复在途时拒绝再次发起（两个事务并发写同一用户目录，宿主侧行为未定义）
       if (isRestoreInFlight()) {
-        alert('已有恢复任务正在进行，请等待其完成后再试');
+        void alertDialog('已有恢复任务正在进行，请等待其完成后再试');
         return;
       }
       const modeRadio = document.querySelector('input[name="restore-mode"]:checked');
@@ -1387,12 +1398,12 @@ async function main(appRoot = document.getElementById('app')) {
           view.setProgress(100, `请求已发出，但结果未确认`);
           logger.warn(`恢复请求已发出，但响应体不可解析（${restoreResult.reason || '未知原因'}）——`
             + '宿主可能仍在处理，请稍后核对数据。');
-          alert('恢复请求已发出，但未能确认结果。\n宿主可能仍在处理，请稍后核对数据。');
+          void alertDialog('恢复请求已发出，但未能确认结果。\n宿主可能仍在处理，请稍后核对数据。');
         } else if (restoreResult && restoreResult.nothingRestored) {
           // 宿主返回 200 但一个条目都没写：如实报告，不得说「成功」
           view.setProgress(100, '宿主未写入任何条目');
           logger.warn('宿主返回成功但 restoredCount=0——请核对包的类目是否被宿主接受');
-          alert('宿主未写入任何条目。\n请核对数据包内容是否包含宿主支持的类目。');
+          void alertDialog('宿主未写入任何条目。\n请核对数据包内容是否包含宿主支持的类目。');
         } else {
           view.setProgress(100, `恭喜！数据包已成功恢复写入到当前酒馆用户！`);
           logger.success(`恢复完成！宿主酒馆数据已更新。`);
@@ -1402,11 +1413,11 @@ async function main(appRoot = document.getElementById('app')) {
           // 取消是**请求级**的：宿主可能已收到部分数据，必须提示核对而非报「失败」
           view.setProgress(100, '恢复写入已取消');
           logger.warn('恢复写入已由用户取消——宿主可能已收到部分数据，请稍后核对');
-          alert('恢复已取消。\n宿主可能仍在处理，请稍后核对数据。');
+          void alertDialog('恢复已取消。\n宿主可能仍在处理，请稍后核对数据。');
         } else {
           view.setProgress(100, `恢复写入失败: ${err.message}`);
           logger.error('恢复写入宿主过程发生错误', err);
-          alert(`恢复失败: ${err.message}`);
+          void alertDialog(`恢复失败: ${err.message}`);
         }
       } finally {
         btnConfirmRestore.disabled = false;
@@ -1714,7 +1725,7 @@ export function openConverterModal() {
     appContainer.innerHTML = trustedStaticMarkup(getWorkbenchHtml({ isModal: true }));
 
     modalOverlay.appendChild(appContainer);
-    document.body.appendChild(modalOverlay);
+    document.body.appendChild(modalOverlay); // dom-scope:allow 自绘模态覆盖层必须挂 body 才能全页覆盖（放进扩展抽屉会被其 overflow/transform 裁剪）
 
     const closeBtn = appContainer.querySelector('#btn-close-converter-modal');
     if (closeBtn) {
@@ -1746,22 +1757,18 @@ export function openConverterModal() {
 
 /**
  * 自适应启动入口：检测独立 Web 模式 vs 酒馆插件模式
+ *
+ * **判定顺序（R6，2026-09-25 修正）**：先判宿主，再找容器。
+ * 原实现反过来——只看 `document.getElementById('app')` 存不存在就决定走独立态：
+ * 插件态下只要宿主页面上有**任意**第三方 `#app`，就会走进独立态分支，
+ * 把整棵工作台 `innerHTML` 写进那个**别人的容器**，并且永远不挂宿主抽屉。
+ * 实测 Luker 全仓无 `#app`（`grep -rn 'id="app"' public/` 零命中），所以今天没炸；
+ * 但这是"当前没炸"而非"不会炸"，判定顺序必须按语义来。
  */
 function bootstrap() {
   const host = detectHost();
-  const existingApp = document.getElementById('app');
 
-  if (existingApp) {
-    // 独立 Web 模式：index.html 仅为空骨架，工作台内容由同一模板函数产出
-    // （单一模板源 · L1-MR-10：与插件抽屉态、模态态共用 getWorkbenchHtml）
-    if (!existingApp.hasChildNodes()) {
-      existingApp.innerHTML = trustedStaticMarkup(getWorkbenchHtml({ isStandalone: true }));
-    }
-    if (!isWorkbenchInitialized) {
-      isWorkbenchInitialized = true;
-      main(existingApp);
-    }
-  } else {
+  if (host.isPlugin) {
     // 宿主扩展模式 (SillyTavern / Luker)
     // 仅在扩展设置抽屉中展开工作台，遵循“只在插件页面做，不在魔法棒做”
     mountSettingsDrawer((drawerApp) => {
@@ -1771,6 +1778,22 @@ function bootstrap() {
       }
     });
     logger.info(`st-zip-converter 扩展设置抽屉已就绪 (${host.platform.toUpperCase()} 模式)`);
+    return;
+  }
+
+  // 独立 Web 模式：index.html 仅为空骨架，工作台内容由同一模板函数产出
+  // （单一模板源 · L1-MR-10：与插件抽屉态、模态态共用 getWorkbenchHtml）
+  const existingApp = document.getElementById('app');
+  if (!existingApp) {
+    logger.warn('独立态未找到 #app 骨架容器，工作台不初始化（index.html 应提供该容器）');
+    return;
+  }
+  if (!existingApp.hasChildNodes()) {
+    existingApp.innerHTML = trustedStaticMarkup(getWorkbenchHtml({ isStandalone: true }));
+  }
+  if (!isWorkbenchInitialized) {
+    isWorkbenchInitialized = true;
+    main(existingApp);
   }
 }
 

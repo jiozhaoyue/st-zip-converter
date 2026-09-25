@@ -29,7 +29,7 @@ function triggerBlobDownload(blob, name) {
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
-  document.body.appendChild(a);
+  document.body.appendChild(a); // dom-scope:allow 下载锚点：临时 <a> 必须挂进文档 click() 才会触发下载，紧随其后即 removeChild
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 60_000);

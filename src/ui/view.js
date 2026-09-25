@@ -109,7 +109,7 @@ export function createViewController() {
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = filename;
-    document.body.appendChild(anchor);
+    document.body.appendChild(anchor); // dom-scope:allow 下载锚点：临时 <a> 必须挂进文档 click() 才会触发下载，紧随其后即 removeChild
     anchor.click();
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);

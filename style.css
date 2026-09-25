@@ -35,10 +35,25 @@
   /* 强调色与各平台标识色 */
   --accent: var(--SmartThemeQuoteColor, #f59e0b);
   --accent-hover: color-mix(in srgb, var(--accent) 80%, #fff);
+  /* `@supports not (color-mix)` 分支专用的降级底色。字面量**只许出现在这里**，
+     不得再散落到规则内部（2026-09-25：原 `@supports` 块内直接写 `rgba(245,158,11,.24)`
+     与 `#f59e0b`，等于把同一份品牌色复制了两处）。 */
+  --accent-soft-fallback: rgba(245, 158, 11, 0.24);
   --accent-st: #38bdf8;
   --accent-luker: #c084fc;
   --accent-tt: #fb7185;
   --accent-pt: #34d399;
+
+  /* 动作语义色（计划预览的动作徽标）。语义 token → 此处变量的映射在
+     `src/ui/action-colors.js`；`src/core/` **只给 token 不给颜色**（分层契约）。
+     这一块是插件里动作色板的**唯一来源**，规则内不得再写字面量。
+     `synth` 跟随宿主强调色，其余留字面量：宿主无官方「动作语义色」变量记载（L1-MR-5 不猜 API）。 */
+  --st-action-copy: #10b981;
+  --st-action-route: #3b82f6;
+  --st-action-migrate: #8b5cf6;
+  --st-action-synth: var(--SmartThemeQuoteColor, #f59e0b);
+  --st-action-drop: #ef4444;
+  --st-action-filter: #6b7280;
 
   /* 状态色彩 */
   --warning: #f59e0b;
@@ -587,8 +602,8 @@
 @supports not (color: color-mix(in srgb, red, blue)) {
   #app.app-container .btn-primary, .st-converter-drawer-app .btn-primary,
   #app.app-container .btn-accent, .st-converter-drawer-app .btn-accent {
-    background: rgba(245, 158, 11, 0.24);
-    color: #f59e0b;
+    background: var(--accent-soft-fallback);
+    color: var(--accent);
   }
 }
 
@@ -1952,7 +1967,14 @@
 }
 
 /* ===== 宿主环境内嵌模态工作台与抽屉 ===== */
-#app.app-container .st-converter-modal-overlay, .st-converter-drawer-app .st-converter-modal-overlay {
+/* 模态态覆盖层：**主体就是覆盖层自身**。
+   2026-09-25 修正死规则：原写法 `#app.app-container .st-converter-modal-overlay` 要求覆盖层是
+   `#app.app-container` 的**后代**，而 `index.js` 建的实际结构相反——覆盖层挂在 `document.body`，
+   `#app.app-container` 是它的**子**（`modalOverlay.appendChild(appContainer)`）。方向颠倒 ⇒
+   该规则**永不命中**，导出 API `openConverterModal()` 一旦被调用，覆盖层没有任何全屏定位样式。
+   守卫 `scripts/css-scope.js` 的 `ALLOWED_ROOTS` 早已含 `#st-converter-modal-overlay`，
+   即守卫本来就在等这个写法。 */
+#st-converter-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;

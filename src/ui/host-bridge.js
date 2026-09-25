@@ -287,8 +287,8 @@ export function detectHost() {
   return { platform: 'standalone', isPlugin: false, confidence: 'none' };
 }
 
-/** 确认弹窗标题——插件自身的功能名，非说明性文案（R4） */
-const CONFIRM_DIALOG_TITLE = '数据包互转';
+/** 宿主原生弹窗标题——插件自身的功能名，非说明性文案（R4）。确认与信息提示共用同一标题 */
+const HOST_DIALOG_TITLE = '数据包互转';
 
 /**
  * 读取宿主上下文对象（`SillyTavern.getContext()`）。
@@ -323,7 +323,7 @@ export async function confirmDialog(message) {
   // 两者齐备才走宿主原生弹窗；POPUP_RESULT 缺失时不猜常量值，直接降级
   if (typeof hostConfirm === 'function' && affirmative !== undefined) {
     try {
-      const result = await hostConfirm(CONFIRM_DIALOG_TITLE, message);
+      const result = await hostConfirm(HOST_DIALOG_TITLE, message);
       return result === affirmative;
     } catch (err) {
       console.warn('[st-zip-converter] 宿主原生确认弹窗不可用，降级为原生 confirm：', err);
@@ -334,6 +334,43 @@ export async function confirmDialog(message) {
   }
   // 无任何确认手段（纯 Node 环境）：不阻断调用方
   return true;
+}
+
+/**
+ * 宿主原生**信息提示**适配器（R5，2026-09-26）。
+ *
+ * 为什么是 `Popup.show.text` 而不是 `Popup.show.alert`：
+ * **官方文档里没有 alert**。`docs.sillytavern.app`（Writing Extensions）只文档化了
+ * `Popup.show.confirm` / `.input` / `.text` 三个方法，其中 `.text(header, text)`
+ * 被标为 "Information display"——即"只显示一条信息"的那一个。
+ * 运行时交叉核对（`research/host-api-check-8003.json`）：`getContext().Popup.show`
+ * 的方法键**恰为** `['confirm','input','text']`，与文档一致。
+ * ⇒ 按 L1-MR-5（API 事实以官方文档为准、禁止翻源码猜 API），此处用 `.text`；
+ *   **不得**由 `.confirm` 的形状外推出一个 `alert`。
+ *
+ * 降级链与 `confirmDialog` 同构，逐级不抛：宿主 `.text` → `window.alert` → 纯 Node 静默返回。
+ * 注意宿主路径是**非阻塞**的（Promise），浏览器 `alert` 是**阻塞**的：
+ * 调用方在同步上下文里用 `void alertDialog(...)`，在 async 上下文里 `await`。
+ *
+ * @param {string} message 提示正文
+ * @param {string} [title] 标题，默认插件功能名
+ * @returns {Promise<void>}
+ */
+export async function alertDialog(message, title = HOST_DIALOG_TITLE) {
+  const ctx = getHostContext();
+  const hostText = ctx?.Popup?.show?.text;
+  if (typeof hostText === 'function') {
+    try {
+      await hostText(title, message);
+      return;
+    } catch (err) {
+      console.warn('[st-zip-converter] 宿主原生信息弹窗不可用，降级为原生 alert：', err);
+    }
+  }
+  if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(message);
+  }
+  // 无任何提示手段（纯 Node 环境）：静默返回，不阻断调用方
 }
 
 /**
@@ -1181,7 +1218,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
   `;
 
   modalOverlay.appendChild(modalBox);
-  document.body.appendChild(modalOverlay);
+  document.body.appendChild(modalOverlay); // dom-scope:allow 自绘模态覆盖层必须挂 body 才能全页覆盖（放进扩展抽屉会被其 overflow/transform 裁剪）
 
   const listEl = modalBox.querySelector('#ext-list-container');
   const itemsState = [];
@@ -1354,7 +1391,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
   startBtn.addEventListener('click', async () => {
     const selected = itemsState.filter((item) => item.checkbox.checked && item.selectable);
     if (selected.length === 0) {
-      alert('请至少勾选一个待安装的扩展');
+      await alertDialog('请至少勾选一个待安装的扩展');
       return;
     }
 
