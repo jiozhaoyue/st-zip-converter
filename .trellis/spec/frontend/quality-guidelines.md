@@ -16,10 +16,11 @@
 
 | 类别 | 命令 | 标准 |
 |---|---|---|
-| 全量测试 | `npm test` | **39 个测试文件 / 333 passed / 2 skipped**（2026-09-25 快照）。不得低于基线、零回归。 |
+| 全量测试 | `npm test` | **41 个测试文件 / 358 passed / 2 skipped**（2026-09-25 快照）。不得低于基线、零回归。 |
 | CSS 作用域守卫 | `npm run check:css-scope` | `style.css` 每条规则必须以 `.app-container` 或 `.st-converter-drawer-app` 为作用域根。退出码 0。 |
 | DOM 注入守卫 | `npm run check:dom-injection` | `src/ui/**` 与根 `index.js` 的 `innerHTML` / `outerHTML` / `insertAdjacentHTML` 不得含未转义插值。退出码 0。 |
 | 单一模板源守卫 | `npm run check:template-source` | `index.html` 只许骨架（业务节点 id 仅 `app` 在白名单内）；`REQUIRED_TEMPLATE_IDS` 全部须定义于 `src/ui/workbench-template.js`。退出码 0。 |
+| 控件消费点守卫 | `npm run check:control-consumer` | 模板中每个交互控件（`button`/`input`/`select`/`textarea`）必须在 `CONTROL_CONSUMERS` 中有消费点声明；声明表含僵尸条目同样违规。退出码 0。 |
 | 宿主行为冒烟 | `npm run dev` + **Dev** 实例 | Dev ST `8001` / Dev Luker `8003`；**默认严禁** Real 实例（`8002` / `8004`）——见下表下方注。 |
 
 > **Real 实例（8004）例外口径**：仅当**该任务**获用户明确授权时才可对 Real 采样，
@@ -184,6 +185,7 @@ Host Native Dialog Adapter 第 7 节）。
 - [ ] 新增 DOM 插值一律走 `src/ui/escape.js`；不放行裸 `innerHTML` 插值
 - [ ] 新增样式一律带 `.app-container` / `.st-converter-drawer-app` 前缀，配色继承宿主变量
 - [ ] 若改动 UI 结构，改 `src/ui/workbench-template.js` **一处即可**，并同步 `REQUIRED_TEMPLATE_IDS` + 跑 `check:template-source`
+- [ ] **新增/删除任何交互控件**（button/input/select/textarea）时，同步 `scripts/control-consumer-guard.js` 的 `CONTROL_CONSUMERS` 并跑 `check:control-consumer`——**先写下「谁读它的值」，写不出来说明该控件没有存在理由**
 - [ ] 若涉及高频回调，接 `requestAnimationFrame` 合帧
 - [ ] 若涉及 `await`，确认有超时 / abort 兜底
 - [ ] 若注入宿主 UI，走共享 `watchHostDom` + `makeHostButton()` 工厂并打 `dataset.stZipInjected` 防重标记
@@ -192,10 +194,11 @@ Host Native Dialog Adapter 第 7 节）。
 
 ## Quality Check
 
-- [ ] `npm test` 全绿（≥ 333 passed / 2 skipped，零回归）
+- [ ] `npm test` 全绿（≥ 358 passed / 2 skipped，零回归）
 - [ ] `npm run check:css-scope` 退出码 0
 - [ ] `npm run check:dom-injection` 退出码 0
 - [ ] `npm run check:template-source` 退出码 0
+- [ ] `npm run check:control-consumer` 退出码 0（改了模板控件时必跑）
 - [ ] 手测默认只针对 Dev 实例（8001 / 8003）；Real（8004）仅在该任务获明确授权时只读采样，且用后还原实例
 
 ---

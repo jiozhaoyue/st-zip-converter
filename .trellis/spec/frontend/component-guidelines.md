@@ -387,13 +387,15 @@ grep 只能看到顶层规则行；嵌在 `@media` / `@supports` 里的裸选择
 守卫：`npm run check:css-scope`（`scripts/css-scope.js` 用 PostCSS AST 走查，单测在 `test/css-scope.test.js`）必须通过，输出为 `CSS 作用域检查通过：style.css`。
 PostCSS 只是 devDependency，用于这条解析期守卫，**不进浏览器运行时**。
 
-### Guard commands (三条静态守卫)
+### Guard commands (四条静态守卫)
 
 ```bash
-npm run check:css-scope        # CSS 作用域：每条选择器必须根在 .app-container / .st-converter-drawer-app
-npm run check:dom-injection    # innerHTML/outerHTML/insertAdjacentHTML 不得有未转义插值
-npm run check:template-source  # index.html 只许骨架；业务节点必须全部定义于 workbench-template.js
+npm run check:css-scope         # CSS 作用域：每条选择器必须根在 .app-container / .st-converter-drawer-app
+npm run check:dom-injection     # innerHTML/outerHTML/insertAdjacentHTML 不得有未转义插值
+npm run check:template-source   # index.html 只许骨架；业务节点必须全部定义于 workbench-template.js
+npm run check:control-consumer  # 每个交互控件必须有消费点声明（防死控件）+ 声明表不得含僵尸条目
 ```
 
-三条都可以单独跑（无需 `npm test`）。DOM 注入守卫的豁免约定：单条语句用 `dom-injection-guard:allow <理由>` 注释，整文件用 `dom-injection-guard:allow-file <理由>`（当前仅死代码 `src/ui/split-deliver-modal.js` 使用）。
+四条都可以单独跑（无需 `npm test`）。DOM 注入守卫的豁免约定：单条语句用 `dom-injection-guard:allow <理由>` 注释，整文件用 `dom-injection-guard:allow-file <理由>`（当前仅死代码 `src/ui/split-deliver-modal.js` 使用）。
 第三条守卫的判据与三态一致性断言见上文「Single Template Source Mandate」。
+第四条守卫的由来与局限见 [`host-capabilities.md`](./host-capabilities.md) 的「UI 控件的合宪性」一节。

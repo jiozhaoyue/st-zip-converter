@@ -221,6 +221,28 @@ export function hostSelectionCapability(platform) {
 三条都排除后，才能判定为死控件。**不要只凭「搜不到引用」就下结论**——
 引用可能藏在批量读取或状态恢复里。
 
+### 机器守卫（`npm run check:control-consumer`）
+
+上述三步是**事后排查**；防复发靠守卫 `scripts/control-consumer-guard.js`：
+模板中每个交互控件（`button`/`input`/`select`/`textarea`）必须在 `CONTROL_CONSUMERS`
+声明表中有消费点条目，否则退出码 1 并输出 `文件:行号`；**声明表含僵尸条目同样违规**。
+
+键的三种形态（覆盖本仓全部三类控件）：
+
+| 形态 | 适用 | 本仓实例 |
+| --- | --- | --- |
+| `<id>` | 有 `id` 的控件 | `compression-select`、`btn-convert`… |
+| `name:<name>` | **无 id** 的单选组（按 name 读取） | `name:restore-mode`、`name:extension-mode` |
+| `group:.<class>` | **既无 id 也无 name**，按类选择器批量绑定 | `group:.btn-quick`（类目快捷按钮，事件委托读 `dataset.preset`） |
+
+> **防绕过设计**：`group:` 键**只对无 id 且无 name 的控件生效**——
+> 否则写一条 `group:.menu_button` 就能兜底掉整张表。
+> 一个控件被多个 `group:` 匹配、或有 id 却被 `group:` 兜底，都会被判违规。
+
+⚠ **守卫的局限（务必如实理解）**：它**只强制「声明存在」，不验证声明为真**——
+声明表写错照样通过。它是「逼人想过这件事」的机制，**不是**「控件一定有消费点」的证明。
+真正的语义验证需变量追踪，误报率高，本仓**有意不做**（见任务 `09-25-control-consumer-guard` 的 Out of Scope）。
+
 ### 处置约定
 
 - **移除控件本身 + 同步 `REQUIRED_TEMPLATE_IDS`**（否则 `check:template-source` 必失败）；

@@ -25,9 +25,9 @@
 | [Quality Guidelines](./quality-guidelines.md) | 验证矩阵、**三条**守卫命令、转义层契约、10 条禁止模式、纯逻辑可单测约定 | 就绪（2026-09-25 刷新） |
 | [Type Safety](./type-safety.md) | JSDoc 契约、运行时目标守卫、manifest 校验 | 就绪 |
 
-> 现行质量门槛：`npm test` 全绿（当前 **40 个测试文件 / 346 passed / 2 skipped**，零回归），
-> 外加三条静态守卫 `npm run check:css-scope`、`npm run check:dom-injection`
-> 与 `npm run check:template-source`（详见 quality-guidelines.md）。
+> 现行质量门槛：`npm test` 全绿（当前 **41 个测试文件 / 358 passed / 2 skipped**，零回归），
+> 外加**四条**静态守卫 `npm run check:css-scope`、`npm run check:dom-injection`、
+> `npm run check:template-source` 与 `npm run check:control-consumer`（详见 quality-guidelines.md）。
 > 同一事实只允许一处权威表述；遇到冲突以本目录文档与根 `CLAUDE.md` 为准。
 >
 > ⚠ **单个 spec 文件不得超过 Trellis 的 `context_injection.max_file_bytes`（32768 字节）**——

@@ -67,7 +67,8 @@ st-zip-converter/
 ├── scripts/
 │   ├── css-scope.js            # CSS 双前缀守卫（npm run check:css-scope）
 │   ├── dom-injection-guard.js  # innerHTML 注入守卫（npm run check:dom-injection）
-│   └── single-template-source.js  # 单一模板源守卫（npm run check:template-source）
+│   ├── single-template-source.js  # 单一模板源守卫（npm run check:template-source）
+│   └── control-consumer-guard.js  # 控件消费点守卫（npm run check:control-consumer）
 ├── fixtures/               # 测试固件（四平台布局）
 │   └── gen.js              # 固件生成脚本（npm run gen-fixtures）
 ├── test/                   # Vitest（当前 39 个文件 / 333 passed / 2 skipped）

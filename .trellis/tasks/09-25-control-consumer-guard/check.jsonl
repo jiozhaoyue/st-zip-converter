@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验收口径：四条守卫全过 + npm test 全绿 + 负向用例须断言行号"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "复核守卫与「UI 控件合宪性」一节表述一致，且守卫局限（只强制声明、不验证真假）已如实写明"}

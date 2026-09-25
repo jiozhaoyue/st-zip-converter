@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "守卫的 CLI 约定（退出码 1 / 文件:行号输出）、验证矩阵接入点、禁止模式与「纯逻辑可单测」约定"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "「UI 控件的合宪性」一节是本任务要固化的流程约定；含死控件三步取证法与处置约定，守卫须与该节一致"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "单一模板源：控件来源唯一为 workbench-template.js，守卫的扫描对象与 REQUIRED_TEMPLATE_IDS 的关系需一致"}
