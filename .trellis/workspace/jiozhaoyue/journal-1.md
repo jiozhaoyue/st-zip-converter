@@ -1204,3 +1204,67 @@ Session summary was not supplied.
 
 - 悬置路径 restoreToLuker 在 L 上必然 404 —— 后台任务建议已登记，待判定
 - 既有 09-23 三项规划（extension-cloud-migration 父 + 两子）仍在 planning
+
+## Session 27: 批量恢复编排与 Luker 恢复端点平台化（含一次实例事故处置）
+
+### Summary
+
+先收口 09-23 三个遗留规划任务（逐条取证 + 残留登记后归档），再建新任务
+`09-25-batch-restore-luker-endpoint`，把「Luker 上恢复必然 404」的悬置路径修掉，
+并把待导出区「已选 N 项只恢复第一项」的静默部分执行改为真正的批量编排。
+中途用户报「插件改酒馆样式 / 夺舍 env-sync GUI / Luker 两实例 CSRF 失效 + 端口冲突」，
+其中 CSRF 一项经取证为我**按用户要求拉取实例后未重启**造成的代码/资源错配，已重启修复。
+
+### Main Changes
+
+- **09-23 三任务归档**：`batch-restore-refresh` / `authority-cloud-transfer` 逐条 AC 取证
+  （已被覆盖的标证据、未做的登记残留），父任务汇总残留后一并归档；
+  Authority transfer 迁移**登记不做**（理由成文），未随新任务转交。
+- **R1 端点解析**：`RESTORE_ENDPOINT_CANDIDATES` 候选序 + **仅 404/405 回退** + 会话缓存；
+  非 404 失败一律不换端点（避免重复写入同一用户目录）；全候选 404 ⇒ 判定宿主无恢复能力，
+  禁用恢复入口 + 说明文案（ST 1.19.0 实测两者皆 404）。
+- **R2 批量编排**：新增 `src/core/restore-batch.js` 纯状态机（Node 直测，10 例）；
+  待导出区批量入口由「只取第一项」改为整批；进行中「已完成 x/N（部分数据已生效）」、
+  收尾逐项原因 + 「重试失败项」+ 显式「刷新页面生效」按钮。
+- **实机验证**：Dev Luker 8003 认证态，插件模块路径恢复命中
+  `/api/users/restore-backup`，`restoredCount: 1`（合成包，无真实数据）。
+- **一次自纠**：首版探针包把 lorebook 写成 `lorebooks/x.json`（宿主实际目录是 `worlds/`），
+  得到 `200 + restoredCount: 0` 并被误判为「宿主静默空恢复」→ 已更正代码注释、
+  research 与 spec，并把「类目目录名 ≠ 类目名」写进 spec 教训。
+- **spec 更正**：`tavern-datapack-formats.md` 两处错误记载（`/api/users/me` 404、
+  「Luker 下隐藏恢复按钮」）已更正；补「端点矩阵 + 空体 POST 判定法」「端点解析契约」
+  「payload 两个坑」「实例 pull 后必须重启」。
+- **实例运维**：ST/Luker 四实例 + 两处插件副本全部更新到最新（ST `06bde939f`、
+  Luker `e1dbd1904`、插件 `48c9e8a`）；Dev/Luker 的 `yieldToBrowser` 本地补丁
+  经 stash 保住后再拉取（上游仍未修该处）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1ece380` | chore(task): 收口归档 09-23-extension-cloud-migration（父 + 2 子） |
+| `b6d8919` | feat(host): 恢复端点按平台解析 + 无恢复能力时诚实降级 |
+| `48c9e8a` | feat(restore): 批量恢复编排，修掉「已选 N 项只恢复第一项」的静默部分执行 |
+| `24fbbc5` | fix(restore): 补 selection 全类目（说明后经自纠更正） |
+| `4f54048` | docs(spec): 更正宿主恢复事实两处错误记载，并记一次自纠 |
+
+### Testing
+
+- [OK] `npm test` **44 文件 / 406 passed / 2 skipped**（基线 42/386/2，零回退）；
+  四条静态守卫退出码 0；`npm run build` 通过
+- [OK] Dev 8003 认证态实机：恢复命中 `restore-backup`、`restoredCount: 1`；三路对照
+  （插件路径 / 带 selection / 不带 selection）均 restoredCount=1
+- [OK] CSRF 比对：`getRequestHeaders()` 与 `/csrf-token` 为同一令牌，二者均被宿主接受
+- [注意] 验收期间出现**一次**单例测试失败，随后 9 轮复跑未复现（未定位，未归因）
+
+### Status
+
+[OK] **Completed**（含 2 条实机残留：ST 禁用态界面读数、批量 UI 实机验收）
+
+### Next Steps
+
+- **新任务（用户裁决）**：修「插件改宿主原生弹窗样式（渐变）」、「插件自身配色须走酒馆变量」、
+  「env-sync GUI 被插件内容覆盖」三项；先看 `D:\Repo\Github-repo\Pubilc\env-sync` 定位机制
+- 残留 R-1/R-2（实机界面读数）随样式修复后一并重验；R-3 探针残留物
+  `worlds/zz-probe-a.json` 是否清除待用户决定
+- 浏览器端提示：实例重启后旧标签页需刷新（否则持续 `Invalid CSRF token`）
