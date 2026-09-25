@@ -854,10 +854,11 @@ async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }
   formData.append('handle', handle);
   formData.append('mode', mode);
   formData.append('incremental', mode === 'merge' ? 'true' : 'false');
-  // **必须显式传类目选择**：2026-09-25 Dev Luker 实测——不传 `selection` 时宿主按
-  // 「未选任何类目」处理，把包内全部条目记为 `path_not_in_selected_categories`，
-  // 返回 200 + `restoredCount: 0` 的**静默空恢复**（包内 manifest 的 selection 不被解析，
-  // 见 `research/host-endpoint-facts.md`）。故这里恒传全类目，与「把包并入现有数据」语义一致。
+  // **显式传类目选择**：2026-09-25 Dev Luker 对照实验（`research/pw-restore-variants.cjs`）表明
+  // 宿主对**缺省** `selection` 也按全量处理（带/不带 selection 均 `restoredCount: 1`），
+  // 故这不是「修 bug」而是**把语义显式化**：与宿主自身 UI（Luker `public/scripts/user.js`）
+  // 及同类扩展 Atria 的 payload 一致，避免依赖未文档化的缺省行为。
+  // 注：包内 `manifest.json` 的 selection **不被宿主解析**（09-01 取证），类目选择只能来自请求。
   formData.append('selection', JSON.stringify(FULL_SELECTION));
 
   // 端点按平台候选序解析，仅 404/405 回退（见 postRestoreWithFallback 的硬约束）

@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门核查：测试基线不得回退、四条守卫退出码 0、禁止模式清单"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "核查对话框合规（未新增自绘浮层、未裸用 confirm、未硬编码 POPUP_RESULT）与降级路径完整"}
+{"file": ".trellis/spec/guides/tavern-datapack-formats.md", "reason": "核查端点候选序、404-only 回退、spec 更正后无残留矛盾表述，且与实测结论一致"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "核查 restoreToHost 对外签名与返回契约未被改动（零回归）"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核查待导出区渲染改动未破坏产物统一出口、按钮工厂与样式作用域铁律"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "核查失败/未确认路径不伪成功、逐项失败原因可读、取消语义与既有提示一致"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核查复用既有件（restoreInFlight / cancelRestoreInFlight / ExportQueue / confirmFn 接缝）而非另造机制"}
+{"file": ".trellis/spec/guides/subagent-collaboration.md", "reason": "若检查阶段派发子代理，核查模型档位与并发纪律（L0-8：低能力档、并发 ≤3、禁用 Kimi K3）"}

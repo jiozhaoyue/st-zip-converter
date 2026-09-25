@@ -191,20 +191,56 @@ git 的 `is_git_directory()` 要求 `.git/objects` 与 `.git/refs` 是**真实�
 - **写侧背压**:不得“逐条目读成 Buffer 再一次性 add”——旧 Node 实现在真实大包下把待压缩数据
   积压到峰值 884MiB。现行做法是 `zipIo` 的并发滑动窗口（`CONCURRENCY` 2–8）+ `waitForSlot` 背压,
   配合 vendor 内部 `CompressionStream`,峰值与包体积无关〔仓内 `src/core/zip-io.js` 头注释〕。
-- **Luker 的恢复路由不是 `/api/users/restore`**（2026-09-25 黑盒探测 Dev Luker 2.7.0）：
-  - `/api/users/restore` → **404**（无此路由）；`/api/users/me` 同样 404。
-  - `/api/users/restore-backup` → **存在**：空体 400 `No backup file uploaded`；字段名 `avatar`
-    + `handle` + `mode=merge` + `incremental=true` → **200**，响应体含
+- **宿主恢复端点矩阵**（2026-09-25 **认证态**黑盒实测；本节此前有两处错误记载，见下）：
+  - **Luker 2.7.0**：`/api/users/restore` → **404**（无此路由）；
+    `/api/users/restore-backup` → **存在**（空体 POST → `400 {"error":"Missing required fields"}`）；
+    带 `avatar` + `handle` + `mode=merge` + `incremental=true` → **200**，响应含
     `{mode, restoredCount, failedCount, skippedCount, rejectedCount, preflight:{categoryStats…}}`。
-  - 本仓 `src/ui/host-bridge.js:728` 的 `restoreToHostInner` 固定 POST `/api/users/restore`，
-    而 `restoreToLuker()`（`:1260`）只是转发给它 —— 即**该函数在 L 上必然 404**。
-    插件在 Luker 下会**隐藏**恢复按钮（`#btn-restore-luker` = `display:none`），
-    且 09-01 任务的既有结论是「L 的 `restore-backup` 支持 selection + overwrite/merge；
-    插件不做导入端」，故这可能是有意为之；但这是一处**悬置路径**，改动前先判定「接线到
-    `restore-backup`」还是「显式标注 ST-only」。
+  - **SillyTavern 1.19.0**：`/api/users/restore` 与 `/api/users/restore-backup` **均为 404**
+    ⇒ **ST 不提供整包恢复能力**（`src/endpoints/users-private.js` 仅注册
+    logout/me/change-avatar/change-password/backup/reset-*/change-name；前端
+    `public/scripts/user.js` 只调 `/api/users/backup` 做导出）。
+  - **判定方法（可复核）**：认证态**空体 POST** 判存在性——路由存在 → `400`（拒绝请求，
+    **不写任何数据**）；不存在 → `404`；无 CSRF → `403`。对照实验（Dev ST 8001）：
+    `POST /api/users/backup`（已知存在）→ 400、构造不存在路径 → 404、不带 CSRF → 403。
+- **两处既有错误记载（已更正，勿再引用旧文）**：
+  1. `/api/users/me` 在 Luker **不是 404**：认证态实测 **200**（`{"handle":"default-user",…}`）。
+     旧记载来自**匿名上下文**（`enableUserAccounts: true` 时匿名一律 403/被重定向），不构成结论
+     ——这也正好解释 `fetchHostBackup`（`host-bridge.js` 内同样调 `getHandle()`）在 Luker 为何可用。
+  2. 旧文称「插件在 Luker 下会**隐藏**恢复按钮（`#btn-restore-luker` = `display:none`）」
+     **与现状相反**：`index.js` 的 `computeActionAvailability()` 里 `restore.visible` **无平台项**
+     （仅 `isHost && hasArtifact`），模板里的 `display:none` 只是首屏初始态。
+     该按钮在 Luker 上**可达**，另一入口是待导出区每行的「写回宿主」。
+- **恢复端点解析契约**（落在 `src/ui/host-bridge.js`，2026-09-25 实现）：
+  - 候选序 `luker → ['/api/users/restore-backup', '/api/users/restore']`、
+    `st → ['/api/users/restore', '/api/users/restore-backup']`；命中结果**会话内缓存**（不持久化，
+    刷新页面即重新探测）。
+  - **仅 `404/405` 才回退下一候选**；非 404 失败（超时 / 5xx / 413 / 网络中断 / 取消）一律
+    **不换端点**——那些情况下请求可能已被宿主处理，换端点重试 = 对同一用户目录**重复写入**。
+  - 全候选 `404/405` ⇒ 判定「本宿主无整包恢复能力」（ST 即如此）：会话内记忆 + **禁用恢复入口**
+    + 说明「请改用宿主原生方式导入」，**不得**留下点了必然失败的按钮，也**不得**报假成功。
+- **恢复 payload 的两个坑**：
+  - `selection` 恒**显式传**（全类目）：宿主响应里 `skippedCount` 会把非类目文件（如
+    `manifest.json`）计入，属正常跳过。实测缺省 `selection` 时 Luker **亦**按全量处理，
+    故显式传的目的是**不依赖未文档化的缺省行为**，与 Luker 自身 UI
+    （`public/scripts/user.js`）与同类扩展 Atria 的 payload 对齐——不是「修 bug」。
+  - **`200` 不等于「有写入」**：条目全部被跳过时宿主返回 `200 + restoredCount: 0`。
+    本仓据此在 `restoreToHostInner` 内对 `restoredCount===0 && skippedCount>0` 标记
+    `nothingRestored`，单条与批量路径都按「未写入」处置，不谎报成功。
+- **类目目录名 ≠ 类目名（造探针包必看）**：宿主里 lorebook 的目录是 **`worlds/`**，
+  `lorebooks` 只是**类目名**（`src/core/inspect.js`：`hubPath.startsWith('worlds/')`
+  → `CATEGORIES.LOREBOOKS`）。2026-09-25 曾把探针包写成 `lorebooks/x.json`，
+  得到 `200 + restoredCount: 0`（skip 原因 `path_not_in_selected_categories`）
+  并被**误判**为「宿主静默空恢复」——教训：**先怀疑包的路径/类目，再怀疑代码**。
 - **宿主请求的 CSRF 与会话绑定**：只带 `X-CSRF-Token` 而不带会话 cookie 会 403
   `Invalid CSRF token`；必须先用 GET 取到 cookie 再带令牌。若实例开了 `enableUserAccounts`，
   **匿名请求一律 403**（即使 `basicAuthMode: false`）——脚本化验收必须借已登录的浏览器会话上下文
   （本机 Dev 用 `playwright` + `.pw-profile-dev` 持久化档案副本，**不要直接用原档案**，避免与在跑的
   Chrome 争抢锁）。无头环境下宿主扩展菜单可能不渲染（`extBlocks: 0`），此时以
   `POST /api/extensions/discover`（扩展管理 UI 的数据源）作为界面侧取证。
+  - **实例 `git pull` 后必须重启进程**（2026-09-25 实测教训）：只更新磁盘代码而不重启，
+    会出现「服务端跑旧代码 + 浏览器加载新静态资源」的错配，浏览器端表现为**持续**
+    `Invalid CSRF token. Please refresh the page and try again.`，且重启前用新页面仍可能偶然成功
+    ——排查时先比对「进程启动时间 vs 代码更新时间」。
+  - `getContext().getRequestHeaders()['X-CSRF-Token']` 与 `GET /csrf-token` 返回**同一令牌**
+    （2026-09-25 两宿主实测），二者皆可作令牌来源。

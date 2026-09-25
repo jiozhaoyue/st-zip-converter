@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "宿主能力对接唯一规范：原生弹窗适配器（confirmDialog / confirmFn DI 接缝、禁止硬编码 POPUP_RESULT）与宿主能力降级口径；本任务新增批量对话框必须遵守"}
+{"file": ".trellis/spec/guides/tavern-datapack-formats.md", "reason": "宿主恢复路由黑盒事实（§194-204：Luker /api/users/restore=404、restore-backup 存在及响应形状）——端点候选序的取证来源，也是本任务要更正的对象"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "restoreToHost 钩子契约与宿主写入类动作的既有约定（§94），改端点前必读以免破坏对外契约"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "产物统一出口与待导出区渲染约定（ExportQueue 不自动下载、按钮工厂、CSS 双前缀铁律）"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "产物统一出口与临时条目（ephemeral / origin=split-part）语义，批量入口与批次顺序需遵守"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "抛错与日志约定；端点全候选失败时的错误形态需与既有恢复链一致"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门：npm test 基线（42 文件 / 386 passed / 2 skipped）、四条静态守卫、转义层契约"}
+{"file": ".trellis/tasks/archive/2026-09/09-24-perf-hardening-transfer-memory/design.md", "reason": "恢复链有界等待 / 取消 / 并发互斥的定稿语义——本任务禁止破坏（restore-chain.test.js 10 条约束）"}
+{"file": ".trellis/tasks/archive/2026-09/09-25-transfer-pack-optimize/research/transfer-defaults.md", "reason": "上下传链路默认值与语义表（含恢复模式「合并写入/覆盖写入」命名裁决），避免批量文案与既有裁决冲突"}
