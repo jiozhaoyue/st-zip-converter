@@ -1314,3 +1314,67 @@ Session summary was not supplied.
 - 用户侧：启动 env-sync dev 确认 GUI 恢复；本仓 dev 起在 3040
 - 残留 R-1：若仍能看到宿主弹窗渐变，请给出触发场景（哪个扩展/操作），据此定位
 - L0-16 端口段位表登记（`tavern-harness` 真源）需用户确认后走真源同步
+
+## Session 29: 全实例插件同装与宿主 DOM 侵入实测治理
+
+### Summary
+
+用户要求「所有实例保持插件最新 + 实测 + DOM 侵入问题」。**开工第一件事就把用户报的现象证伪了**：
+「插件触发酒馆通知」的三条独立证据全部指向"与本插件无关"（插件零 toastr 调用；
+6 个插件入口动作在 8003 上 0 条 toast；宿主更新提示只对 `manifest.auto_update` 生效而本仓无该字段），
+8004 上抓到的真凶是**另一仓 `shujuku-rebuild`**（经 `Zero/index.js:39` 调 `window.toastr`）。
+于是把任务重心从"修一个不存在的问题"转成**给可复核的断言 + 按实测发现改进插件**。
+
+### Main Changes
+
+- **R1 八处实例同装**：ST/Luker 四处拉到 `1640118`（ST 两处为首次 `git clone`，落点在宿主
+  `.gitignore` 内，两个 ST 实例仓 `git status` 仍为空）；TT/PT 四处**按例外条款不装**——
+  取证发现 TT 的 data root 是**运行期可选**的、安装由 Rust gitoxide 建受管 embedded repo，
+  PT 干脆**没有服务端扩展目录**（包在浏览器 Profile 的 M13 blobs）。
+- **R3 把仪器固化成可复核断言**：劫持 DOM 写 API 按**调用栈**归因 + CSS 命中域交由浏览器自解析。
+  两条关键读数：整页 23860 次 DOM 写操作中本插件占 **17** 次（13 写自己容器内 + **4 全部落在声明锚点**），
+  `style.css` **343 条规则零越界**、`body`/`html` 逐字节未变。
+  带**负例自检**（先证明判定能抓到违规，再看它报 0）——这一步当场抓出判定自身的真漏洞。
+- **R4 配色分层**：原目标 `split-deliver-modal.js` 经核实是**死代码**（只 import 不调用），
+  去修它的配色等于装修没人进的屋子 ⇒ 用户批准后与 `archive-manager.js`（全仓 0 引用）**一并删除**。
+  改为处理真正的 live 目标：`src/core/plan-preview.js` 的 6 个颜色字面量（原被 UI 直接写进
+  `style.borderColor`）→ 语义 token + `src/ui/action-colors.js` 映射到 `--st-action-*`；
+  另修掉 `style.css` 一条**永不命中的死规则**（模态覆盖层选择器方向与插件自己建的 DOM 相反）。
+- **R5 弹窗**：新增 `alertDialog`，宿主路径用**官方文档记载**的 `Popup.show.text`
+  （文档与运行时键集均为 `confirm/input/text`，**确实没有 alert**——不外推），16 处裸 `alert` 清零。
+- **R6 容器来源**：除 `main()` 的裸 `#app` 兜底外，还发现**更要害的一处**——
+  `bootstrap()` 原先只看 `#app` 存不存在就判独立态，插件态下会把整棵工作台写进第三方容器
+  且永不挂宿主抽屉。已改为**先判宿主再找容器**。
+- **R7 新守卫**：`check:dom-scope` + 13 例负例测试。**负例逼出守卫自身两个真缺陷**：
+  ① 可选链 `?.` 形态**静默漏报**；② 锚点白名单因取错括号位置而**形同虚设**
+  （真仓当时"通过"只是因为它恰好全走局部变量）——是"0 违规 ≠ 没违规"的活证据。
+- **spec 落库 + 三处过时条文更正**：新建 `frontend/dom-write-scope.md`；
+  更正 `quality-guidelines.md` 的测试基线、作废的 `body:has` 例外声明、
+  `component-guidelines.md` 里指向已删文件的失效表述；`index.md` 标注
+  `component-guidelines.md` 仅余 **135 字节**（上限 32768），**新增内容前必须先拆文件**。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1640118` | fix(host): 弹窗走宿主原生 Popup、删死代码、core 去颜色字面量，新增 DOM 作用域守卫 |
+| `f1f871a` | docs(spec): 落 DOM 写入作用域规范、更正三处过时条文，并同步规则块 v1.3.0 |
+
+### Testing
+
+- [OK] `npm test` **46 文件 / 429 passed / 2 skipped**（基线 44/410/2，+19 例零回退）
+- [OK] 五条静态守卫（含新增 `check:dom-scope`）退出码 0；`npm run build` 通过
+- [OK] 实机 8003 + 8004：插件加载、注入点齐全、`--st-action-synth` 等于宿主 `--SmartThemeQuoteColor`
+      （证明配色已跟随宿主而非写死）、本插件零失败请求（3 个 404 经带 URL 采集确认非本插件）
+- [注意] 仪器自身修了 3 个坑（DocumentFragment 未守卫曾打断 jQuery 的 IIFE 导致整页报错；
+  宿主与插件共用记录上限把插件挤出窗口；`DOMTokenList` 无 owner 致误报）
+
+### Status
+
+[OK] **Completed**（6 条残留，见 prd.md；最关键的是 TT/PT 无法离线安装、ST 两实例未做加载验证）
+
+### Next Steps
+
+- ST 8001/8002 未监听，若需 ST 实机加载验证需先获授权启动实例服务器
+- 跨仓线索：`shujuku-rebuild` 在 8004 加载时弹「数据库已加载！」toastr（用户答复无偏好，未处理）
+- 上轮遗留：L0-16 端口段位表登记（`tavern-harness` 真源）仍需用户确认后走真源同步
