@@ -20,14 +20,14 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 <!-- TRELLIS:END -->
 
-<!-- TAVERN-RULES:START v1.1.0 -->
+<!-- TAVERN-RULES:START v1.2.0 -->
 <!-- 本块由 tavern-harness/scripts/sync_tavern_rules.py 自动生成，请勿手动编辑 -->
-<!-- 真源: tavern-harness · rules/ · 仓群 my-repo · v1.1.0 -->
-<!-- 同步时间: 2026-09-24T14:03:12+08:00 -->
-<!-- 内容哈希: sha256:5fe3b392d4f3d433（仅覆盖规则正文，不含本头部与「项目覆盖」节） -->
+<!-- 真源: tavern-harness · rules/ · 仓群 my-repo · v1.2.0 -->
+<!-- 同步时间: 2026-09-25T16:18:59+08:00 -->
+<!-- 内容哈希: sha256:09ab3bcdfd41d464（仅覆盖规则正文，不含本头部与「项目覆盖」节） -->
 <!-- 覆盖声明: 本仓如需覆盖某条规则，请在文末「项目覆盖」节声明并说明理由 -->
 
-# 统一开发规则（v1.1.0）
+# 统一开发规则（v1.2.0）
 
 > 本块为**自包含全文**，不依赖任何外部路径；由 `tavern-harness` 真源仓同步生成，请勿手动编辑。
 > 适用仓群：**My-repo 仓群（酒馆扩展 / 工具插件）**。
@@ -229,6 +229,30 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 **原因**：8000 六处出厂默认互抢、3000 三方撞车（工具默认 + 系统实占）都是实测形态；且 Dev/Real 实例仅差 1 个端口，端口混乱直接放大误连真实数据的风险（P-11/P-14/P-15）。
 
 **违反后果**：服务按默认配置启动必然失败；或误占实例段端口造成误连真实数据区（不可逆）。
+
+---
+
+### L0-17 Trellis 工程纪律（交付物落点 · 市场源）(MUST) ｜仓群实践（2026-09-25 实证）
+
+**规则**：
+
+**(1) 任务交付物的落点与范围门。** Trellis 管理的仓里，`.gitignore` 普遍排除 `.trellis/tasks/` 与 `.trellis/workspace/`，但**保留** `.trellis/spec/`。因此：
+
+- 任务收口时，**规范条文必须落 `.trellis/spec/`**；任务目录（`prd.md` / `design.md` / `deliverables/` / `research/`）只作工作副本，**不是持久化载体**。
+- **spec 页面必须自包含**（内联条文与 file:line 证据），**不得**写"详见任务目录的 xxx"——那在其他机器上就是悬空引用。
+- 判断"有无改动产品代码"用 **`git status --short` 输出为空**；**不得**用 `git diff --stat` 判断"改动是否只在任务目录"——被忽略的目录**根本不出现在 diff 里**。
+
+**(2) Trellis 市场源须用 SSH 形式。** Trellis 的模板/工作流市场源语法为 `provider:user/repo[/subdir][#ref]`；`gh:` / `github:` 前缀走 `raw.githubusercontent.com`，**对私有仓返回 404**，且其 git 回退（`preferGit`）**仅**对 SSH / 自建 host 触发。故私有仓作市场源必须写成 `git@github.com:<owner>/<repo>`。
+
+**原因**：
+
+- （1）2026-09-25 在 `ST-Delegation-of-authority` 的治理规划收口时实测——`.gitignore` 排除 `.trellis/tasks/`（提交 `4f0193e`「公开 fork 防泄露」），任务目录交付物**不进 git、不推送**，随归档即不可见，与 P-1 同形；且用 `git diff --stat` 做范围门**永远得到空结果**，看起来像"什么都没改"。
+- （2）同日实测：`raw.githubusercontent.com` 本机可达（HTTP 200 / 0.65s），但 `jiozhaoyue/tavern-harness` 为**私有仓**，其 raw 路径返回 **404**；Trellis 源码 `dist/utils/workflow-resolver.js` 的 `parseRegistrySource` 对 `gh:` 走 HTTP，**不自动回退 git**。
+
+**违反后果**：
+
+- （1）成果随任务归档消失（复现 P-1）；或 spec 引用悬空、agent **静默拿不到规范**（P-4 同形）；范围门失效导致误判"没动产品代码"。
+- （2）按 `gh:` 形式配置市场源必然失败，且报错形态是 404 / 需认证，易被误判为网络问题而反复排查。
 
 ## L1 仓群规则 — My-repo（酒馆扩展 / 工具插件形态）
 
@@ -562,6 +586,7 @@ npx vitest run -t "用例名"         # 单条用例
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
+| v1.2.0 | 2026-09-25 | 新增 L0-17「Trellis 工程纪律（交付物落点 · 市场源）」；修正 `ST-shujuku-rebuild` 的记账路径 |
 | v1.1.0 | 2026-09-21 | 首次以「自包含块」形式发布；修正前作过时条目（实例路径、子代理模型）；新增 L0-12「跨宿主插件禁用 Host Bridge」；新增本节「坑与教训」并强制「每条带后果」 |
 
 ## 项目覆盖
