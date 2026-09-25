@@ -95,6 +95,36 @@ document.querySelectorAll('.userBackupButton').forEach((anchor) => {
 
 > **无锚点时不造浮层**：找不到锚点就什么都不做，等 observer 下次触发。**不要**自造右下角浮动按钮之类的非官方挂载点（UI 落点只认官方文档记载的位置）。
 
+### Gotcha：锚点是「按需渲染」的，排查注入时不要只看初始 DOM（2026-09-25 真实误判）
+
+`mountNativeBackupButton` / `mountLukerBackupManagerButton` 的锚点**在页面初始 DOM 中根本不存在**——
+它们在宿主弹层被打开时才由模板渲染出来：
+
+```
+[Luker] #account_button 点击                                 (user.js:3469)
+  └─ openUserProfile() → renderTemplateAsync('userProfile')  → 出现 .userBackupButton
+       └─ 点该原生按钮 → openBackupManager()
+            └─ renderTemplateAsync('userBackupManager')        → 出现 .backupActionRow
+```
+
+真机逐步计数（Dev Luker 8003）：初始 `0 / 0` → 点 `#account_button` 后 `.userBackupButton = 1`、
+注入 **2** → 点原生 `.userBackupButton` 后 `.backupActionRow = 5`、注入 **3**。
+
+**教训**：本仓 2026-09-25 曾因「初始 DOM 里 `[data-st-zip-injected="1"]` 为 0」而把注入判为回归，
+实际是**探针点错了入口 id**（点了 `#user-settings-button` / `#sys-settings-button` /
+`#extensionsMenuButton` / `#user-settings-block`，而 Luker 的正确 id 是 `#account_button`）。
+
+**排查注入类问题时的强制步骤**：
+
+1. 先确认**宿主面板已被打开**（记录用了哪个入口 id 与点击链），再查锚点计数；
+2. 初始计数为 0 **不构成回归证据**——它只是说明面板没开；
+3. `#st-zip-converter-menu-item`（扩展菜单注入）恒存在，可作为「注入机制是否整体健康」的对照探针。
+
+**另一处实测细节**：`.backupActionRow` 在 Luker 有 **5 行**，但只有 index 0 含原生 ZIP 下载按钮，
+故 `querySelector('.userBackupManager .backupActionRow')` 取首个**正是预期落点**（已真机确认）。
+另注原生 `.userBackupButton` 自身带 `.disabled` class 但**仍可点击**——`.menu_button.disabled`
+在 Luker 上只是外观态，非 `disabled` 属性语义，不要为它加额外分支。
+
 ---
 
 ## Event Handling & Host Coexistence (事件处理与宿主共存)

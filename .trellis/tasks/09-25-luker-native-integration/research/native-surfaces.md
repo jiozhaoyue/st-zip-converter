@@ -12,9 +12,12 @@
 | 登录门禁 | `enableUserAccounts: true` + `whitelistMode: true`；`/` → **302 `/login`**，匿名 `/api/**` **403**，`/csrf-token` 200 |
 | **浏览器直通** | Playwright 持久化上下文 `goto('/')` **无门禁**（未落 `/login`），登录后 `/api/users/me` **200** —— 故 UI E2E 走浏览器路径可行，curl 匿名不可行 |
 | 插件装载 | 已 `git clone` 到 `data/default-user/extensions/st-zip-converter` @ `30c00be`；实测 `#st_zip_converter_settings` / `.st-converter-drawer-app` / `#st-zip-converter-menu-item` **全部就位** |
-| 注入节点计数 | `[data-st-zip-injected="1"]` = **0**，与 Real 8004 一致；但 `#st-zip-converter-menu-item` 存在 → **注入机制本身正常**，仅依赖 `.userBackupButton` 的那两处因宿主面板未打开而未触发 |
+| 注入节点计数 | 初始 `[data-st-zip-injected="1"]` = **0**（与 Real 8004 一致），但**打开宿主面板后变为 3**——见 §3 的 2026-09-25 澄清 |
 
 > 环境探针：`.trellis/tasks/09-25-luker-native-integration/research/pw-dev-login-probe.cjs`
+>
+> **重要澄清（2026-09-25 阶段 1 已闭环）**：初始计数为 0 **不是回归**。注入锚点是**按需渲染**的，
+> 初始 DOM 里根本不存在；必须先把宿主面板打开。详见 §3。
 
 ## 1. 本插件当前已用的宿主端点（`grep -rhoE "/api/..." src/ index.js`）
 
@@ -41,15 +44,58 @@
 - `openStorageInspector(dataSource)` 的 `dataSource` 必需形状（是否必须传 Luker 的 `RestProvider` 实例）；
 - 该模块 import 后是否会因宿主侧模块图依赖（`./util/...`）而失败。
 
-## 3. 备份管理器（候选对接面 ②）
+## 3. 备份管理器（候选对接面 ②）—— **2026-09-25 阶段 1 已闭环**
 
-| 项 | 事实 |
-| --- | --- |
-| 原生模板 | `public/scripts/templates/userBackupManager.html`（**仅 Luker 有**；ST 检索 `userBackupManager` 无命中） |
-| 锚点 | `.userBackupManager .backupActionRow`（含原生 ZIP 下载按钮）；ST 检索 `backupActionRow` **无命中** |
-| 渲染方式 | 由 `openBackupManager` 经 `callGenericPopup` 动态渲染 |
-| 插件现状 | `mountLukerBackupManagerButton()` 已在锚点前注入入口（`host-bridge.js:1468` 附近） |
-| 账号弹层锚点 | `.userBackupButton` —— **ST 与 Luker 都有**（`templates/userProfile.html` + `admin.html`） |
+### 渲染链路（宿主源码 `funnycups/Luker` `public/scripts/user.js`）
+
+```
+$('#account_button').on('click')            user.js:3469
+  └─ openUserProfile()                       user.js:2350
+       └─ renderTemplateAsync('userProfile')          ← .userBackupButton 在此模板
+            └─ .userBackupButton click             user.js:2372
+                 └─ openBackupManager(handle, cb)  user.js:1136/2378
+                      └─ renderTemplateAsync('userBackupManager')  ← .backupActionRow 在此模板
+```
+
+### 真机逐步取证（Dev Luker 8003，`pw-probe-backup-anchors.cjs`）
+
+| 步骤 | `.userBackupButton` | `.userBackupManager` | `.backupActionRow` | 插件注入节点 |
+| --- | --- | --- | --- | --- |
+| 初始 | 0 | 0 | 0 | **0** |
+| 点 `#account_button` | 1 | 0 | 0 | **2**（`…-native-btn` + `…-quick-fetch`） |
+| 再点原生 `.userBackupButton` | 1 | 1 | 5 | **3**（+ `…-luker-manager-btn`） |
+
+注入节点结构逐项符合 `makeHostButton` 契约：
+`className = "menu_button menu_button_icon interactable"`、子节点 `[I, SPAN]`、
+图标 `fa-fw fa-solid fa-right-left`、文案「数据包互转」、
+且 `…-native-btn` 的 `previousElementSibling` 正是 `.userBackupButton`（兄弟位幂等约定成立）。
+
+### 落点确认（`.backupActionRow` 有 5 行，取首个是否正确）
+
+| index | 文本 | 含原生 ZIP 下载 | 我方注入 |
+| --- | --- | --- | --- |
+| **0** | 数据包互转 / 下载备份 ZIP | **是** | **是**（第一个子节点） |
+| 1 | 选择 ZIP 恢复备份 | 否 | 否 |
+| 2 | 打开局域网同步 | 否 | 否 |
+| 3 | 创建迁移链接 / 复制链接 | 否 | 否 |
+| 4 | 从链接迁移 | 否 | 否 |
+
+→ `querySelector('.userBackupManager .backupActionRow')` **取首个即预期落点**，注释原本的判断成立。
+
+### 结论（回答 T2 遗留项）
+
+**T2 的「注入未生效」结论作废，且不是回归**：锚点是**按需渲染**的，初始 DOM 中不存在。
+T2 探针点击的是 `#user-settings-button` / `#sys-settings-button` / `#extensionsMenuButton` /
+`#user-settings-block` —— 在 Luker 上**均非正确入口**，正确 id 是 **`#account_button`**。
+换对入口后注入**全部正常**（3 个节点）。
+
+### 附带观察
+
+- 原生 `.userBackupButton` 自身带 `disabled` class（`userBackupButton menu_button menu_button_icon interactable disabled`），
+  但仍可正常点击打开管理器——`.menu_button.disabled` 在 Luker 上只是外观态，非 `disabled` 属性语义。
+  **我方注入按钮不得为该状态做额外处理**。
+- 注入按钮的 `className` 实测含宿主追加的 `interactable`（宿主脚本后加），与工厂写入的
+  `menu_button menu_button_icon` 不冲突，单测断言用的是「工厂产出快照」而非宿主运行期最终态——二者不矛盾。
 
 ## 4. 扩展管理器（候选对接面 ③）
 

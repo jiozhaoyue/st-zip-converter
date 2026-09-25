@@ -6,20 +6,23 @@
 
 ## 阶段 0 · 基线固化
 
-- [ ] 0.1 基线：`npm test`（当前 39 文件 / 333 passed / 2 skipped）+ 三守卫全绿
-- [ ] 0.2 Dev 8003 起实例（`Instance/Dev/Luker`，config 已配 8003）：`NODE_ENV=production node server.js`，起效约 26s
-- [ ] 0.3 Dev 插件按 Git 装载：`git clone` 至 `data/default-user/extensions/st-zip-converter` 并 checkout 本任务分支
-- [ ] 0.4 采集改造前 E2E 基线（`pw-final-verify.cjs` 指向 8003）：抽屉读数 270 节点 / 29 按钮 / 3 可见 / 0 `<details>` / 5 `.inline-drawer`
+- [x] 0.1 基线：`npm test` **39 文件 / 333 passed / 2 skipped** + 三守卫（`check:css-scope` / `check:dom-injection` / `check:template-source`）全绿
+- [x] 0.2 Dev 8003 起实例：`NODE_ENV=production node server.js`（`Instance/Dev/Luker`，config 显式 `port: 8003`）；实测起效约 **26s**（含 webpack 编译前端库），**轮询探活要留够时间**
+- [x] 0.3 Dev 插件按 Git 装载：`git clone` 至 `data/default-user/extensions/st-zip-converter`（origin 与 Real 一致）
+- [x] 0.4 改造前 E2E 基线（`pw-final-verify.cjs` → `LUKER_URL=https://127.0.0.1:8003`）：抽屉读数 **270 节点 / 29 按钮 / 3 可见 / 0 `<details>` / 5 `.inline-drawer`**，与 8004 逐项一致
+      - 附带发现并修复：该脚本往返断言的 `popup` 选择器自首次运行起就是坏的（见 1.6）
 
-## 阶段 1 · ② 备份管理器真机取证（R2，先取证后改码）
+## 阶段 1 · ② 备份管理器真机取证（R2）—— **已闭环，结论 (a)**
 
-- [ ] 1.1 写 `research/pw-probe-backup-anchors.cjs`：枚举 Dev 8003 页面上所有可点击入口，逐步展开，定位 `.userBackupButton` / `.userBackupManager .backupActionRow` 的真实出现条件
-- [ ] 1.2 记录**进入路径**（点哪些元素、先后顺序、是否需要先登录/切换页面）
-- [ ] 1.3 结论二选一，均须落盘 `research/`：
-  - (a) 锚点存在 → 记录路径，实机确证注入按钮可见
-  - (b) 锚点在该宿主版本不存在 → 记录结论，把该注入点标为**宿主版本相关**
-- [ ] 1.4 依结论修正 `mountNativeBackupButton` / `mountLukerBackupManagerButton` 的锚点假设与注释（R2.2）
-- [ ] 1.5 验证：`npm test` 全绿（`test/host-button-factory.test.js` 的契约不回归）
+- [x] 1.1 `research/pw-probe-backup-anchors.cjs`：按宿主源码推导的路径逐步点击并逐层断言
+- [x] 1.2 进入路径已记录：`#account_button`（`user.js:3469`）→ `openUserProfile()`（:2350）→ `renderTemplateAsync('userProfile')` → 点原生 `.userBackupButton`（:2372）→ `openBackupManager()`（:1136）→ `renderTemplateAsync('userBackupManager')`
+- [x] 1.3 **结论 (a) 锚点存在**：初始 0 → 点 `#account_button` 后 `.userBackupButton = 1` / 注入 **2** → 点原生备份按钮后 `.backupActionRow = 5` / 注入 **3**
+      - **T2 的「注入未生效」结论作废且非回归**：T2 探针点的 4 个入口 id 在 Luker 上**均非正确入口**（正确是 `#account_button`）
+      - 落点确认：5 个 `.backupActionRow` 中只有 index 0 含原生 ZIP 下载按钮，`querySelector` 取首个**正是预期落点**
+- [x] 1.4 修正两处注入函数的注释：写明「锚点按需渲染、初始 DOM 不存在」与各自渲染链路、入口 id、落点依据（R2.2）
+- [x] 1.5 验证：`npm test` 39 文件 / 333 passed / 2 skipped；三守卫通过
+- [x] 1.6 修复 `pw-final-verify.cjs` 的往返断言选择器（改用 `document.querySelector('.popup-button-cancel')`）；Dev 实测取消按钮文案「否」→ 返回 `0` → 适配器映射 `false` 语义正确
+- [x] 1.7 沉淀 spec：`component-guidelines.md` 的 UI Mounting 段新增 **Gotcha：锚点是「按需渲染」的**（含强制排查步骤，防止同类误判重演）
 
 ## 阶段 2 · ① 存储配额接原生 Inspector（R1）
 

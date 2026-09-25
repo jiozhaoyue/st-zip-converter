@@ -64,7 +64,13 @@
 
 - [ ] ① `#btn-storage-inspector` 在 Dev 8003 上点击可唤起 Luker 原生 Inspector（实机证据）；模块不可用时按钮保持隐藏（有测试或实机反例）。
 - [ ] ① `openStorageInspector` 的 `dataSource` 形状有取证结论（或明确记录「未能取证，改为 X 方案」）。
-- [ ] ② 真机记录宿主面板进入路径并确证注入按钮可见；确证结论与 `host-bridge.js` 注释一致。
+- [x] ② 真机记录宿主面板进入路径并确证注入按钮可见；确证结论与 `host-bridge.js` 注释一致。
+      **证据（2026-09-25 阶段 1，Dev Luker 8003）**：`research/native-surfaces.md` §3 +
+      `research/pw-probe-backup-anchors.cjs`。进入路径 `#account_button`(`user.js:3469`) →
+      `openUserProfile()`(:2350) → `renderTemplateAsync('userProfile')` → 原生 `.userBackupButton`(:2372) →
+      `openBackupManager()`(:1136) → `renderTemplateAsync('userBackupManager')`。
+      逐步计数：初始 0 → 账号弹层 注入 **2** → 备份管理器 注入 **3**；结构逐项符合 `makeHostButton` 契约。
+      **T2 遗留项结论**：注入本来就在工作，T2 的「未生效」是**入口 id 点错**所致（其探针点的 4 个 id 在 Luker 上均非正确入口）。
 - [ ] ③ `research/` 产出扩展管理可对接面盘点 + 建议清单；**未经用户逐项确认前不得改动既有流程**。
 - [ ] ④ selection 差异以显式数据表表达，且有对应单测断言 ST / Luker / 未知宿主三态。
 - [ ] 全仓宿主能力调用点均可溯源到「`getContext()` 官方路径」或「已注明理由的根绝对路径 import」；无第三类。

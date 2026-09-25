@@ -1424,6 +1424,14 @@ function makeHostButton({ id, icon, label, title, onClick }) {
  * 转换器入口按钮。四个宿主（ST/Luker/TauriTavern/PureTavern）的
  * templates/userProfile.html（账号弹层）与 templates/admin.html（管理面板，
  * 每用户行一个）均渲染该锚点，与扩展设置抽屉共存。
+ *
+ * **锚点是「按需渲染」的，初始 DOM 里根本不存在**（2026-09-25 真机取证，Dev Luker 8003）：
+ *   · 初始页面查询 `.userBackupButton` → **0 个**，本函数自然什么都不做；
+ *   · 用户点开账号弹层后才出现 1 个 → `watchHostDom` 捕获该变更并注入。
+ *   · Luker 的入口 id 是 **`#account_button`**（`user.js:3469` → `openUserProfile()`）；
+ *     ST 侧用另一套 id。**排查「注入没生效」时不要只查初始 DOM，必须先把宿主面板打开**——
+ *     本仓 2026-09-25 曾因只点错入口 id（`#user-settings-button` 等）而误判为回归。
+ *
  * @param {() => void} [onOpen] 打开抽屉后的回调
  * @param {{ onQuickFetch?: () => void }} [opts] onQuickFetch：一键拉取宿主数据包进转换队列
  */
@@ -1476,6 +1484,15 @@ export function mountNativeBackupButton(onOpen, opts = {}) {
  * 由 openBackupManager 动态渲染（callGenericPopup），在动作按钮行
  * (.backupActionRow，含原生 ZIP 下载按钮) 前插入转换器入口。
  * 仅 Luker 存在该锚点，其余宿主自然无操作。
+ *
+ * **渲染链路与落点（2026-09-25 真机取证，Dev Luker 8003）**：
+ *   账号弹层里的**原生** `.userBackupButton` 被点击 → `user.js:1136 openBackupManager()`
+ *   渲染本弹层。故本锚点**必须先把账号弹层打开再点原生备份按钮**才会出现。
+ *   `.backupActionRow` 实测有 **5 行**，但只有 **index 0** 含原生 ZIP 下载按钮
+ *   （其余为「选择 ZIP 恢复」「局域网同步」「创建迁移链接」「从链接迁移」），
+ *   因此 `querySelector('.userBackupManager .backupActionRow')`（取首个）**正是预期落点**，
+ *   真机确认注入按钮即 row 0 的第一个子节点。
+ *
  * @param {() => void} [onOpen]
  */
 export function mountLukerBackupManagerButton(onOpen) {
