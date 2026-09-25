@@ -64,6 +64,20 @@ describe('单一模板源守卫', () => {
     expect(html).not.toContain('host-export-card');
     expect(html).not.toContain('btn-clear-workspace');
   });
+
+  it('死开关不得复活：#incremental-mode-check 已移除（T4 取证确认其值从不被读取）', async () => {
+    const [html, template] = await Promise.all([
+      readFile(new URL('../index.html', import.meta.url), 'utf8'),
+      readFile(new URL('../src/ui/workbench-template.js', import.meta.url), 'utf8'),
+    ]);
+
+    // 它曾是一个「勾了却无任何行为」的复选框，且与「差量补丁」及恢复写入的
+    // mode:'merge' 三者撞名。三个位置（模板 / REQUIRED_TEMPLATE_IDS / index.js 绑定）
+    // 都已清除；任一复活都说明消歧被回退。
+    expect(template).not.toContain('incremental-mode-check');
+    expect(html).not.toContain('incremental-mode-check');
+    expect(REQUIRED_TEMPLATE_IDS).not.toContain('incremental-mode-check');
+  });
 });
 
 describe('三入口渲染一致性（R8.2 · 独立态 / 插件抽屉态 / 模态态）', () => {

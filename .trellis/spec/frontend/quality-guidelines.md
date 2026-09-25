@@ -135,7 +135,7 @@ grep -rn "trustedStaticMarkup(" src/ index.js
 因此结构改动**只需改一处**，但必须：
 
 1. 跑 `npm run check:template-source`（会同时校验 `index.html` 不含业务节点、模板含全部必需节点）；
-2. 跑 `test/single-template-source.test.js` 的三态一致性断言（三态各产出全部 41 个必需节点）；
+2. 跑 `test/single-template-source.test.js` 的三态一致性断言（三态各产出全部必需节点，数目由 `REQUIRED_TEMPLATE_IDS` 决定）；
 3. 若新增/删除业务节点，同步更新 `scripts/single-template-source.js` 的 `REQUIRED_TEMPLATE_IDS`——
    **不更新清单等于守卫失效**。
 

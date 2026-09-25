@@ -1,5 +1,10 @@
 # 工作台两块式重构 + 宿主导出修复 + 主题配色 实施计划
 
+> ⚠ **历史存档（2026-09-07）——不是现行规范。** 该计划已执行完毕，且此后结构又经过
+> 分区式与单一模板源两轮演进；文中列出的「关键 id」清单已过期
+> （如 `incremental-mode-check` 已于 `09-25-transfer-pack-optimize` 移除）。
+> **现行约定以 `.trellis/spec/frontend/*.md` 为准。**
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 修复宿主导出 `convert: target 必须是 st|l|tt|pt 之一` 报错，把工作台重构为两块式（状态+数据包区 / 统一选项+执行区），配色完全继承酒馆主题并根除写死色值。

@@ -503,7 +503,8 @@ index.html（骨架，约 22 行）
 
 `test/single-template-source.test.js` 用 `it.each` 对三态各跑一遍，断言：
 
-1. 三态均产出全部 **41 个**必需业务节点 id（清单源：`scripts/single-template-source.js` 的 `REQUIRED_TEMPLATE_IDS`）→ `missing` 必须为空数组；
+1. 三态均产出全部必需业务节点 id（清单源：`scripts/single-template-source.js` 的 `REQUIRED_TEMPLATE_IDS`，
+   **节点数由该数组决定，本文件不写死数字**）→ `missing` 必须为空数组；
 2. 折叠区为宿主原生 `inline-drawer`，且**不得**回退到 `<details>`；
 3. 三态的分支差异被**正向断言**锁死：`isModal` 才有 `btn-close-converter-modal`、`isStandalone` 没有；`isDrawer` 才不出 `class="app-header"`、才有 `btn-storage-inspector`。
 

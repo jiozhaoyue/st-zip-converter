@@ -173,7 +173,7 @@ st-zip-converter/
 
 - 复用宿主原生类（`.inline-drawer` / `.menu_button` / `.text_pole` / `.checkbox_label` / `.extension_block`），图标统一 Font Awesome（`fa-solid fa-...`），无 emoji。
 - 徽标组按模式**只渲染一份**（抽屉模式在 `status-row`，独立/模态在 `header`）——历史上两处同时渲染导致重复 id，第二份 `#env-badge` 永远停在「检测中」。
-- **三态只允许三处分支差异**：模态多 `#btn-close-converter-modal`；抽屉不出 `app-header`、多 `#status-row` 与 `#btn-storage-inspector`。业务节点集合三态必须一致，由 `test/single-template-source.test.js` 机器断言（各 41 个必需节点）。
+- **三态只允许三处分支差异**：模态多 `#btn-close-converter-modal`；抽屉不出 `app-header`、多 `#status-row` 与 `#btn-storage-inspector`。业务节点集合三态必须一致，由 `test/single-template-source.test.js` 机器断言（数目由 `REQUIRED_TEMPLATE_IDS` 决定）。
 
 ### 4. `src/ui/escape.js`（DOM 注入防线）
 - `escapeHtml()`（覆盖 `& < > " '`，元素上下文与**属性上下文**通用）、`isSafeHttpUrl()`（只放行 http/https）、`trustedStaticMarkup()`（恒等函数，唯一作用是让守卫放行并让 reviewer 一眼看完全部豁免点：`grep -rn "trustedStaticMarkup(" src/ index.js`）。

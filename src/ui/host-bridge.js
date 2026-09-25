@@ -1,6 +1,6 @@
 /**
  * 宿主环境桥接与增量流控模块 (SillyTavern & Luker)
- * 负责环境嗅探、CSRF Token 获取、细粒度备份拉取、增量恢复写入与多包增量合并。
+ * 负责环境嗅探、CSRF Token 获取、细粒度备份拉取、恢复写入（合并/覆盖）与多包合并。
  */
 
 import { logger } from '../core/logger.js';
@@ -672,7 +672,7 @@ export async function fetchHostBackup(platform, selection = null, { onPhase, tas
 
 /**
  * 直接调用恢复 API 将目标包恢复/写入到当前酒馆宿主
- * 支持增量合并 (mode: 'merge') 与全量覆盖 (mode: 'overwrite')
+ * 支持合并写入 (mode: 'merge') 与覆盖写入 (mode: 'overwrite')
  *
  * 有界等待（L1-MR-7）：凭证请求走短超时；响应体读取走 `readJsonBounded`；
  * 上传超时由 `UPLOAD_TIMEOUT_MS` 配置（默认 `0` = 不设硬超时，见 design.md §2.2）。
@@ -714,7 +714,9 @@ export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st', 
 
 /** `restoreToHost` 的实现体（互斥标志由外层 `try/finally` 保证复位）。 */
 async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }) {
-  logger.info(`准备向宿主 [${platform.toUpperCase()}] 恢复写入数据包 (模式: ${mode === 'merge' ? '增量合并' : '全量覆盖'})...`);
+  // 中文名刻意避开「增量合并」——该词曾是 J 区一个从不生效的开关名，
+  // 与这里的宿主端 merge 语义完全无关。此处语义是「把包并入现有数据」vs「整体覆盖」。
+  logger.info(`准备向宿主 [${platform.toUpperCase()}] 恢复写入数据包 (模式: ${mode === 'merge' ? '合并写入' : '覆盖写入'})...`);
   const [token, handle] = await Promise.all([getCsrfToken({ signal }), getHandle({ signal })]);
 
   const formData = new FormData();
@@ -759,7 +761,7 @@ async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }
     logger.warn('宿主恢复响应体读取失败，无法确认结果（请求已发出）:', err);
     return { success: false, unconfirmed: true, reason: '响应体不可解析' };
   }
-  logger.success(`数据包恢复至当前用户 (${handle}) 成功！模式: ${mode === 'merge' ? '增量合并' : '全量覆盖'}`);
+  logger.success(`数据包恢复至当前用户 (${handle}) 成功！模式: ${mode === 'merge' ? '合并写入' : '覆盖写入'}`);
 
   // 检查包内扩展清单 _convert/extensions-manifest.json，据归一后的状态决定是否自动呼出安装器
   try {
@@ -1260,6 +1262,16 @@ export async function restoreToLuker(zipBlob, options = {}) {
 }
 
 /**
+ * ⚠ **未接线**：当前**无任何调用方**。
+ *
+ * 本函数是 J 区曾有过的「增量合并」复选框本该接的实现。该复选框经 2026-09-25 全仓取证
+ * 确认**从不生效**（其 `.checked` 无任何读取点；全仓亦无泛读复选框的代码与状态持久化），
+ * 已于任务 `09-25-transfer-pack-optimize` 移除，消除「勾了却没反应」的误导，
+ * 同时避免它与「差量补丁」及恢复写入的 `mode: 'merge'` 三者撞名。
+ *
+ * **若要上线「把入包合并进基准包」的能力**：从这里接线，但需先与用户确定语义
+ * （合并哪些类目、同名条目如何取舍、与「差量补丁」的关系），**不要直接复活那个开关**。
+ *
  * 对两个 Zip 数据包执行增量合并 (Incremental Archive Merge)
  * 尤其适合 TauriTavern / SillyTavern 数据包的差量累加与历史补丁融合
  * @param {Blob|File|string} baseArchive 基准包 (原有包)

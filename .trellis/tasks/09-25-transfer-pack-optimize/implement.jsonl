@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Single Template Source Mandate 是模板改动的硬约束来源（结构只改一处 + 同步 REQUIRED_TEMPLATE_IDS）；Host Capability Acquisition 说明宿主契约值不得擅改"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "三守卫与验证矩阵、禁止模式（含零解释性文案与纯逻辑可单测约定）；模板节点数变更须同步守卫与文档"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "三形态入口与分层边界确认改动落点（模板/index.js/splitter 注释），src/core 算法语义不动"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "恢复上传端点契约（/api/users/restore 的 mode/incremental 字段）——改名仅限中文展示名，协议值不得动"}

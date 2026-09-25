@@ -12,6 +12,13 @@ import { zipIo } from './zip-io.js';
 import * as zip from '../vendor/zip.js';
 import { resolveFilename } from './filename-template.js';
 
+/**
+ * `splitArchiveEntries()` 的 **API 默认参数**——仅当调用方不传 `thresholdMB` 时生效。
+ *
+ * ⚠ 它**不是 UI 默认值**：`index.js` 恒显式传入由 `#split-input` 求出的 `splitMb`，
+ * 而该输入框**默认为空 = 不分卷**。故从 UI 路径出发本常量**不可达**，
+ * 不要把它读成「界面默认 100MB」（2026-09-25 取证澄清）。
+ */
 export const DEFAULT_THRESHOLD_MB = 100;
 export const SAFETY_MARGIN = 0.95; // 预留 5% 缓冲杜绝因压缩表头/元数据导致超限
 

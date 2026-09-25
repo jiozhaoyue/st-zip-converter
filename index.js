@@ -3,7 +3,7 @@
  * 全平台跨酒馆数据包工作站：
  * 1. 宿主酒馆直接细粒度导出 (对齐 ST / Luker 分类) 与直出跨平台目标格式
  * 2. 外部数据包互转、动作规划完全扫描与单项穿透
- * 3. 闭环一键还原/写入宿主 (支持增量合并与全量覆盖)
+ * 3. 闭环一键还原/写入宿主 (支持合并写入与覆盖写入)
  * 4. 底部实时抽屉式日志控制台与全屏幕/移动端极致响应式适配
  */
 
@@ -187,7 +187,6 @@ async function main(appRoot = document.getElementById('app')) {
   const includeBackupsCheck = document.getElementById('include-backups-check');
   const includeCacheCheck = document.getElementById('include-cache-check');
   const includePrivateCheck = document.getElementById('include-private-check');
-  const incrementalModeCheck = document.getElementById('incremental-mode-check');
 
   const compressionSelect = document.getElementById('compression-select');
   const filenameTemplateInput = document.getElementById('filename-template-input');
@@ -246,12 +245,12 @@ async function main(appRoot = document.getElementById('app')) {
     const extEl = document.getElementById('fold-summary-extension');
     if (extEl) extEl.textContent = getExtensionMode() === 'full' ? '完整离线包' : '轻量清单';
 
+    // 增量与差量：仅「差量补丁」是生效项（原「增量合并」开关经取证确认从不生效，已于 T4 移除）。
+    // 该区必选项是基准 ZIP，故状态读数必须体现基准是否已就绪——否则用户勾了也不知道能不能跑。
     const incEl = document.getElementById('fold-summary-incremental');
     if (incEl) {
-      const parts = [];
-      if (document.getElementById('incremental-mode-check')?.checked) parts.push('增量合并');
-      if (document.getElementById('host-incremental-export')?.checked) parts.push('差量补丁');
-      incEl.textContent = parts.join(' · ');
+      const deltaOn = document.getElementById('host-incremental-export')?.checked;
+      incEl.textContent = !deltaOn ? '' : (currentBaseZip ? '差量补丁 · 基准已就绪' : '差量补丁 · 缺基准');
     }
 
     const fnEl = document.getElementById('fold-summary-filename');
@@ -753,6 +752,8 @@ async function main(appRoot = document.getElementById('app')) {
         refreshBaseArchiveOptions();
         updateBaseZipStatusUI();
       }
+      // 折叠摘要须随开关刷新（原实现漏了这一步，摘要会停留在旧值）
+      updateFoldSummaries();
     });
   }
 
@@ -1185,7 +1186,7 @@ async function main(appRoot = document.getElementById('app')) {
 
       try {
         btnConfirmRestore.disabled = true;
-        view.setProgress(15, `正在恢复写入数据包至宿主 (${mode === 'merge' ? '增量合并' : '全量覆盖'})...`);
+        view.setProgress(15, `正在恢复写入数据包至宿主 (${mode === 'merge' ? '合并写入' : '覆盖写入'})...`);
         logger.info(`向宿主发起数据包恢复请求: ${fileToRestore.name}, 模式: ${mode}`);
 
         // `restoreToHost` 的同步段会置位在途标志，故先拿到 promise 再刷新，
@@ -1310,9 +1311,6 @@ async function main(appRoot = document.getElementById('app')) {
   }
   if (includePrivateCheck) {
     includePrivateCheck.addEventListener('change', () => refreshPlan());
-  }
-  if (incrementalModeCheck) {
-    incrementalModeCheck.addEventListener('change', () => refreshPlan());
   }
 
   // 9. 开始转换外部 Zip

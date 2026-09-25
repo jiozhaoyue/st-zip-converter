@@ -122,10 +122,10 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false, isStandalo
         <label class="output-field">
           <small>压缩级别</small>
           <select id="compression-select" class="text_pole">
-            <option value="5" selected>5</option>
-            <option value="0">0</option>
-            <option value="1">1</option>
-            <option value="9">9</option>
+            <option value="0">存储</option>
+            <option value="1">快速</option>
+            <option value="5" selected>标准</option>
+            <option value="9">最大</option>
           </select>
         </label>
         <label class="output-field">
@@ -204,10 +204,6 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false, isStandalo
         </div>
         <div class="inline-drawer-content" style="display: none;">
           <div class="wb-checks">
-            <label class="checkbox_label flex-container">
-              <input type="checkbox" id="incremental-mode-check">
-              <span>增量合并</span>
-            </label>
             <label class="checkbox_label flex-container">
               <input type="checkbox" id="host-incremental-export">
               <span>差量补丁</span>
@@ -310,11 +306,11 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false, isStandalo
         <div class="restore-mode-group">
           <label class="checkbox_label flex-container">
             <input type="radio" name="restore-mode" value="merge" checked>
-            <div class="radio-text"><strong>增量合并</strong></div>
+            <div class="radio-text"><strong>合并写入</strong></div>
           </label>
           <label class="checkbox_label flex-container">
             <input type="radio" name="restore-mode" value="overwrite">
-            <div class="radio-text"><strong>全量覆盖</strong></div>
+            <div class="radio-text"><strong>覆盖写入</strong></div>
           </label>
         </div>
         <div class="flex-container" style="justify-content: flex-end; gap: 8px;">

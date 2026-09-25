@@ -59,7 +59,6 @@ export const REQUIRED_TEMPLATE_IDS = [
   'include-backups-check',
   'include-cache-check',
   'include-private-check',
-  'incremental-mode-check',
   'keep-dev-files-check',
   'log-console-mount',
   'prune-builtin-check',
