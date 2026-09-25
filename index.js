@@ -1297,9 +1297,14 @@ async function main(appRoot = document.getElementById('app')) {
       restoreOne: async ({ id }) => {
         const target = targets.find((t) => t.id === id);
         try {
-          return await restoreToHost(target.blob, {
+          const res = await restoreToHost(target.blob, {
             mode, platform: host.platform, timeoutMs: UPLOAD_TIMEOUT_MS,
           });
+          // 宿主 200 但没写任何条目：不计成功（否则整批会谎报「恢复完成」）
+          if (res && res.nothingRestored) {
+            throw new Error('宿主未写入任何条目（该类目可能不被宿主接受）');
+          }
+          return res;
         } catch (err) {
           // 宿主根本没这个能力：后续每一项都会同样失败，立即停批（避免刷出 N 条相同失败）
           if (err?.code === 'RESTORE_UNSUPPORTED' && activeBatch) activeBatch.abort();
@@ -1383,6 +1388,11 @@ async function main(appRoot = document.getElementById('app')) {
           logger.warn(`恢复请求已发出，但响应体不可解析（${restoreResult.reason || '未知原因'}）——`
             + '宿主可能仍在处理，请稍后核对数据。');
           alert('恢复请求已发出，但未能确认结果。\n宿主可能仍在处理，请稍后核对数据。');
+        } else if (restoreResult && restoreResult.nothingRestored) {
+          // 宿主返回 200 但一个条目都没写：如实报告，不得说「成功」
+          view.setProgress(100, '宿主未写入任何条目');
+          logger.warn('宿主返回成功但 restoredCount=0——请核对包的类目是否被宿主接受');
+          alert('宿主未写入任何条目。\n请核对数据包内容是否包含宿主支持的类目。');
         } else {
           view.setProgress(100, `恭喜！数据包已成功恢复写入到当前酒馆用户！`);
           logger.success(`恢复完成！宿主酒馆数据已更新。`);

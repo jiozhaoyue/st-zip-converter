@@ -441,6 +441,42 @@ describe('restoreToHost：端点候选解析（R1.3 / R1.4 / R1.6）', () => {
     await restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'luker' });
     expect(getRestoreCapability()).toBe('available');
   });
+
+  it('payload 必带 selection 全类目（不传时 Luker 把条目全部跳过 → 静默空恢复）', async () => {
+    let captured = null;
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      const u = String(url);
+      if (u.includes('csrf-token')) return { ok: true, status: 200, json: async () => ({ token: 't' }) };
+      if (u.includes('/api/users/me')) return { ok: true, status: 200, json: async () => ({ handle: 'u' }) };
+      captured = init.body;
+      return { ok: true, status: 200, json: async () => ({ restoredCount: 3 }) };
+    });
+    const { restoreToHost } = await import('../src/ui/host-bridge.js');
+    await restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'luker' });
+
+    const selection = JSON.parse(captured.get('selection'));
+    expect(Object.keys(selection)).toHaveLength(10);
+    expect(selection.lorebooks).toBe(true);
+    expect(selection.settings).toBe(true);
+    expect(captured.get('handle')).toBe('u');
+    expect(captured.get('mode')).toBe('merge');
+  });
+
+  it('restoredCount=0 且 skipped>0 时标记 nothingRestored（200 不等于有写入）', async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.includes('csrf-token')) return { ok: true, status: 200, json: async () => ({ token: 't' }) };
+      if (u.includes('/api/users/me')) return { ok: true, status: 200, json: async () => ({ handle: 'u' }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ restoredCount: 0, skippedCount: 2, failedCount: 0 }),
+      };
+    });
+    const { restoreToHost } = await import('../src/ui/host-bridge.js');
+    const result = await restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'luker' });
+    expect(result.nothingRestored).toBe(true);
+  });
 });
 
 describe('getCsrfToken：官方上下文优先（R1.2）', () => {

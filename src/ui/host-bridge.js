@@ -854,6 +854,11 @@ async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }
   formData.append('handle', handle);
   formData.append('mode', mode);
   formData.append('incremental', mode === 'merge' ? 'true' : 'false');
+  // **必须显式传类目选择**：2026-09-25 Dev Luker 实测——不传 `selection` 时宿主按
+  // 「未选任何类目」处理，把包内全部条目记为 `path_not_in_selected_categories`，
+  // 返回 200 + `restoredCount: 0` 的**静默空恢复**（包内 manifest 的 selection 不被解析，
+  // 见 `research/host-endpoint-facts.md`）。故这里恒传全类目，与「把包并入现有数据」语义一致。
+  formData.append('selection', JSON.stringify(FULL_SELECTION));
 
   // 端点按平台候选序解析，仅 404/405 回退（见 postRestoreWithFallback 的硬约束）
   const response = await postRestoreWithFallback(formData, {
@@ -886,6 +891,18 @@ async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }
     // 解析失败与体读取超时/取消都归「未确认」：请求已发出，但结果无从得知
     logger.warn('宿主恢复响应体读取失败，无法确认结果（请求已发出）:', err);
     return { success: false, unconfirmed: true, reason: '响应体不可解析' };
+  }
+  // 200 不等于「有写入」：宿主可能把全部条目跳过。如实上报条目计数，
+  // 避免「点了恢复 → 显示成功 → 其实一个条目都没写」的假成功（与审计 R-15 同源）。
+  if (typeof result.restoredCount === 'number') {
+    if (result.restoredCount === 0 && (result.skippedCount || 0) > 0) {
+      result.nothingRestored = true;
+      logger.warn(`宿主未写入任何条目：restored ${result.restoredCount} / skipped ${result.skippedCount}`
+        + '（请核对包的类目是否被宿主接受）');
+    } else {
+      logger.info(`宿主恢复条目计数：restored ${result.restoredCount}`
+        + `${typeof result.skippedCount === 'number' ? ` / skipped ${result.skippedCount}` : ''}`);
+    }
   }
   logger.success(`数据包恢复至当前用户 (${handle}) 成功！模式: ${mode === 'merge' ? '合并写入' : '覆盖写入'}`);
 
