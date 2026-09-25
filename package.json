@@ -24,6 +24,7 @@
     "test": "vitest run",
     "check:css-scope": "node scripts/css-scope.js",
     "check:dom-injection": "node scripts/dom-injection-guard.js",
+    "check:template-source": "node scripts/single-template-source.js",
     "gen-fixtures": "node fixtures/gen.js"
   }
 }

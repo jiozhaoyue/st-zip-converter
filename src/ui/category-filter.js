@@ -386,8 +386,8 @@ export function invertSelection() {
 export function applyPreset(preset) {
   currentExcludedPaths.clear();
 
-  const linkCheck = document.getElementById('link-char-chats-check');
-  const isLinked = linkCheck ? linkCheck.checked : true;
+  // 角色与聊天智能联动已恒开（用户裁决 6：移除该复选框，行为保留）
+  const isLinked = true;
 
   availableCategories.forEach((cat) => {
     if (preset === 'chars') {

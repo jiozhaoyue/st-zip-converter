@@ -93,6 +93,58 @@ async function main(appRoot = document.getElementById('app')) {
   let currentFileHandle = 'default-user';
   let currentHostHandle = 'default-user';
   let lastConvertedBlob = null;
+
+  // ── 动作按钮契约（用户裁决 8 + 「怎么解耦复用按钮」）─────────────────────
+  // 三枚按钮对应两条并行流程，可同时可见：
+  //   · 宿主拉取 → 转换 → 恢复（插件内一站式）
+  //   · 上传暂存 → 清理 → 转换 / 导出（源码 webui 模式）
+  // 可见性与可用性由本组函数**唯一**求值；禁止在业务分支里散落地写
+  // btnXxx.disabled / btnXxx.style.display（历史上有 14 处分散写点）。
+  let workbenchBusy = false;
+
+  /**
+   * 计算三枚动作按钮的可见性与可用性（纯函数）
+   * @param {{isHost: boolean, hasSource: boolean, hasArtifact: boolean,
+   *          isTaskRunning: boolean, isRestoreInFlight: boolean}} s
+   * @returns {{fetch: {visible: boolean, enabled: boolean},
+   *            convert: {visible: boolean, enabled: boolean},
+   *            restore: {visible: boolean, enabled: boolean}}}
+   */
+  function computeActionAvailability(s) {
+    return {
+      fetch: { visible: s.isHost, enabled: !s.isTaskRunning },
+      convert: { visible: true, enabled: s.hasSource && !s.isTaskRunning },
+      restore: { visible: s.isHost && s.hasArtifact, enabled: !s.isTaskRunning && !s.isRestoreInFlight },
+    };
+  }
+
+  /** 从当前工作台状态收集求值输入 */
+  function collectActionState() {
+    return {
+      isHost: host.isPlugin,
+      hasSource: !!currentFile,
+      hasArtifact: !!lastConvertedBlob,
+      isTaskRunning: workbenchBusy,
+      isRestoreInFlight: isRestoreInFlight(),
+    };
+  }
+
+  /**
+   * 三枚动作按钮状态的唯一应用点。
+   * 用 getElementById 动态查询而非闭包变量：btnHostFetch 在本函数之后才声明，
+   * 提前绑定会踩 TDZ。
+   */
+  function applyActionAvailability() {
+    const a = computeActionAvailability(collectActionState());
+    const apply = (el, spec) => {
+      if (!el) return;
+      el.style.display = spec.visible ? '' : 'none';
+      el.disabled = !spec.enabled;
+    };
+    apply(document.getElementById('btn-convert'), a.convert);
+    apply(document.getElementById('btn-host-fetch'), a.fetch);
+    apply(document.getElementById('btn-restore-luker'), a.restore);
+  }
   let isPlanning = false;
   let pendingRestoreFile = null;
   let currentBaseZip = null; // { name: string, blob: Blob, size: number }
@@ -135,7 +187,26 @@ async function main(appRoot = document.getElementById('app')) {
 
   const compressionSelect = document.getElementById('compression-select');
   const filenameTemplateInput = document.getElementById('filename-template-input');
-  const placeholderChips = document.getElementById('placeholder-chips');
+  const splitInput = document.getElementById('split-input');
+
+  /** 智能分包的最小阈值（MB）——数值输入只接受整数且不小于此值 */
+  const MIN_SPLIT_MB = 1;
+
+  /**
+   * 读取智能分包阈值（MB）。
+   * 用户裁决：分包改为只填数值、必须整数、有最小限制（不再用档位下拉）。
+   * 浮点归一（1.5 → 1）；空值 / 0 / 非法 / 小于最小值一律视为不分卷。
+   * @returns {number} 0 表示不分卷
+   */
+  function parseSplitInputMb() {
+    if (!splitInput) return 0;
+    const raw = splitInput.value;
+    if (raw === '' || raw === null) return 0;
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return 0;
+    const asInt = Math.floor(num);
+    return asInt >= MIN_SPLIT_MB ? asInt : 0;
+  }
 
   // 还原模态弹窗元素
   const restoreModalOverlay = document.getElementById('restore-modal-overlay');
@@ -153,15 +224,49 @@ async function main(appRoot = document.getElementById('app')) {
     return chk ? chk.checked : false;
   }
 
+  /**
+   * 刷新各折叠区的摘要读数（状态读数，非说明文案）。
+   * 用户裁决：每一类都可折叠，且标题栏须能判断当前状态，不必展开。
+   */
+  function updateFoldSummaries() {
+    // 垃圾清理：勾选 = 打包该项，未勾选 = 已清理；「剔除原生资产」勾选即为已清理
+    const cleanupEl = document.getElementById('fold-summary-cleanup');
+    if (cleanupEl) {
+      const items = [
+        { id: 'include-backups-check', clearedWhenChecked: false },
+        { id: 'include-cache-check', clearedWhenChecked: false },
+        { id: 'include-private-check', clearedWhenChecked: false },
+        { id: 'prune-builtin-check', clearedWhenChecked: true },
+      ];
+      const cleared = items.filter((it) => {
+        const el = document.getElementById(it.id);
+        if (!el) return false;
+        return it.clearedWhenChecked ? el.checked : !el.checked;
+      });
+      cleanupEl.textContent = cleared.length === items.length
+        ? '全部已清理'
+        : `已清理 ${cleared.length}/${items.length}`;
+    }
+
+    const extEl = document.getElementById('fold-summary-extension');
+    if (extEl) extEl.textContent = getExtensionMode() === 'full' ? '完整离线包' : '轻量清单';
+
+    const incEl = document.getElementById('fold-summary-incremental');
+    if (incEl) {
+      const parts = [];
+      if (document.getElementById('incremental-mode-check')?.checked) parts.push('增量合并');
+      if (document.getElementById('host-incremental-export')?.checked) parts.push('差量补丁');
+      incEl.textContent = parts.join(' · ');
+    }
+
+    const fnEl = document.getElementById('fold-summary-filename');
+    if (fnEl) fnEl.textContent = filenameTemplateInput?.value || '';
+  }
+
   document.querySelectorAll('input[name="extension-mode"]').forEach((el) => {
     el.addEventListener('change', () => {
-      document.querySelectorAll('.extension-mode-section label').forEach((lbl) => {
-        const input = lbl.querySelector('input[name="extension-mode"]');
-        if (input) {
-          lbl.style.background = input.checked ? 'rgba(137, 180, 250, 0.08)' : 'rgba(255, 255, 255, 0.03)';
-          lbl.style.borderColor = input.checked ? 'rgba(137, 180, 250, 0.3)' : 'rgba(255, 255, 255, 0.1)';
-        }
-      });
+      // 选中态视觉由 CSS :has(input:checked) 处理，不再写内联色值（禁止硬编码颜色）
+      updateFoldSummaries();
       refreshPlan();
     });
   });
@@ -197,7 +302,8 @@ async function main(appRoot = document.getElementById('app')) {
     if (!sourceRecords || sourceRecords.length === 0) return;
     const target = targetSelect ? targetSelect.value : 'pt';
     const totalCount = sourceRecords.length;
-    btnConvert.disabled = true;
+    workbenchBusy = true;
+    applyActionAvailability();
     view.setProgress(0, `正在开始批量转换 ${totalCount} 个数据包...`);
     logger.info(`启动批量转换队列，共 ${totalCount} 个包，目标格式: ${target.toUpperCase()}`);
 
@@ -252,7 +358,8 @@ async function main(appRoot = document.getElementById('app')) {
     }
 
     view.setProgress(100, `批量队列处理完成：成功 ${completed}/${totalCount} 个包`);
-    btnConvert.disabled = false;
+    workbenchBusy = false;
+    applyActionAvailability();
     await updateWorkspaceUI();
   }
 
@@ -273,7 +380,7 @@ async function main(appRoot = document.getElementById('app')) {
         currentFileId = fileRecord.id;
         currentFileHandle = fileRecord.handle || 'default-user';
 
-        btnConvert.disabled = false;
+        applyActionAvailability();
         if (dropHandler?.setFilename) {
           dropHandler.setFilename(fileRecord.name);
         }
@@ -407,61 +514,9 @@ async function main(appRoot = document.getElementById('app')) {
     });
   }
 
-  // 占位符标签点击智能插入到包名输入框
-  if (placeholderChips && filenameTemplateInput) {
-    // 阻止鼠标点击时失焦，保留用户光标位置
-    placeholderChips.addEventListener('mousedown', (e) => {
-      const btn = e.target.closest('.btn-chip');
-      if (btn) {
-        e.preventDefault();
-      }
-    });
-
-    placeholderChips.addEventListener('click', (e) => {
-      const btn = e.target.closest('.btn-chip');
-      if (!btn) return;
-      const insertVal = btn.getAttribute('data-insert');
-      if (!insertVal) return;
-
-      const input = filenameTemplateInput;
-      let val = input.value || '';
-      const start = input.selectionStart ?? val.length;
-      const end = input.selectionEnd ?? val.length;
-
-      if (start !== end) {
-        // 用户主动划选了部分文本，直接替换选区
-        input.value = val.slice(0, start) + insertVal + val.slice(end);
-        input.setSelectionRange(start + insertVal.length, start + insertVal.length);
-      } else if (val.toLowerCase().endsWith('.zip')) {
-        // 智能插入在 .zip 扩展名前，并按需自动补全连接符 -
-        const base = val.slice(0, -4);
-        const sep = (base.length > 0 && !base.endsWith('-') && !base.endsWith('_')) ? '-' : '';
-        input.value = `${base}${sep}${insertVal}.zip`;
-        const newPos = input.value.length - 4;
-        input.setSelectionRange(newPos, newPos);
-      } else {
-        const sep = (val.length > 0 && !val.endsWith('-') && !val.endsWith('_')) ? '-' : '';
-        input.value = `${val}${sep}${insertVal}`;
-        input.setSelectionRange(input.value.length, input.value.length);
-      }
-      input.dispatchEvent(new Event('input'));
-      input.focus();
-      updateFilenamePreview();
-    });
-  }
-
-  // 快捷预设模板点击一键应用
-  document.querySelectorAll('.btn-tpl-preset').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const tpl = btn.getAttribute('data-tpl');
-      if (tpl && filenameTemplateInput) {
-        filenameTemplateInput.value = tpl;
-        filenameTemplateInput.dispatchEvent(new Event('input'));
-        updateFilenamePreview();
-        refreshPlan();
-      }
-    });
-  });
+  // 占位符 chip 与包名预设按钮已移除（用户裁决 4/6）：
+  // 包名模板的可用占位符由输入框自身的 placeholder 表达，默认模板即默认值，
+  // 不再提供插入按钮与三档预设——它们与输入框三重表达同一件事。
 
   // 1. 刷新数据包区（暂存列表/配额条/待导出区）
   async function updateWorkspaceUI() {
@@ -477,6 +532,8 @@ async function main(appRoot = document.getElementById('app')) {
 
   // 2. 调度完全扫描与动作预测规划
   async function refreshPlan() {
+    // 折叠区摘要与「是否已有源包」无关，须在早退前刷新
+    updateFoldSummaries();
     if (!currentFile || isPlanning) return;
     isPlanning = true;
 
@@ -553,8 +610,8 @@ async function main(appRoot = document.getElementById('app')) {
   // 4. 插件态界面激活与宿主工作台初始化
   const applyPluginUi = (platform) => {
     if (!host.isPlugin) return;
-    const btnHostFetch = document.getElementById('btn-host-fetch');
-    if (btnHostFetch) btnHostFetch.style.display = 'inline-flex';
+    // 按钮可见性/可用性统一由 applyActionAvailability 求值——此处不再单独写 display
+    // （原实现：btn-host-fetch 强制 inline-flex、btn-restore-luker 仅 luker 显示）
 
     // ST 宿主端点不支持 selection：在类目面板头部注入"插件内过滤"提示
     const categoryPanel = document.getElementById('category-panel');
@@ -570,9 +627,8 @@ async function main(appRoot = document.getElementById('app')) {
       hint.style.display = platform === 'st' ? 'block' : 'none';
     }
 
-    if (platform === 'luker' && btnRestoreLuker) {
-      btnRestoreLuker.style.display = 'inline-block';
-    }
+    // 插件态下按钮可用性统一求值（含 btn-restore-luker 的可见性）
+    applyActionAvailability();
     if (targetSelect) {
       // 插件模式注入"宿主原生格式"选项并默认选中（native → 执行时经 hostLayoutCode 归一）
       let nativeOpt = targetSelect.querySelector('option[value="native"]');
@@ -768,7 +824,8 @@ async function main(appRoot = document.getElementById('app')) {
       return;
     }
 
-    if (btnHostFetch) btnHostFetch.disabled = true;
+    workbenchBusy = true;
+    applyActionAvailability();
 
     // 统一类目勾选（与外部转换路径共用同一份 category-filter 状态）
     const selection = getSelectionState();
@@ -916,9 +973,8 @@ async function main(appRoot = document.getElementById('app')) {
       });
 
       // 检查智能分包与原生资产过滤设置（统一控件）
-      const splitSelect = document.getElementById('split-select');
-      const splitVal = splitSelect ? splitSelect.value : 'none';
-      const shouldSplit = splitVal !== 'none';
+      const splitMb = parseSplitInputMb();
+      const shouldSplit = splitMb > 0;
       const pruneBuiltinCheck = document.getElementById('prune-builtin-check');
       const pruneBuiltinAssets = pruneBuiltinCheck ? pruneBuiltinCheck.checked : true;
 
@@ -988,7 +1044,7 @@ async function main(appRoot = document.getElementById('app')) {
 
       // 执行智能增量分卷 (若开启)
       if (shouldSplit) {
-        const thresholdMB = parseInt(splitVal, 10) || 100;
+        const thresholdMB = splitMb;
         view.setProgress(92, `正在按 ${thresholdMB} MB 阈值执行智能独立分包...`);
         logger.info(`启动智能分包引擎: 单包阈值 ${thresholdMB} MB`);
 
@@ -1065,7 +1121,8 @@ async function main(appRoot = document.getElementById('app')) {
         logger.error('宿主拉取过程发生错误', err);
       }
     } finally {
-      if (btnHostFetch) btnHostFetch.disabled = false;
+      workbenchBusy = false;
+      applyActionAvailability();
     }
   }
 
@@ -1172,7 +1229,7 @@ async function main(appRoot = document.getElementById('app')) {
     subTextEl: document.getElementById('drop-sub-text'),
     onFilesReady: async (fileItems) => {
       if (!fileItems || fileItems.length === 0) return;
-      btnConvert.disabled = false;
+      // 按钮可用性在源包入库后统一求值（下方 updateWorkspaceUI 之后）
 
       // 批量存入 IndexedDB
       for (const item of fileItems) {
@@ -1201,12 +1258,13 @@ async function main(appRoot = document.getElementById('app')) {
 
       await updateWorkspaceUI();
       updateFilenamePreview();
+      applyActionAvailability();
       if (currentFile) {
         await refreshPlan();
       }
     },
     onError: (err) => {
-      btnConvert.disabled = true;
+      applyActionAvailability();
       resetCategoryFilter();
       logger.error('文件读取失败', err);
     },
@@ -1253,15 +1311,14 @@ async function main(appRoot = document.getElementById('app')) {
     const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
 
     // 检查智能分包与原生资产过滤设置
-    const splitSelect = document.getElementById('split-select');
-    const splitVal = splitSelect ? splitSelect.value : 'none';
-    const shouldSplit = splitVal !== 'none';
+    const splitMb = parseSplitInputMb();
+    const shouldSplit = splitMb > 0;
     const pruneBuiltinCheck = document.getElementById('prune-builtin-check');
     const pruneBuiltinAssets = pruneBuiltinCheck ? pruneBuiltinCheck.checked : true;
 
     try {
-      btnConvert.disabled = true;
-      if (btnRestoreLuker) btnRestoreLuker.disabled = true;
+      workbenchBusy = true;
+      applyActionAvailability();
       view.setProgress(5, '正在启动异步 Web Worker 线程处理数据包...');
       logger.info(`开始转换外部包: ${currentFile.name} -> ${target.toUpperCase()}`);
 
@@ -1291,7 +1348,7 @@ async function main(appRoot = document.getElementById('app')) {
 
       // 执行智能增量分卷 (若开启)
       if (shouldSplit) {
-        const thresholdMB = parseInt(splitVal, 10) || 100;
+        const thresholdMB = splitMb;
         view.setProgress(95, `正在按 ${thresholdMB} MB 阈值执行智能独立分包...`);
         logger.info(`启动智能分包引擎: 单包阈值 ${thresholdMB} MB`);
 
@@ -1364,19 +1421,18 @@ async function main(appRoot = document.getElementById('app')) {
       view.setProgress(100, `转换完成！产物已进入待导出区: ${outputFilename}`);
       logger.success(`转换成功: ${outputFilename} (${formatBytes(resultBlob.size)}) —— 可在待导出区下载、选位置导出、存入工作区或写回宿主`);
 
-      if (btnRestoreLuker && host.platform === 'luker') {
-        btnRestoreLuker.disabled = false;
-      }
     } catch (err) {
       view.setProgress(100, `转换出错: ${err.message}`);
       logger.error('数据包转换出错', err);
     } finally {
-      btnConvert.disabled = false;
+      workbenchBusy = false;
+      applyActionAvailability();
     }
   });
 
   // 10. 页面启动时无损恢复工作区状态与初始化文件名预览
   updateFilenamePreview();
+  updateFoldSummaries();
 
   if (isStorageSupported()) {
     try {
@@ -1416,7 +1472,7 @@ async function main(appRoot = document.getElementById('app')) {
           }
           updateFilenamePreview();
 
-          btnConvert.disabled = false;
+          applyActionAvailability();
           if (dropHandler?.setFilename) {
             dropHandler.setFilename(fileRecord.name);
           }
@@ -1489,7 +1545,11 @@ function bootstrap() {
   const existingApp = document.getElementById('app');
 
   if (existingApp) {
-    // 独立 Web 模式 (直接打开 index.html)
+    // 独立 Web 模式：index.html 仅为空骨架，工作台内容由同一模板函数产出
+    // （单一模板源 · L1-MR-10：与插件抽屉态、模态态共用 getWorkbenchHtml）
+    if (!existingApp.hasChildNodes()) {
+      existingApp.innerHTML = trustedStaticMarkup(getWorkbenchHtml({ isStandalone: true }));
+    }
     if (!isWorkbenchInitialized) {
       isWorkbenchInitialized = true;
       main(existingApp);

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验收口径：测试全绿 + 三守卫 + 8 条禁止模式"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核 UI 契约不被破坏"}

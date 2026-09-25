@@ -289,7 +289,6 @@ body:has(> .app-container) {
   color: var(--text-main);
   cursor: pointer;
   user-select: none;
-  transition: all 0.15s ease;
 }
 
 .app-container .category-chip-label:hover, .st-converter-drawer-app .category-chip-label:hover {
@@ -341,7 +340,6 @@ body:has(> .app-container) {
   padding: 30px 16px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   background: rgba(13, 16, 24, 0.55);
   box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.4);
 }
@@ -430,7 +428,6 @@ body:has(> .app-container) {
   font-family: var(--font-mono);
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s ease;
   user-select: none;
 }
 
@@ -491,7 +488,6 @@ body:has(> .app-container) {
   outline: none;
   width: 100%;
   font-family: var(--font-mono);
-  transition: all 0.2s ease;
 }
 
 .app-container .text-input:focus, .st-converter-drawer-app .text-input:focus {
@@ -509,7 +505,6 @@ body:has(> .app-container) {
   font-size: 0.84rem;
   outline: none;
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 .app-container .select-input:focus, .st-converter-drawer-app .select-input:focus {
@@ -551,7 +546,6 @@ body:has(> .app-container) {
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 20%, transparent);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -596,7 +590,6 @@ body:has(> .app-container) {
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -723,14 +716,14 @@ body:has(> .app-container) {
    转换报告卡片 (Report Panel)
    ========================================================================== */
 .app-container .report-panel, .st-converter-drawer-app .report-panel {
-  display: none;
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--border-color);
 }
 
-.app-container .report-panel.active, .st-converter-drawer-app .report-panel.active {
-  display: block;
+/* 空状态隐藏（用户裁决 11）：未出报告时不占位、不留空白 */
+.app-container .report-panel[hidden], .st-converter-drawer-app .report-panel[hidden] {
+  display: none;
 }
 
 .app-container .module-grid, .st-converter-drawer-app .module-grid {
@@ -746,7 +739,6 @@ body:has(> .app-container) {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   text-align: center;
-  transition: all 0.15s ease;
 }
 
 .app-container .module-item:hover, .st-converter-drawer-app .module-item:hover {
@@ -861,7 +853,6 @@ body:has(> .app-container) {
   font-size: 0.76rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
   user-select: none;
 }
 
@@ -931,7 +922,6 @@ body:has(> .app-container) {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s ease;
 }
 
 .app-container .btn-batch-convert:hover, .st-converter-drawer-app .btn-batch-convert:hover {
@@ -948,7 +938,6 @@ body:has(> .app-container) {
   border-radius: var(--radius-sm);
   font-size: 0.74rem;
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .app-container .btn-workspace-clear:hover, .st-converter-drawer-app .btn-workspace-clear:hover {
@@ -1019,7 +1008,6 @@ body:has(> .app-container) {
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   gap: 8px;
-  transition: all 0.15s ease;
 }
 
 .app-container .archive-card:hover, .st-converter-drawer-app .archive-card:hover {
@@ -1079,6 +1067,7 @@ body:has(> .app-container) {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  position: relative; /* 行内「更多」菜单的定位基准 */
 }
 
 .app-container .btn-archive-action, .st-converter-drawer-app .btn-archive-action {
@@ -1089,7 +1078,6 @@ body:has(> .app-container) {
   padding: 3px 8px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .app-container .btn-archive-action:hover, .st-converter-drawer-app .btn-archive-action:hover {
@@ -1182,7 +1170,6 @@ body:has(> .app-container) {
   background: rgba(18, 22, 33, 0.7);
   border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: var(--radius-sm);
-  transition: all 0.15s ease;
 }
 
 .app-container .category-card:hover:not(.disabled), .st-converter-drawer-app .category-card:hover:not(.disabled) {
@@ -1216,7 +1203,6 @@ body:has(> .app-container) {
   padding: 2px 7px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .app-container .btn-expand-detail:hover, .st-converter-drawer-app .btn-expand-detail:hover {
@@ -1291,7 +1277,6 @@ body:has(> .app-container) {
   background: rgba(255, 255, 255, 0.02);
   font-size: 0.76rem;
   gap: 8px;
-  transition: all 0.12s ease;
 }
 
 .app-container .file-detail-row.large-warn, .st-converter-drawer-app .file-detail-row.large-warn {
@@ -1508,7 +1493,6 @@ body:has(> .app-container) {
   border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
 .app-container .radio-label:hover, .st-converter-drawer-app .radio-label:hover {
@@ -1549,7 +1533,6 @@ body:has(> .app-container) {
   border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
-  transition: all 0.2s ease;
 }
 
 .app-container .log-bar-header, .st-converter-drawer-app .log-bar-header {
@@ -1997,7 +1980,6 @@ body:has(> .st-converter-modal-overlay) .app-container,
   cursor: pointer;
   padding: 2px 10px;
   border-radius: var(--radius-sm);
-  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2120,7 +2102,6 @@ body:has(> .st-converter-modal-overlay) .app-container,
   font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
   user-select: none;
   box-sizing: border-box;
 }
@@ -2617,4 +2598,101 @@ body:has(> .st-converter-modal-overlay) .app-container,
 /* 页面整体存储配额条用次级透明度区分 */
 .app-container .usage-quota-fill-page, .st-converter-drawer-app .usage-quota-fill-page {
   background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* ==========================================================================
+   分区式工作台（2026-09-25 UI 精简 · 任务 09-25-ui-slim-native）
+   折叠区摘要 / 输出三联 / 扩展模式紧凑选项 / 清理勾选区 / 存储入口
+   ========================================================================== */
+
+/* 折叠区标题栏的状态读数（读数，非说明文案） */
+.app-container .wb-fold-summary, .st-converter-drawer-app .wb-fold-summary {
+  margin-left: auto;
+  margin-right: 8px;
+  font-size: 0.75rem;
+  color: var(--text-sub);
+  white-space: nowrap;
+}
+
+.app-container .wb-fold > .inline-drawer-toggle, .st-converter-drawer-app .wb-fold > .inline-drawer-toggle {
+  display: flex;
+  align-items: center;
+}
+
+/* 输出目标三联（目标平台 / 压缩级别 / 分卷 MB） */
+.app-container .output-row, .st-converter-drawer-app .output-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.app-container .output-field, .st-converter-drawer-app .output-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.app-container .output-field > small, .st-converter-drawer-app .output-field > small {
+  font-size: 0.72rem;
+  color: var(--text-sub);
+}
+
+/* 扩展打包：两个紧凑选项（替代原带大段描述的模式卡） */
+.app-container .ext-mode-row, .st-converter-drawer-app .ext-mode-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.app-container .ext-mode-opt, .st-converter-drawer-app .ext-mode-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.app-container .ext-mode-opt:has(input:checked), .st-converter-drawer-app .ext-mode-opt:has(input:checked) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 折叠区内的勾选与动作排布 */
+.app-container .wb-checks, .st-converter-drawer-app .wb-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.app-container .wb-actions, .st-converter-drawer-app .wb-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* 存储入口按钮（唤起宿主原生 Storage Inspector） */
+.app-container .wb-storage-btn, .st-converter-drawer-app .wb-storage-btn {
+  margin-left: auto;
+}
+
+/* 暂存区行内「更多」菜单（自绘，零宿主依赖） */
+.app-container .stash-row-menu, .st-converter-drawer-app .stash-row-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  min-width: 92px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }

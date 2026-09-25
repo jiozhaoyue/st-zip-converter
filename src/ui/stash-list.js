@@ -59,6 +59,53 @@ function triggerDownload(full) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+let activeRowMenu = null;
+
+/** 关闭已展开的行内「更多」菜单 */
+function closeRowMenu() {
+  if (activeRowMenu) {
+    activeRowMenu.remove();
+    activeRowMenu = null;
+  }
+}
+
+/**
+ * 打开行内「更多」菜单（自绘，不依赖宿主弹窗模块）。
+ * 用户裁决：暂存区行内动作缩为「载入 + ⋯」，其余动作收进菜单，消除与批量条的双重表达。
+ * @param {HTMLElement} anchor 触发按钮
+ * @param {Array<{label: string, onClick: () => void|Promise<void>}>} actions
+ */
+function openRowMenu(anchor, actions) {
+  if (typeof document === 'undefined' || !anchor) return;
+  closeRowMenu();
+
+  const menu = document.createElement('div');
+  menu.className = 'stash-row-menu';
+  for (const action of actions) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'menu_button';
+    btn.textContent = action.label;
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeRowMenu();
+      action.onClick();
+    });
+    menu.appendChild(btn);
+  }
+  anchor.parentElement.appendChild(menu);
+  activeRowMenu = menu;
+
+  // 点击菜单外部或滚动时收起
+  const onOutside = (e) => {
+    if (!menu.contains(e.target)) closeRowMenu();
+  };
+  setTimeout(() => {
+    document.addEventListener('click', onOutside, { once: true });
+  }, 0);
+}
+
 /**
  * 渲染上传暂存区列表
  * @param {object} params
@@ -168,36 +215,39 @@ export async function renderStashList({
     `;
     item.appendChild(info);
 
-    const btns = document.createElement('div');
-    btns.className = 'archive-buttons';
-    const mkBtn = (cls, text, title, onClick) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = `btn-archive-action ${cls}`;
-      b.textContent = text;
-      if (title) b.title = title;
-      b.addEventListener('click', onClick);
-      return b;
-    };
+    // 行内只留「载入 + ⋯」：下载 / 写回宿主 / 删除 收进更多菜单，
+    // 消除与批量条动作的双重表达（用户裁决 9）。
     if (!isActive) {
       btns.appendChild(mkBtn('load', '载入', '载入为当前转换源', async () => {
         const full = await getFile(file.id);
         if (full && typeof onLoadFile === 'function') onLoadFile(full);
       }));
     }
-    btns.appendChild(mkBtn('download', '下载', '', async () => {
-      triggerDownload(await getFile(file.id));
-    }));
-    if (isHostAvailable && typeof onRestoreToHost === 'function') {
-      btns.appendChild(mkBtn('restore', '写回宿主', '', async () => {
-        const full = await getFile(file.id);
-        if (full?.blob) onRestoreToHost(full);
-      }));
-    }
-    btns.appendChild(mkBtn('delete', '删除', '', async () => {
-      if (!confirm(`确定要从暂存区删除「${file.name}」吗？`)) return;
-      await deleteFile(file.id);
-      if (typeof onListChanged === 'function') onListChanged();
+    btns.appendChild(mkBtn('more', '⋯', '更多操作', () => {
+      const actions = [
+        {
+          label: '下载',
+          onClick: async () => triggerDownload(await getFile(file.id)),
+        },
+      ];
+      if (isHostAvailable && typeof onRestoreToHost === 'function') {
+        actions.push({
+          label: '写回宿主',
+          onClick: async () => {
+            const full = await getFile(file.id);
+            if (full?.blob) onRestoreToHost(full);
+          },
+        });
+      }
+      actions.push({
+        label: '删除',
+        onClick: async () => {
+          if (!confirm(`确定要从暂存区删除「${file.name}」吗？`)) return;
+          await deleteFile(file.id);
+          if (typeof onListChanged === 'function') onListChanged();
+        },
+      });
+      openRowMenu(btns.lastElementChild, actions);
     }));
     item.appendChild(btns);
     list.appendChild(item);

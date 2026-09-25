@@ -35,11 +35,17 @@ describe('SillyTavern 标准插件工程结构 (st-zip-converter)', () => {
     expect(code).toContain('mountSettingsDrawer');
   });
 
-  it('index.html 包含轻量清单模式 (manifest) 与完整离线包 (full) 单选控制', async () => {
+  it('扩展打包模式与保留构建配置节点位于唯一模板源（index.html 仅为骨架，不再持有业务节点）', async () => {
+    // 单一模板源（L1-MR-10 单向化）：业务节点只允许出现在 workbench-template.js
+    const template = await readFile('src/ui/workbench-template.js', 'utf8');
+    expect(template).toContain('name="extension-mode" value="manifest"');
+    expect(template).toContain('name="extension-mode" value="full"');
+    expect(template).toContain('id="keep-dev-files-check"');
+
+    // 反向断言：index.html 不得再出现这些业务节点（防回归成两份副本）
     const html = await readFile('index.html', 'utf8');
-    expect(html).toContain('name="extension-mode" value="manifest"');
-    expect(html).toContain('name="extension-mode" value="full"');
-    expect(html).toContain('id="keep-dev-files-check"');
+    expect(html).not.toContain('name="extension-mode"');
+    expect(html).not.toContain('id="keep-dev-files-check"');
   });
 
   it('host-bridge 导出了 discoverHostExtensions, installExtensionViaHost, checkHostThirdPartyAnomaly, deleteExtensionViaHost 与 mountSettingsDrawer', async () => {
