@@ -87,6 +87,12 @@ DOM: div.toast.acu-toast.acu-toast--success
 
 ### B4 ⚠ 实测发现的真问题：`split-deliver-modal.js` 是「第二个自绘深色模态」
 
+> **2026-09-26 收口更正**：写本节时把该文件当作**待修的活代码**，后续核实它其实是
+> **死代码**——`index.js:73` 只 `import { renderSplitDeliveryModal }` 而**全仓无任何调用点**
+> （文件头注释也已自标为「待清理死代码（审计 S-09）」）。因此本节列出的配色问题**不再是待修项**，
+> 而是**删除依据**。经用户批准该文件已删除，连带 `src/ui/archive-manager.js`（全仓 0 引用）。
+> 下方内容保留作证据记录。
+
 上一任务（`09-25-style-scope-and-dev-port`）已把 `host-bridge.js` 的**扩展安装器模态**改成
 继承 `var(--SmartTheme*)`，但其残留表 R-4 只覆盖了那一处。本次实测发现**同一类问题的另一个文件**，
 且更严重——`src/ui/split-deliver-modal.js:58-113` 整块 `style.cssText` + 内联 `style`
@@ -173,44 +179,107 @@ spec 已立 `Host Native Dialog Adapter`（`getContext().Popup.show.confirm`，
 
 ## Acceptance Criteria
 
-> 回填方式：逐条现场取证（命令输出 / file:line / 实机读数），收口时回填；
+> 回填方式：逐条现场取证（命令输出 / file:line / 实机读数），2026-09-26 收口时回填；
 > 未取证者保持未勾选并记入残留（不得以「已归档」推断已完成）。
 
-- [ ] **R1** 八处目录逐处取证表（路径 / 是否 git 仓 / `git log -1` 哈希 / 与 HEAD 是否一致），
-      TT/PT 若不适配则给出机制不兼容的证据与结论。
-- [ ] **R2** 8003 与 8004 各至少一轮实机读数落 `research/`（插件已加载、抽屉/菜单项/账号弹层注入点存在、
-      无本插件报错）；8004 全程只读。
-- [ ] **R3** 两条仪器可重复执行（脚本在 `research/` 内有用法注释），
-      跑出 `cssViolations = 0`、`pluginWritesIntoHost` 全部落在白名单锚点、
-      `attrOrClassOnForeignNode = 0`、`removalOfForeignNode = 0`；
-      **且**负例自检通过（人为违规能被抓到）。
-- [ ] **R4** `grep -c gradient`/硬编码色统计：`split-deliver-modal.js` 零硬编码色值；
-      `style.css:44/591`、`plan-preview.js:36` 已修；实机（8003）下该模态表面色为宿主变量派生值。
-- [ ] **R5** `grep -rn "[^a-zA-Z.]alert(" src/ index.js` 在业务层为 **0**（仅适配器内部保留降级）；
-      `confirm` 自检命令与 spec 一致；每处替换后行为不变（有测试覆盖或实机核对）。
-- [ ] **R6** `main()` 不再有 `getElementById('app')` 兜底；插件态容器来源唯一。
-- [ ] **R7** 新守卫退出码 0；负例单测改前通过、改后拦截；五条守卫（原四条 + 新一条）全绿。
-- [ ] `npm test` 全绿、零回退（基线：44 文件 / 410 passed / 2 skipped）；`npm run build` 通过。
-- [ ] 本任务新增的 spec 条文落 `.trellis/spec/`（**自包含**，内联读数与 file:line，
-      不写"详见任务目录"——任务目录被 `.gitignore` 排除，归档即不可见）。
+- [x] **R1** 八处目录逐处取证。
+  **证据**：`research/instance-install-table.md` —— 表 8 行齐全。
+  ST/Luker 共四处均 `f26dcd5` → 拉取后 `1640118`（= 本仓 `origin/main`）；
+  两处 ST 为首次 `git clone --depth 1`，落点在宿主 `.gitignore:18/:54` 内，
+  两个 ST 实例仓 `git status --short` **均为空**（未弄脏）。
+  TT/PT 共四处按例外条款**不装**，理由有 file:line 证据（见下表与残留 R-1）。
+- [x] **R2** 8003 与 8004 实机读数落 `research/`。
+  **证据**：`research/verify-changes-8003.json`、`verify-changes-8004.json` ——
+  两处 `pluginLoaded=true`、设置面板/菜单项存在、账号弹层两个注入点均在；
+  `pluginOwnFailedRequests: []`（本插件零失败请求，页面上的 3 个 404 经带 URL 采集确认为
+  `/api/plugins/server-plugin-manager/probe`、`/api/plugins/command-exec/sandbox/get`、
+  `/scripts/extensions/popup.js`，**均非本插件发出**）。8004 全程只读。
+- [x] **R3** 仪器可重复执行 + 负例自检通过 + 归因读数。
+  **证据**：`pw-dom-write-audit.cjs --selftest` → `selftest: PASS`、退出码 0，
+  合成样本四类违规全部被抓（`violationsTotal=4`）；
+  真实读数（新代码 `1640118` 下重跑）：整页 **23860** 次 DOM 写操作，本插件 **17** 次
+  （13 写自己容器内 + **4 全部落在声明锚点**），`violationsTotal=0`（四类各 0）；
+  CSS：**343 条规则、0 条命中插件容器之外**；`body`/`html` 的 class+内联 style 与
+  「屏蔽插件」对照**逐字节相同**。见 `research/FINDINGS.md` §2/§3。
+- [x] **R4** 硬编码配色处理（**范围经现场取证后改判**）。
+  **证据**：原目标 `src/ui/split-deliver-modal.js` 经核实为**死代码**（`index.js:73` 只 import
+  不调用；文件头亦自标 S-09 待清理），经用户批准与 `src/ui/archive-manager.js`
+  （全仓 0 引用）**一并删除**；`index.js` 的未使用 import 同步移除。
+  live 目标已修：`src/core/plan-preview.js` 的 6 个颜色字面量 → 语义 token
+  （`ACTION_TOKENS`），新增 `src/ui/action-colors.js` 映射到 `style.css` 的 `--st-action-*`；
+  `@supports not (color-mix)` 块里重复的 `rgba(245,158,11,.24)`/`#f59e0b` 收敛为
+  `var(--accent-soft-fallback)`/`var(--accent)`。
+  **实机读数**（8003/8004 一致）：`--st-action-synth` = `rgba(225,138,36,1)` **等于**宿主
+  `--SmartThemeQuoteColor`（不再是写死的 `#f59e0b`），`--st-action-copy` = `#10b981`。
+- [x] **R5** 原生 `alert`/`confirm` 全部改走宿主原生 Popup。
+  **证据**：新增 `alertDialog(message, title?)`，宿主路径用**官方文档记载**的
+  `Popup.show.text`（文档与运行时键集均为 `['confirm','input','text']`，**无 alert**），
+  16 处调用点全部替换（`index.js` 12、`host-bridge.js` 1、`log-console.js` 1）；
+  自检 `grep -rn "[^a-zA-Z.]alert(" src/ index.js` → **0 命中**；
+  `confirm` 自检 → **0 命中**（原死代码处随文件删除归零）；
+  `test/alert-dialog.test.js` 6 例全过（**故意不提供 `show.alert`**，实现回退即失败）。
+- [x] **R6** 容器来源唯一化。
+  **证据**：`main(appRoot)` 去掉默认参数与 `||` 兜底，改早返回 + `logger.warn`；
+  `bootstrap()` 改为**先判 `host.isPlugin` 再找容器**（原先只看 `#app` 存不存在）。
+  实机核对：`r6_noMainDefaultFallback=true`、`r6_hostFirstBranchLine=759`、
+  全仓**代码中**唯一的 `getElementById('app')` 在 **1786 行**（> 759，即只在独立态分支内）。
+- [x] **R7** 新增守卫 + 负例单测。
+  **证据**：`scripts/dom-scope.js` + `npm run check:dom-scope`；
+  `test/dom-scope.test.js` **13 例全过**（6 类负例 + 4 类正例 + 不误报 + 真仓现状）；
+  真仓 15 文件零未声明写入；6 处确属必要的宿主写入已加带理由的 `dom-scope:allow` 标记。
+  **负例当场逼出守卫自身两个真缺陷并已修**：① 可选链 `?.` 形态**静默漏报**；
+  ② 锚点白名单因取错括号位置而**形同虚设**（详见 implement.md 阶段 6 与 spec `dom-write-scope.md` §6）。
+- [x] `npm test` 全绿、零回退 + `npm run build` 通过。
+  **证据**：**46 文件 / 429 passed / 2 skipped**（基线 44/410/2，+2 文件 +19 例，零回退）；
+  `npm run build` `✓ built in 963ms`。
+- [x] 五条静态守卫退出码 0（css-scope / dom-injection / template-source / control-consumer / dom-scope）。
+- [x] **R1 附加**：ST/Luker 四处插件的 `manifest.json` 均可解析
+      （`name=st-zip-converter` / `version=1.0.0` / `js=index.js` / `css=style.css`）。
+- [x] **R5 附则**：`CONFIRM_DIALOG_TITLE` 更名 `HOST_DIALOG_TITLE`（确认与提示共用），
+      `test/confirm-dialog.test.js` 断言的标题字符串不变、7 例仍全过。
+- [x] 本任务新增/更正的 spec 条文已落 `.trellis/spec/`（**自包含**，内联读数与 file:line）：
+      新建 `frontend/dom-write-scope.md`；增补 `frontend/host-capabilities.md`（信息提示契约 +
+      "宿主无 alert"实证）；更正 `frontend/index.md` 与 `frontend/quality-guidelines.md` 的
+      **过时计数与作废声明**（原「`body:has` 是有意保留的例外」已于上一任务移除，
+      本次一并更正）；`frontend/component-guidelines.md` 的守卫清单 4 → 5 条。
+
+### 残留（**明确未做**，不得读作已覆盖）
+
+| 编号 | 残留项 | 原因 |
+| --- | --- | --- |
+| R-1 | TT / PT 四处**未安装**插件 | 两宿主的安装契约不允许「离线目录 clone」：TT 的 data root 是运行期可选的、且安装由 Rust gitoxide 建受管 embedded repo；PT 干脆**没有服务端扩展目录**（包在浏览器 Profile）。替代路径 = 各自启动后经其扩展管理器用 Git URL 安装。证据见 `research/instance-install-table.md` B/C |
+| R-2 | ST 两实例**未做实机加载验证** | 8001/8002 当前未监听；启动实例服务器属重操作，本任务未擅自执行。四处已装的 ST 副本仅做了文件级取证 |
+| R-3 | `openConverterModal()` 修复仅由选择器/DOM 契约保证，**未做像素级实机核对** | 该导出 API 在仓内无调用点（`plugin.test.js:34` 只断言其存在），无法从 UI 触发；死规则已按实际 DOM 方向改正，守卫亦接受该写法 |
+| R-4 | 语义色（`--warning`/`--danger`/`--success` 及 `--st-action-*` 的部分项）仍为字面量 | 宿主无官方「语义色」变量记载（L1-MR-5 不猜 API）；本次只做**收敛**（集中到 `style.css` 令牌块一处），不翻案 |
+| R-5 | 8003/8004 上仍有**其他扩展**造成的控制台报错与 3 个 404 | 非本插件（已用带 URL 的请求采集逐条确认） |
+| R-6 | `shujuku-rebuild` / `Zero` 在 8004 加载时弹「数据库已加载！」toastr | 属**另一仓**；用户答复该项无偏好。本仓只在 spec 记下约定，未跨仓改动。重跑未复现，故不断言其触发条件 |
 
 ## Out of Scope
 
 - **不改 `shujuku-rebuild` / `Zero` 等其他仓**（B2 的真凶在那边；用户答复该项「无偏好」，
   按不阻塞处理：只在本仓 spec 记下「插件不得往宿主 body 塞自绘 toast」的约定，供后续跨仓任务用）。
 - **不擅自启动 ST 8001/8002 实例服务器**（重操作，需用户授权）。
-- **不删除任何文件**（含死代码 `src/ui/archive-manager.js`）：删除属 PARDON 门禁项，
-  本任务只登记建议，动手指令留给用户。
+- ~~不删除任何文件~~ **（2026-09-26 修正）**：原计划「只登记建议不动手」已由用户当场批准变更为
+  **删除两个死代码文件**（`src/ui/archive-manager.js`、`src/ui/split-deliver-modal.js`）——
+  删除理由、核实过程与替代方案已列出并获批（见 implement.md 阶段 3.1）。
+  **除此两文件外，本任务未删除任何其他文件**；后续若还要删文件，仍需单独走 PARDON 门禁。
 - 不做整份样式体系重构（只处理 B4/B5 点名的位置）。
 - 不改 `src/vendor/**`；不引入构建步骤（L1-MR-11）。
 - 不处理 B2 里「8004 重跑未复现」的不确定性（那是别的仓的行为）。
 
-## Open Questions
+## Open Questions（2026-09-26 全部收口）
 
-- **OQ-1**：TT（`src/scripts/extensions/third-party/`）与 PT（`apps/web/.generated/public/scripts/extensions/`）
-  是否真的能吃 ST 形态的第三方扩展（`manifest.json` + `index.js` + `style.css`）？
-  需现场核其加载器实现；不适配则按 R1 例外条款登记不装。
-- **OQ-2**：`split-deliver-modal.js` 的 `z-index: 100000` 是否高于宿主 `Popup` 层级？
-  若高于，宿主弹窗会被本插件模态压住——需实测宿主 `Popup` 的 `z-index` 再定（不猜）。
-- **OQ-3**：R5 的 `alertDialog` 走 `getContext().Popup.show.alert`？
-  须核官方文档/宿主源码确认该 API 形态（L1-MR-5：不得翻源码猜 API，须以官方文档为准）。
+- **OQ-1 ✅ 已答**：TT 的扩展加载契约**兼容 ST 形态**（读 `manifest.json`，见
+  `TauriTavern/src/scripts/extensions.js:695-715`），但其落点 data root 是**运行期可选**的、
+  安装由 Rust gitoxide 建受管 embedded repo ⇒ 离线目录 clone 不可行；
+  PT **没有服务端扩展目录**（`apps/web/src/features/extensions/README.md:3/:54/:56`）。
+  ⇒ 两宿主均不装，替代路径见残留 R-1。
+- **OQ-2 ✅ 已答**：宿主 `.popup` 的 `z-index` 为 **`auto`**（`position: fixed`，无数值层级）；
+  页面上最高层是其他扩展的 `999999`/`100000`/`99999`。本插件 split 模态（**已删除**）曾用 `100000`。
+  自有模态 overlay 用 `9999` —— 层级不统一一事随死代码删除而消解。
+- **OQ-3 ✅ 已答**：官方文档与运行时**都没有** `Popup.show.alert`；
+  信息提示的宿主方法 = **`Popup.show.text`**（文档标为 "Information display"）。
+  `alertDialog` 即按此实现（见 spec `host-capabilities.md`）。
+- **OQ-4（上一任务遗留）✅ 已答**：Luker 宿主全仓 `grep -rn 'id="app"' public/` **零命中**，
+  `getElementById('app')` 亦零命中 ⇒ id 争用不存在。
+  但发现更要害的同类隐患并已修：`bootstrap()` 原先按 `#app` 存在与否判独立态（见 R6）。

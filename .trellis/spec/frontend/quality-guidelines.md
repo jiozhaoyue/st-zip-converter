@@ -16,11 +16,12 @@
 
 | 类别 | 命令 | 标准 |
 |---|---|---|
-| 全量测试 | `npm test` | **41 个测试文件 / 358 passed / 2 skipped**（2026-09-25 快照）。不得低于基线、零回归。 |
+| 全量测试 | `npm test` | **46 个测试文件 / 429 passed / 2 skipped**（2026-09-26 快照）。不得低于基线、零回归。 |
 | CSS 作用域守卫 | `npm run check:css-scope` | `style.css` 每条规则必须以 `.app-container` 或 `.st-converter-drawer-app` 为作用域根。退出码 0。 |
 | DOM 注入守卫 | `npm run check:dom-injection` | `src/ui/**` 与根 `index.js` 的 `innerHTML` / `outerHTML` / `insertAdjacentHTML` 不得含未转义插值。退出码 0。 |
 | 单一模板源守卫 | `npm run check:template-source` | `index.html` 只许骨架（业务节点 id 仅 `app` 在白名单内）；`REQUIRED_TEMPLATE_IDS` 全部须定义于 `src/ui/workbench-template.js`。退出码 0。 |
 | 控件消费点守卫 | `npm run check:control-consumer` | 模板中每个交互控件（`button`/`input`/`select`/`textarea`）必须在 `CONTROL_CONSUMERS` 中有消费点声明；声明表含僵尸条目同样违规。退出码 0。 |
+| 宿主 DOM 写入守卫 | `npm run check:dom-scope` | `src/ui/**` 与根 `index.js` 里往宿主 DOM 的写入只许落在声明锚点（`#extensions_settings2` / `#extensionsMenu` / `.userBackupButton` 父元素 / `.userBackupManager .backupActionRow`）或带 `dom-scope:allow <理由>` 标记。取值契约见 [dom-write-scope.md](./dom-write-scope.md)。退出码 0。 |
 | 宿主行为冒烟 | `npm run dev` + **Dev** 实例 | Dev ST `8001` / Dev Luker `8003`；**默认严禁** Real 实例（`8002` / `8004`）——见下表下方注。 |
 
 > **Real 实例（8004）例外口径**：仅当**该任务**获用户明确授权时才可对 Real 采样，
@@ -39,7 +40,10 @@
 ### `npm run check:css-scope`（`scripts/css-scope.js`）
 PostCSS AST 解析 `style.css`，覆盖 `@media` / `@supports` 等嵌套规则与逗号分隔的每条选择器。
 行级 grep（如 `grep -n "^body"`）**会漏掉嵌套规则**，不可替代守卫。
-`@keyframes` 帧规则不作为元素选择器检查；独立页面骨架规则 `body:has(> .app-container)` 是有意保留的例外。
+`@keyframes` 帧规则不作为元素选择器检查。
+**2026-09-25 更正**：原先「独立页面骨架规则 `body:has(> .app-container)` 是有意保留的例外」的说法**已作废**——
+该豁免因「以 `body` 为主体即越界」而被移除，独立态骨架改挂 marker 类
+`#app.app-container.app-standalone`，`body:has(` 现被守卫**直接拒绝**（负例单测锁定）。
 
 ### `npm run check:dom-injection`（`scripts/dom-injection-guard.js`）
 扫描 `src/ui/**` 与根 `index.js`，凡 `innerHTML` / `outerHTML` / `insertAdjacentHTML` 的右值：
@@ -190,15 +194,19 @@ Host Native Dialog Adapter 第 7 节）。
 - [ ] 若涉及 `await`，确认有超时 / abort 兜底
 - [ ] 若注入宿主 UI，走共享 `watchHostDom` + `makeHostButton()` 工厂并打 `dataset.stZipInjected` 防重标记
 - [ ] 若需确认对话框，走 `host-bridge.js` 的 `confirmDialog()`，组件层经 `confirmFn` 注入（禁裸 `confirm()`）
+- [ ] 若需**信息提示**，走 `host-bridge.js` 的 `alertDialog()`（宿主路径是 `Popup.show.text`，
+      **不是**外推的 `show.alert`——宿主没有该方法）；同步禁裸 `alert()`
 - [ ] 若有判定/归一逻辑写在 `main()` 闭包里，先抽成具名纯函数再动手
 
 ## Quality Check
 
-- [ ] `npm test` 全绿（≥ 358 passed / 2 skipped，零回归）
+- [ ] `npm test` 全绿（≥ 429 passed / 2 skipped，零回归）
 - [ ] `npm run check:css-scope` 退出码 0
 - [ ] `npm run check:dom-injection` 退出码 0
 - [ ] `npm run check:template-source` 退出码 0
 - [ ] `npm run check:control-consumer` 退出码 0（改了模板控件时必跑）
+- [ ] `npm run check:dom-scope` 退出码 0（改了任何往宿主写 DOM 的代码时必跑；
+      确属必要的写入在该行或上一行加 `dom-scope:allow <理由>`）
 - [ ] 手测默认只针对 Dev 实例（8001 / 8003）；Real（8004）仅在该任务获明确授权时只读采样，且用后还原实例
 
 ---

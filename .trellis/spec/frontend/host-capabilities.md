@@ -10,18 +10,20 @@
 
 ---
 
-## Host Native Dialog Adapter (宿主原生弹窗适配器 · 2026-09-25)
+## Host Native Dialog Adapter (宿主原生弹窗适配器 · 2026-09-25，2026-09-26 增补信息提示)
 
 ### 1. Scope / Trigger
 
-新增或改动任何**确认/输入类对话框**。宿主的原生弹窗与 `window.confirm` 外观、模态层级、键盘行为都不同，
-混用会让插件在酒馆里显得「不是酒馆的一部分」。
+新增或改动任何**确认 / 信息提示类对话框**。宿主的原生弹窗与 `window.confirm` / `window.alert`
+在**外观、模态层级、键盘行为**上都不同：浏览器原生弹窗是自带样式的小方框，混用会让插件在酒馆里
+显得「不是酒馆的一部分」。**信息提示此前一处都没接入**（`alert` 有 16 处裸调用），2026-09-26 已清零。
 
 ### 2. Signature
 
 ```js
 // src/ui/host-bridge.js
 export async function confirmDialog(message: string): Promise<boolean>
+export async function alertDialog(message: string, title?: string): Promise<void>   // 2026-09-26 新增
 ```
 
 ### 3. Contract
@@ -32,15 +34,24 @@ export async function confirmDialog(message: string): Promise<boolean>
   const ctx = globalThis.SillyTavern?.getContext?.();
   ctx.Popup.show.confirm(header, text)   // → Promise<POPUP_RESULT|null>
   ctx.POPUP_RESULT.AFFIRMATIVE            // === 1
+  ctx.Popup.show.text(header, text)      // → 被点击按钮的结果；**信息提示用这个**
   ```
 
   据 `docs.sillytavern.app`（Writing Extensions）与两仓源码：
   ST 的 `public/scripts/st-context.js:225` 与 Luker 的 `public/scripts/st-context.js:2663` 都把
   `Popup` / `POPUP_TYPE` / `POPUP_RESULT` 挂在 `getContext()` 上；
   `Popup.show = showPopupHelper`（ST/Luker 的 `public/scripts/popup.js:858`），其 `confirm(header, text, popupOptions)`。
+- **⚠ 宿主没有原生 `alert`——不得外推**。官方文档只文档化 `Popup.show` 的
+  `confirm` / `input` / `text` 三个方法，其中 `.text(header, text)` 被标为 "Information display"，
+  即"只显示一条信息"的那一个。运行时交叉核对（Dev Luker 8003 认证态）：
+  `getContext().Popup.show` 的方法键**恰为** `['confirm','input','text']`，与文档一致；
+  `POPUP_RESULT` 含 `AFFIRMATIVE/CANCELLED/NEGATIVE/CUSTOM1..9`，`POPUP_TYPE` 含 `CONFIRM/CROP/DISPLAY/INPUT/TEXT`。
+  ⇒ 信息提示用 **`.text`**。**严禁**照 `.confirm` 的形状编造一个 `Popup.show.alert`（L1-MR-5）。
 - **不需要、也不要动态 `import()` 宿主模块**：`getContext()` 已经给出全部所需能力。
 - 判定式：`result === ctx.POPUP_RESULT.AFFIRMATIVE`；返回 `null`（用户直接关闭弹窗）视为**取消**。
-- 标题用插件功能名 `数据包互转`（`CONFIRM_DIALOG_TITLE`），不写解释性文案（R4）。
+- 标题用插件功能名 `数据包互转`（`HOST_DIALOG_TITLE`，确认与提示共用），不写解释性文案（R4）。
+- **宿主路径是非阻塞的（Promise），`window.alert` 是阻塞的**：调用方在 async 上下文里 `await`，
+  在同步上下文里 `void alertDialog(...)`（适配器自身永不 reject，故不会产生未处理拒绝）。
 
 ### 4. Validation & Error Matrix
 
@@ -48,23 +59,39 @@ export async function confirmDialog(message: string): Promise<boolean>
 | --- | --- |
 | `Popup.show.confirm` 为函数 **且** `POPUP_RESULT.AFFIRMATIVE` 存在 | 走宿主原生弹窗，`result === AFFIRMATIVE` → `true` |
 | 原生返回 `null` / `NEGATIVE`(0) | `false` |
+| `Popup.show.text` 为函数（`alertDialog`） | 走宿主原生提示，返回值忽略 |
+| 宿主只有 `confirm`/`input`（无 `text`） | `alertDialog` **降级**为 `window.alert`，文案原样透传 |
 | `POPUP_RESULT` 缺失 | **降级**（不猜常量值——宿主分支间可能不同） |
 | `getContext()` 抛错（宿主脚本未就绪） | 捕获 → **降级** |
 | 原生弹窗调用抛错 | `console.warn` 后**降级**，绝不上抛给调用方 |
 | `window.confirm` 也不可用（纯 Node） | 返回 `true`，不阻断调用方 |
+| `window.alert` 也不可用（纯 Node） | `alertDialog` 静默 resolve，不阻断调用方 |
 
 ### 5. Cases
 
 - **Good**：8004 Luker 2.7.0 真机取证——`getContext().Popup.show.confirm` 为 `function`、
   `AFFIRMATIVE = 1`、真实唤起后点「取消」返回 `0` 且 promise settle → 适配器映射 `false`。
-- **Base**：独立 Web 态（无 `SillyTavern`）→ 直接走 `window.confirm`。
+- **Good**：8003/8004 运行时键集核对——`Popup.show` 恰为 `['confirm','input','text']`，
+  证实"宿主无原生 alert"不是文档缺失而是**确实没有**。
+- **Base**：独立 Web 态（无 `SillyTavern`）→ 直接走 `window.confirm` / `window.alert`。
 - **Bad**：把 `POPUP_RESULT.AFFIRMATIVE` 硬编码成 `1`，或假设「必须动态 import `popup.js`」而放弃原生路径。
+- **Bad（2026-09-26 清理掉的真实形态）**：业务代码里直接 `alert('…')`。清理前共 **16 处**
+  （`index.js` 12 处：差量补丁提示、恢复不可用、已有恢复任务、恢复结果四态；
+  `src/ui/host-bridge.js` 安装器「至少勾选一个」；`src/ui/log-console.js` 复制失败）。
+  在酒馆里这些会弹出浏览器自带样式的小方框，与酒馆 UI 割裂——**用户报的"插件侵入宿主观感"有一半来自这里**。
+  自查命令（业务层须为 0）：`grep -rn "[^a-zA-Z.]alert(" src/ index.js`
 
 ### 6. Tests Required
 
 `test/confirm-dialog.test.js`（7 用例，`globalThis.SillyTavern` 桩 + 可写 `globalThis.window`）断言：
 原生返回 AFFIRMATIVE → `true`；返回 `0` / `null` → `false`；无宿主 → `window.confirm` 且**原文案透传**；
 原生抛错 → 降级且不抛；`POPUP_RESULT` 缺失 → **不调用**宿主 confirm；双不可用 → `true`；`getContext` 抛错 → 降级。
+
+`test/alert-dialog.test.js`（6 用例，2026-09-26 新增）断言：宿主 `.text` 可用 → 走原生、
+**参数序 `(header, text)`**、且**不再**调 `window.alert`；标题可覆盖；
+宿主只有 `confirm`/`input` → 降级 `window.alert` 且**原文案透传**；原生抛错 → 静默降级；
+`getContext` 抛错 → 降级；双不可用 → 静默 resolve。
+**桩里故意不提供 `show.alert`**——实现哪天改回外推的 `show.alert`，第一个用例就会失败。
 
 ### 7. Wrong vs Correct
 
