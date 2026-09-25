@@ -2614,6 +2614,16 @@ body:has(> .st-converter-modal-overlay) .app-container,
   white-space: nowrap;
 }
 
+/*
+ * hidden 属性在插件内必须生效。
+ * 宿主原生类（.menu_button 等）自带 display 声明，作者样式优先级高于 UA 的
+ * [hidden]{display:none}，会让 hidden 元素照常显示（2026-09-25 实机发现：
+ * 「存储」入口按钮本应隐藏却可见）。
+ */
+.app-container [hidden], .st-converter-drawer-app [hidden] {
+  display: none;
+}
+
 .app-container .wb-fold > .inline-drawer-toggle, .st-converter-drawer-app .wb-fold > .inline-drawer-toggle {
   display: flex;
   align-items: center;
