@@ -18,16 +18,22 @@
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | 三形态入口（独立 Web / 宿主插件 / Node 测试）、`src/**` 分层、构建与部署 | 就绪（2026-09-24 校正） |
-| [Component Guidelines](./component-guidelines.md) | 宿主内 UI 注入（幂等 + 自愈）、注入按钮工厂、宿主原生弹窗适配器、单一模板源、CSS 作用域铁律、DOM 注入防线 | 就绪（2026-09-25 刷新） |
+| [Component Guidelines](./component-guidelines.md) | 宿主内 UI 注入（幂等 + 自愈）、注入按钮工厂、单一模板源、CSS 作用域铁律、DOM 注入防线 | 就绪（2026-09-25 刷新） |
+| [Host Capabilities](./host-capabilities.md) | 宿主能力获取决策树、原生弹窗适配器契约、降级反例构造法、现存能力面表、**UI 控件合宪性（死控件取证）** | 就绪（2026-09-25 新建） |
 | [Hook Guidelines](./hook-guidelines.md) | 宿主生命周期接入、备份/恢复端点、CSRF、无全局命名空间 | 就绪（2026-09-24 刷新） |
 | [State Management](./state-management.md) | 内存 Blob 生命周期、TaskManager 断点续传、rAF 合帧 | 就绪 |
 | [Quality Guidelines](./quality-guidelines.md) | 验证矩阵、**三条**守卫命令、转义层契约、10 条禁止模式、纯逻辑可单测约定 | 就绪（2026-09-25 刷新） |
 | [Type Safety](./type-safety.md) | JSDoc 契约、运行时目标守卫、manifest 校验 | 就绪 |
 
-> 现行质量门槛：`npm test` 全绿（当前 **39 个测试文件 / 333 passed / 2 skipped**，零回归），
+> 现行质量门槛：`npm test` 全绿（当前 **40 个测试文件 / 346 passed / 2 skipped**，零回归），
 > 外加三条静态守卫 `npm run check:css-scope`、`npm run check:dom-injection`
 > 与 `npm run check:template-source`（详见 quality-guidelines.md）。
 > 同一事实只允许一处权威表述；遇到冲突以本目录文档与根 `CLAUDE.md` 为准。
+>
+> ⚠ **单个 spec 文件不得超过 Trellis 的 `context_injection.max_file_bytes`（32768 字节）**——
+> 超限会被**静默截断**，拿到半截规范的 agent 比拿不到更危险。
+> 2026-09-25 因 `component-guidelines.md` 涨到 36.7 KB 而拆出 `host-capabilities.md`。
+> 新增内容后请 `wc -c .trellis/spec/frontend/*.md` 自查。
 
 ---
 

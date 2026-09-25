@@ -93,14 +93,32 @@
 
 ## Acceptance Criteria
 
-- [ ] 全仓无「读不到值的控件」：`#incremental-mode-check` 已移除，且 `grep` 无残留引用
+> 回填方式：**逐条现场取证**（文件:行号 / 命令输出 / 实机读数）。取证时点 2026-09-25。
+
+- [x] 全仓无「读不到值的控件」：`#incremental-mode-check` 已移除，且 `grep` 无残留引用
       （模板 / `index.js` 绑定 / 折叠摘要三处同步清除）。
-- [ ] `incrementalMergeArchives()` 的 JSDoc 含「未接线 / 无调用方」显式标注。
-- [ ] 「增量合并」一词在 UI 与日志中不再指向两个概念；恢复写入改称「合并写入 / 覆盖写入」。
-- [ ] `#compression-select` 四档均有语义值名，值仍为 `0/1/5/9`，默认仍为 `5`。
-- [ ] `DEFAULT_THRESHOLD_MB` 有注释说明「API 默认参数、UI 不可达」；UI 默认仍为「不分卷」。
-- [ ] `research/transfer-defaults.md` 覆盖链路全部用户可选项，含默认/取值域/适用场景/是否改动。
-- [ ] `npm test` 全绿 + 三条守卫通过；Dev 8003 实机渲染无回归（J 区少一个复选框）。
+      **证据**：三处均已删除（`workbench-template.js` / `index.js:190,252,1314`）；
+      `grep -rn` 在源码、守卫、现行 spec 中零命中（仅剩 `.history/`、`dist/` 构建产物
+      与已加「历史存档」横幅的 2026-09-07 设计记录）；
+      新增反向断言 `test/single-template-source.test.js` 对三处任一出现即失败。
+- [x] `incrementalMergeArchives()` 的 JSDoc 含「未接线 / 无调用方」显式标注。
+      **证据**：`host-bridge.js` 该函数 JSDoc 顶部含「⚠ **未接线**：当前**无任何调用方**」
+      + 接线前置条件（须先与用户确定合并语义，不要直接复活开关）。
+- [x] 「增量合并」一词在 UI 与日志中不再指向两个概念；恢复写入改称「合并写入 / 覆盖写入」。
+      **证据**：模板单选（`:309/313`）、成功日志（`host-bridge.js:764`）、进度文案（`index.js:1189`）
+      全部改名；**协议值 `mode: 'merge'|'overwrite'` 与 `incremental` 表单字段一字未动**（已复核）。
+      实机确认：恢复模态 `merge 合并写入(选中) / overwrite 覆盖写入`。
+- [x] `#compression-select` 四档均有语义值名，值仍为 `0/1/5/9`，默认仍为 `5`。
+      **证据**：实机读数 `[{0,存储},{1,快速},{5,标准,selected},{9,最大}]`。
+- [x] `DEFAULT_THRESHOLD_MB` 有注释说明「API 默认参数、UI 不可达」；UI 默认仍为「不分卷」。
+      **证据**：`splitter.js` 常量上方注释已补；实机读数 `#split-input` 为空值、placeholder「不分卷」、min=1。
+- [x] `research/transfer-defaults.md` 覆盖链路全部用户可选项，含默认/取值域/适用场景/是否改动。
+      **证据**：覆盖拉取（目标平台、类目、差量补丁）、转换（压缩率、分卷、垃圾清理、扩展打包、
+      包名模板）、导出与写回（导出落点、恢复模式、上传超时）三组，逐项注明 T4 是否改动。
+- [x] `npm test` 全绿 + 三条守卫通过；Dev 8003 实机渲染无回归（J 区少一个复选框）。
+      **证据**：`npm test` **40 文件 / 346 passed / 2 skipped**；三守卫通过（模板节点数 41 → **40**）；
+      Dev 8003 实机 **267 节点**（基线 270，−3 恰为移除的 label+input+span）/ 29 按钮 /
+      5 `.inline-drawer` / 0 `<details>`；**插件零控制台报错**。探针 `research/pw-verify-t4-transfers.cjs`。
 
 ## Out of Scope
 
