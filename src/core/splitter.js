@@ -15,6 +15,27 @@ import { resolveFilename } from './filename-template.js';
 export const DEFAULT_THRESHOLD_MB = 100;
 export const SAFETY_MARGIN = 0.95; // 预留 5% 缓冲杜绝因压缩表头/元数据导致超限
 
+/** 智能分包数值输入的最小阈值 (MB)。低于此值一律视为不分卷。 */
+export const MIN_SPLIT_MB = 1;
+
+/**
+ * 归一化「智能分包」数值输入的原始值（纯函数，DOM 无关以便单测）。
+ *
+ * 设计约束（用户裁决 5）：分包改为只填数值、**必须整数**、有**最小限制**。
+ * 浮点向下归一（1.5 → 1）；空值 / 0 / 负数 / 非数字 / 小于最小值一律视为不分卷。
+ * 归一后的结果保证是 ≥ `MIN_SPLIT_MB` 的整数，或 0（不分卷）——绝不把浮点传进分卷逻辑。
+ *
+ * @param {string|number|null|undefined} raw 输入控件的原始值
+ * @returns {number} 整数 MB；0 表示不分卷
+ */
+export function normalizeSplitMb(raw) {
+  if (raw === '' || raw === null || raw === undefined) return 0;
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return 0;
+  const asInt = Math.floor(num);
+  return asInt >= MIN_SPLIT_MB ? asInt : 0;
+}
+
 /**
  * 资产条目优先级评估
  * 优先级 1: 核心小文件与文本数据 (settings, secrets, characters, chats, worlds, presets)

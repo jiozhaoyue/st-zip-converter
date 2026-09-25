@@ -232,9 +232,14 @@ export class ExportQueue {
  */
 export function renderExportQueue({
   containerEl, queue, isHostAvailable = false, restoreInFlight = false,
-  onCancelRestore, onRestoreToHost, onWorkspaceChanged,
+  onCancelRestore, onRestoreToHost, onWorkspaceChanged, confirmFn = null,
 }) {
   if (!containerEl) return;
+  // 破坏性操作确认走宿主原生弹窗（由调用方注入 host-bridge 的 confirmDialog），
+  // 未注入时降级为 window.confirm——保持本组件可脱离宿主单测。
+  const askConfirm = typeof confirmFn === 'function'
+    ? confirmFn
+    : (msg) => Promise.resolve(typeof window !== 'undefined' ? window.confirm(msg) : true);
   const selected = new Set();
 
   const render = () => {
@@ -261,8 +266,8 @@ export function renderExportQueue({
         await queue.stashAll();
         if (typeof onWorkspaceChanged === 'function') onWorkspaceChanged();
       }));
-      batchBar.appendChild(mkBtn('<i class="fa-solid fa-trash"></i> 清空', '', () => {
-        if (confirm('确定清空待导出区吗？临时产物将一并丢弃。')) queue.clear();
+      batchBar.appendChild(mkBtn('<i class="fa-solid fa-trash"></i> 清空', '', async () => {
+        if (await askConfirm('确定清空待导出区吗？临时产物将一并丢弃。')) queue.clear();
       }));
       header.appendChild(batchBar);
     }
@@ -278,8 +283,8 @@ export function renderExportQueue({
       btnCancel.className = 'menu_button btn-tool';
       btnCancel.innerHTML = trustedStaticMarkup('<i class="fa-solid fa-ban"></i> 取消恢复');
       btnCancel.title = '中止正在进行的恢复写入（宿主可能已收到部分数据，取消后请核对）';
-      btnCancel.addEventListener('click', () => {
-        if (confirm('确定取消正在进行的恢复写入吗？\n宿主可能已收到部分数据，取消后请核对数据完整性。')) {
+      btnCancel.addEventListener('click', async () => {
+        if (await askConfirm('确定取消正在进行的恢复写入吗？\n宿主可能已收到部分数据，取消后请核对数据完整性。')) {
           onCancelRestore();
         }
       });

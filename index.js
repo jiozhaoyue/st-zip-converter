@@ -45,6 +45,7 @@ import {
   restoreToHost,
   isRestoreInFlight,
   cancelRestoreInFlight,
+  confirmDialog,
   getHandle,
   registerMenuButton,
   mountNativeBackupButton,
@@ -61,7 +62,7 @@ import { UPLOAD_TIMEOUT_MS } from './src/ui/fetch-bounds.js';
 import { setupFileDrop } from './src/ui/file-drop.js';
 import { createViewController } from './src/ui/view.js';
 import { getWorkbenchHtml } from './src/ui/workbench-template.js';
-import { splitArchiveEntries } from './src/core/splitter.js';
+import { splitArchiveEntries, normalizeSplitMb } from './src/core/splitter.js';
 import { renderSplitDeliveryModal } from './src/ui/split-deliver-modal.js';
 import { zipIo } from './src/core/zip-io.js';
 
@@ -189,23 +190,14 @@ async function main(appRoot = document.getElementById('app')) {
   const filenameTemplateInput = document.getElementById('filename-template-input');
   const splitInput = document.getElementById('split-input');
 
-  /** 智能分包的最小阈值（MB）——数值输入只接受整数且不小于此值 */
-  const MIN_SPLIT_MB = 1;
-
   /**
    * 读取智能分包阈值（MB）。
-   * 用户裁决：分包改为只填数值、必须整数、有最小限制（不再用档位下拉）。
-   * 浮点归一（1.5 → 1）；空值 / 0 / 非法 / 小于最小值一律视为不分卷。
+   * 归一化逻辑（整数/最小值/非法输入）在 `src/core/splitter.js` 的纯函数里，
+   * 此处仅做 DOM 取值，便于单测覆盖。
    * @returns {number} 0 表示不分卷
    */
   function parseSplitInputMb() {
-    if (!splitInput) return 0;
-    const raw = splitInput.value;
-    if (raw === '' || raw === null) return 0;
-    const num = Number(raw);
-    if (!Number.isFinite(num)) return 0;
-    const asInt = Math.floor(num);
-    return asInt >= MIN_SPLIT_MB ? asInt : 0;
+    return normalizeSplitMb(splitInput ? splitInput.value : null);
   }
 
   // 还原模态弹窗元素
@@ -373,6 +365,7 @@ async function main(appRoot = document.getElementById('app')) {
       batchBarEl: stashBatchBar,
       activeFileId: currentFileId,
       isHostAvailable: host.isPlugin,
+      confirmFn: confirmDialog,
       onLoadFile: async (fileRecord) => {
         if (!fileRecord || !fileRecord.blob) return;
         currentFile = fileRecord.blob;
@@ -499,6 +492,7 @@ async function main(appRoot = document.getElementById('app')) {
       containerEl: exportQueuePanel,
       queue: exportQueue,
       isHostAvailable: host.isPlugin,
+      confirmFn: confirmDialog,
       restoreInFlight: isRestoreInFlight(),
       onCancelRestore: () => {
         if (cancelRestoreInFlight()) {

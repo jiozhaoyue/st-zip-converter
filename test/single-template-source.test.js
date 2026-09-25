@@ -5,6 +5,7 @@ import {
   REQUIRED_TEMPLATE_IDS,
   checkSingleTemplateSource,
 } from '../scripts/single-template-source.js';
+import { getWorkbenchHtml } from '../src/ui/workbench-template.js';
 
 describe('单一模板源守卫', () => {
   const skeleton = `<!DOCTYPE html>
@@ -62,5 +63,40 @@ describe('单一模板源守卫', () => {
     expect(html).not.toContain('workspace-panel');
     expect(html).not.toContain('host-export-card');
     expect(html).not.toContain('btn-clear-workspace');
+  });
+});
+
+describe('三入口渲染一致性（R8.2 · 独立态 / 插件抽屉态 / 模态态）', () => {
+  const MODES = [
+    ['独立态', { isStandalone: true }],
+    ['插件抽屉态', { isDrawer: true }],
+    ['模态态', { isModal: true }],
+  ];
+
+  // 三个入口必须由同一函数产出同一套业务节点，避免再次分歧成两份副本（L1-MR-10）
+  it.each(MODES)('%s 渲染出全部必需业务节点 id', (_label, opts) => {
+    const html = getWorkbenchHtml(opts);
+    const missing = REQUIRED_TEMPLATE_IDS.filter((id) => !html.includes(`id="${id}"`));
+
+    expect(missing).toEqual([]);
+  });
+
+  it.each(MODES)('%s 的折叠区为宿主原生 inline-drawer，且带状态读数（R1.1 / R1.2）', (_label, opts) => {
+    const html = getWorkbenchHtml(opts);
+
+    expect(html).toContain('inline-drawer');
+    // 折叠组件复用宿主原生结构，不得回退到 <details>
+    expect(html).not.toContain('<details');
+    for (const id of ['fold-summary-cleanup', 'fold-summary-extension', 'fold-summary-incremental', 'fold-summary-filename']) {
+      expect(html).toContain(`id="${id}"`);
+    }
+  });
+
+  it('只有模态态带关闭按钮，抽屉态不出页头（三态的唯一合法分支差异）', () => {
+    expect(getWorkbenchHtml({ isModal: true })).toContain('id="btn-close-converter-modal"');
+    expect(getWorkbenchHtml({ isStandalone: true })).not.toContain('id="btn-close-converter-modal"');
+    expect(getWorkbenchHtml({ isDrawer: true })).not.toContain('class="app-header"');
+    // 抽屉态独有的「存储」入口（宿主原生存储面板入口，独立态无此锚点）
+    expect(getWorkbenchHtml({ isDrawer: true })).toContain('id="btn-storage-inspector"');
   });
 });

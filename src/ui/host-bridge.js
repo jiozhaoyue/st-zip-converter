@@ -146,6 +146,55 @@ export function detectHost() {
   return { platform: 'standalone', isPlugin: false, confidence: 'none' };
 }
 
+/** 确认弹窗标题——插件自身的功能名，非说明性文案（R4） */
+const CONFIRM_DIALOG_TITLE = '数据包互转';
+
+/**
+ * 读取宿主上下文对象（`SillyTavern.getContext()`）。
+ * ST 与 Luker 均暴露该全局（Luker `script.js` 亦暴露 `SillyTavern`），
+ * 独立态、宿主脚本未就绪或调用抛错时返回 null。
+ * @returns {object|null}
+ */
+function getHostContext() {
+  try {
+    const st = globalThis.SillyTavern;
+    return st && typeof st.getContext === 'function' ? st.getContext() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 宿主原生确认对话框适配器（L0-11：适配器 + 特性检测 + 静默降级）。
+ *
+ * 优先使用**官方文档记载**的 `SillyTavern.getContext().Popup.show.confirm(header, text)`，
+ * 返回 `Promise<POPUP_RESULT|null>`（ST `popup.js` 与 Luker 同名副本签名一致）。
+ * 宿主不可用（独立态 / 非 ST 系宿主 / 脚本未就绪）或调用抛错时，
+ * 静默降级为 `window.confirm`，主路径不阻塞、不缺失。
+ *
+ * @param {string} message 确认文案
+ * @returns {Promise<boolean>} 用户是否确认
+ */
+export async function confirmDialog(message) {
+  const ctx = getHostContext();
+  const hostConfirm = ctx?.Popup?.show?.confirm;
+  const affirmative = ctx?.POPUP_RESULT?.AFFIRMATIVE;
+  // 两者齐备才走宿主原生弹窗；POPUP_RESULT 缺失时不猜常量值，直接降级
+  if (typeof hostConfirm === 'function' && affirmative !== undefined) {
+    try {
+      const result = await hostConfirm(CONFIRM_DIALOG_TITLE, message);
+      return result === affirmative;
+    } catch (err) {
+      console.warn('[st-zip-converter] 宿主原生确认弹窗不可用，降级为原生 confirm：', err);
+    }
+  }
+  if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+    return window.confirm(message);
+  }
+  // 无任何确认手段（纯 Node 环境）：不阻断调用方
+  return true;
+}
+
 /**
  * 通过服务端 /version 端点二次校验宿主类型
  *
@@ -1332,6 +1381,45 @@ export function registerMenuButton(onOpen) {
 }
 
 /**
+ * 宿主注入按钮工厂（R7.3 按钮复用）。
+ *
+ * 收敛两处 `menu_button menu_button_icon` 形态的注入按钮构造：
+ * 宿主原生类、`dataset.stZipInjected` 幂等标记、`<i>` 图标 + `<span>` 文案结构，
+ * 以及 `preventDefault/stopPropagation` 包裹（避免触达宿主原生锚点的默认行为）。
+ *
+ * 两类按钮**有意不**经由本工厂（形态不同，硬套会破坏宿主原生外观）：
+ * - `registerMenuButton` 注入的是宿主扩展菜单项（`list-group-item` +
+ *   `extensionsMenuExtensionButton` 图标类），非 `menu_button`；
+ * - 工作台的固定动作按钮是**声明式模板标记**（单一模板源 R8），
+ *   改由 JS 生成会与 R8 冲突。
+ *
+ * @param {{ id: string, icon: string, label?: string, title?: string, onClick?: () => void }} spec
+ * @returns {HTMLElement} 已挂好点击处理的按钮节点
+ */
+function makeHostButton({ id, icon, label, title, onClick }) {
+  const btn = document.createElement('div');
+  btn.id = id;
+  btn.dataset.stZipInjected = '1';
+  // 复用宿主原生 menu_button 样式，与原生按钮并排
+  btn.className = 'menu_button menu_button_icon';
+  if (title) btn.title = title;
+  const iconEl = document.createElement('i');
+  iconEl.className = `fa-fw fa-solid ${icon}`;
+  btn.appendChild(iconEl);
+  if (label) {
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    btn.appendChild(labelEl);
+  }
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof onClick === 'function') onClick();
+  });
+  return btn;
+}
+
+/**
  * 原生"用户数据备份/导出"UI 多锚点注入：在所有 .userBackupButton 旁追加
  * 转换器入口按钮。四个宿主（ST/Luker/TauriTavern/PureTavern）的
  * templates/userProfile.html（账号弹层）与 templates/admin.html（管理面板，
@@ -1345,29 +1433,6 @@ export function mountNativeBackupButton(onOpen, opts = {}) {
 
   const QUICK_ID = `${BTN_ID}-quick-fetch`;
 
-  const makeButton = (id, icon, label, title, onClick) => {
-    const btn = document.createElement('div');
-    btn.id = id;
-    btn.dataset.stZipInjected = '1';
-    // 复用宿主原生 menu_button 样式，与原生备份按钮并排
-    btn.className = 'menu_button menu_button_icon';
-    btn.title = title;
-    const iconEl = document.createElement('i');
-    iconEl.className = `fa-fw fa-solid ${icon}`;
-    btn.appendChild(iconEl);
-    if (label) {
-      const labelEl = document.createElement('span');
-      labelEl.textContent = label;
-      btn.appendChild(labelEl);
-    }
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      onClick();
-    });
-    return btn;
-  };
-
   const addBtn = () => {
     // 多锚点：账号弹层（userProfile）与管理面板（admin，每用户行一个）都有 .userBackupButton
     document.querySelectorAll('.userBackupButton').forEach((anchor) => {
@@ -1375,19 +1440,29 @@ export function mountNativeBackupButton(onOpen, opts = {}) {
       // 幂等：兄弟位已注入则跳过（弹层重渲染后标记随节点消失，observer 自动重注）
       if (anchor.nextElementSibling?.dataset?.stZipInjected === '1') return;
 
-      const openBtn = makeButton(BTN_ID, 'fa-right-left', '数据包互转',
-        '打开酒馆数据包互转工坊（在扩展设置中）', () => {
+      const openBtn = makeHostButton({
+        id: BTN_ID,
+        icon: 'fa-right-left',
+        label: '数据包互转',
+        title: '打开酒馆数据包互转工坊（在扩展设置中）',
+        onClick: () => {
           openConverterDrawer();
           if (typeof onOpen === 'function') onOpen();
-        });
+        },
+      });
       anchor.parentElement.insertBefore(openBtn, anchor.nextSibling);
 
       // 「一键拉取」只加在账号弹层锚点（含 <span> 文案）；管理面板行（纯图标）不加，
       // 避免逐行出现针对当前用户的拉取按钮造成误解
       const isProfileAnchor = !!anchor.querySelector('span');
       if (isProfileAnchor && typeof opts.onQuickFetch === 'function') {
-        const quick = makeButton(QUICK_ID, 'fa-cloud-arrow-down', '一键拉取',
-          '一键拉取宿主数据包并进入待导出区（走完整拉取/转换流程）', opts.onQuickFetch);
+        const quick = makeHostButton({
+          id: QUICK_ID,
+          icon: 'fa-cloud-arrow-down',
+          label: '一键拉取',
+          title: '一键拉取宿主数据包并进入待导出区（走完整拉取/转换流程）',
+          onClick: opts.onQuickFetch,
+        });
         anchor.parentElement.insertBefore(quick, openBtn.nextSibling);
       }
     });
@@ -1412,18 +1487,17 @@ export function mountLukerBackupManagerButton(onOpen) {
     const row = document.querySelector('.userBackupManager .backupActionRow');
     if (!row) return;
 
-    const btn = document.createElement('div');
-    btn.id = BTN_ID;
-    btn.className = 'menu_button menu_button_icon';
-    btn.title = '打开酒馆数据包互转工坊（在扩展设置中）';
-    btn.innerHTML = '<i class="fa-fw fa-solid fa-right-left"></i><span>数据包互转</span>';
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openConverterDrawer();
-      if (typeof onOpen === 'function') {
-        onOpen();
-      }
+    const btn = makeHostButton({
+      id: BTN_ID,
+      icon: 'fa-right-left',
+      label: '数据包互转',
+      title: '打开酒馆数据包互转工坊（在扩展设置中）',
+      onClick: () => {
+        openConverterDrawer();
+        if (typeof onOpen === 'function') {
+          onOpen();
+        }
+      },
     });
     row.insertBefore(btn, row.firstChild);
   };

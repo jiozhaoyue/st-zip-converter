@@ -125,8 +125,14 @@ export async function renderStashList({
   onLoadFile,
   onListChanged,
   onRestoreToHost,
+  confirmFn = null,
 }) {
   if (!containerEl) return;
+  // 删除确认走宿主原生弹窗（由调用方注入 host-bridge 的 confirmDialog），
+  // 未注入时降级为 window.confirm——保持本组件可脱离宿主单测。
+  const askConfirm = typeof confirmFn === 'function'
+    ? confirmFn
+    : (msg) => Promise.resolve(typeof window !== 'undefined' ? window.confirm(msg) : true);
   const all = await listStoredFiles();
   const files = filterStashFiles(all);
   const selected = new Set();
@@ -183,7 +189,7 @@ export async function renderStashList({
       }));
     }
     batchBarEl.appendChild(mkBtn('<i class="fa-solid fa-trash"></i> 删除', '', cap.canDelete, async () => {
-      if (!confirm(`确定删除选中的 ${selected.size} 个源包吗？`)) return;
+      if (!(await askConfirm(`确定删除选中的 ${selected.size} 个源包吗？`))) return;
       for (const id of [...selected]) {
         selected.delete(id);
         await deleteFile(id);
@@ -242,7 +248,7 @@ export async function renderStashList({
       actions.push({
         label: '删除',
         onClick: async () => {
-          if (!confirm(`确定要从暂存区删除「${file.name}」吗？`)) return;
+          if (!(await askConfirm(`确定要从暂存区删除「${file.name}」吗？`))) return;
           await deleteFile(file.id);
           if (typeof onListChanged === 'function') onListChanged();
         },
