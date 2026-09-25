@@ -50,3 +50,7 @@ Thumbs.db
 CLAUDE.md.bak
 *.md.bak
 
+# 实例诊断原始采样（含实例侧真实目录名/用户数据风险 — L1-MR-14 红线）
+# 摘要结论见同目录 *.md 报告；原始数据可由 *.cjs 脚本重跑，勿入库
+.trellis/tasks/**/research/*.json
+

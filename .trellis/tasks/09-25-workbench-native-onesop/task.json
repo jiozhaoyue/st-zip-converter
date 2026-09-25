@@ -1,0 +1,31 @@
+{
+  "id": "workbench-native-onesop",
+  "name": "workbench-native-onesop",
+  "title": "一站式工作台原生化：UI 精简、性能止血与 Luker 原生对接",
+  "description": "统筹四个方向把插件收敛为一站式、简洁、高性能的 Luker 扩展：UI 冗余精简与原生化、实例实测性能止血、Luker 原生能力对接、数据包上下传与打包优化。父任务持需求全集、任务地图、跨子任务验收矩阵与最终集成审查。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P0",
+  "creator": "jiozhaoyue",
+  "assignee": "jiozhaoyue",
+  "createdAt": "2026-09-25",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-25-live-perf-diagnosis",
+    "09-25-ui-slim-native",
+    "09-25-luker-native-integration",
+    "09-25-transfer-pack-optimize"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

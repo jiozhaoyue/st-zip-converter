@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "宿主 DOM 注入/双前缀 CSS 铁律/rAF 合帧/有界等待——诊断注入点与监听器开销的依据"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "rAF 合帧与 Blob 生命周期约定——判断进度回调与传输期开销的依据"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "宿主生命周期接入与端点/CSRF 约定——只读采样时辨认插件网络行为的依据"}

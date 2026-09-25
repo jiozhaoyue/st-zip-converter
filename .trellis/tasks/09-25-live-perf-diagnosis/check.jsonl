@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验证矩阵与两条静态守卫——诊断结论与后续止损实施的验收口径"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核结论需对齐既有 component 契约（双前缀/rAF/有界等待）"}
