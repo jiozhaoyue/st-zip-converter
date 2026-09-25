@@ -118,7 +118,24 @@ export const zipIo = {
             isDirectory: false,
             openStream: async () => {
               const { readable, writable } = new TransformStream({}, { highWaterMark: 16 });
-              entry.getData(writable).catch((err) => readable.cancel(err));
+              /**
+               * 读失败时**安全地**把错误转达给消费方。
+               *
+               * 历史事故（2026-09-26 实测，见任务 `09-26-all-instance-data-sync-e2e`
+               * 的 `research/build-packs-blocker.md`）：此行原为 `readable.cancel(err)`。
+               * 当消费方（`writer.addLazy` 的 `source.pipeTo(writable)`）**已经锁定**该流时，
+               * `cancel()` 自身抛 `ERR_INVALID_STATE: ReadableStream is locked`；该抛出发生在
+               * `.catch()` 回调里 ⇒ 升级为**未处理拒绝**，后果是：
+               *   ① Node 侧直接杀死进程，且**不留下任何转换错误**；
+               *   ② 真正的主错误被这条无意义的 "ReadableStream is locked" 彻底掩盖。
+               * 修正：已锁定/已取消时不再 cancel（此时错误本就会经 TransformStream
+               * 自然传播给消费方）；cancel 自身的失败也无处可报，显式吞掉。
+               */
+              entry.getData(writable).catch((err) => {
+                if (!readable.locked) {
+                  readable.cancel(err).catch(() => {});
+                }
+              });
               return readable;
             },
             read: async () => {
@@ -139,21 +156,77 @@ export const zipIo = {
    * @param {zip.BlobWriter|string} [destination]
    * @param {object} [options]
    * @param {number} [options.level=5] 压缩等级 0(Store)-9(Max)
+   * @param {boolean} [options.bufferedWrite=false] 是否让 vendor 为**每条目**建临时流整条缓冲。
+   *   默认**关闭**——实测该模式在真实包规模上会永不落盘，见下方说明。
    */
-  async createWriter(destination = new zip.BlobWriter('application/zip'), { level = 5 } = {}) {
+  async createWriter(destination = new zip.BlobWriter('application/zip'), {
+    level = 5,
+    /**
+     * zip.js 的 `bufferedWrite: true` 会为**每一个条目**建一个 `highWaterMark: Infinity`
+     * 的临时流，把整条数据缓冲完才写入目标。
+     *
+     * 实测（2026-09-26，真源包 1602.7 MB / 8683 条目，任务
+     * `09-26-all-instance-data-sync-e2e` 的 `research/build-packs-blocker.md`）：
+     *   - `bufferedWrite: true`  → 落点文件字节数**恒为 0**、`close()` **永不返回**，
+     *     RSS 涨到 1.0–1.5 GB；配合上方 `openStream` 的未处理拒绝还会**杀死进程**。
+     *   - `bufferedWrite: false` → **82.4 s 完成**，产出 614 MB，RSS ~330 MB（有界）。
+     * 同一份数据、同一落点，唯一变量是该标志。
+     *
+     * 故默认改为 `false`（直写目标、不做整条缓冲）。确需旧行为的调用方可显式传 `true`。
+     */
+    bufferedWrite = false,
+  } = {}) {
     const isFilePath = typeof destination === 'string';
     const writerTarget = isFilePath ? new zip.Uint8ArrayWriter() : destination;
-    const writer = new zip.ZipWriter(writerTarget, { level, bufferedWrite: true });
+    const writer = new zip.ZipWriter(writerTarget, { level, bufferedWrite });
     const written = new Set();
+    /**
+     * **正在写入**的条目 —— 背压窗口**只看它**。
+     *
+     * ⚠️ 绝不可把「已受理但仍在排队」的条目也算进来：那样排队者自身会把窗口占满，
+     * `inflight.size` 永远降不到 `CONCURRENCY` 以下，`waitForSlot()` 便会在等待一批
+     * **永不 settle** 的 promise 上永久自锁（2026-09-26 用纯形态复刻实测：100 条任务只完成 6 条，
+     * 其余 94 条永久饿死。证据见任务 `09-26-all-instance-data-sync-e2e` 的
+     * `research/build-packs-blocker.md` 的 Bug D）。
+     */
     const inflight = new Set();
-    let firstEntryDone = false;
+    /**
+     * **全部未完成**条目（含仍在排队的）—— `close()` 必须等齐它，
+     * 否则排队中的条目会被静默丢弃（产出「少了条目但看着完整」的包）。
+     */
+    const pending = new Set();
+    /**
+     * 首条目闸门：中央目录首条的顺序语义要求「首条目先落盘，再放开并发」
+     * （见原实现的注释）。用显式闸门表达，**不再**靠 `firstEntryDone` 顺带承担背压 ——
+     * 原写法把窗限放在 `if (!firstEntryDone)` **之后**，而 `convert()` 是在紧凑循环里
+     * **同步、不 await** 地投递全部条目，于是所有任务开跑时该标志仍为 `false`，
+     * **全部走首条目分支、无一经过背压** ⇒ 无界并发（Bug C）。
+     */
+    let firstEntryClaimed = false;
+    let releaseFirstEntry = null;
+    const firstEntryGate = new Promise((resolve) => { releaseFirstEntry = resolve; });
     // Store 直存统计（report 消费）：命中已压缩扩展名而绕过 deflate 的条目数与字节量
     const storeStats = { count: 0, bytes: 0 };
 
+    /** 登记一个**正在写入**的条目（占用背压窗口）。只许包住「真正在写」的那段。 */
     function track(promise) {
       const wrapped = promise.finally(() => inflight.delete(wrapped));
       inflight.add(wrapped);
       return wrapped;
+    }
+
+    /** 登记一个**已受理、可能仍在排队**的条目（不占背压窗口，但 `close()` 要等它）。 */
+    function enqueue(promise) {
+      const wrapped = promise.finally(() => pending.delete(wrapped));
+      pending.add(wrapped);
+      return wrapped;
+    }
+
+    /** 认领「首条目」身份。必须在**同步**段调用（IIFE 起跑前），否则认领会飘。 */
+    function claimFirst() {
+      if (firstEntryClaimed) return false;
+      firstEntryClaimed = true;
+      return true;
     }
 
     function levelFor(name) {
@@ -169,12 +242,27 @@ export const zipIo = {
     }
 
     /**
-     * 并发背压：在飞条目数达到并发上限时等待任一完成
+     * 并发背压：在飞条目数达到并发上限时等待任一完成。
+     * 只看 `inflight`（在跑条目），排队者不计入 —— 这是不自锁的前提。
      */
     async function waitForSlot() {
       while (inflight.size >= CONCURRENCY) {
         await Promise.race(inflight);
       }
+    }
+
+    /**
+     * 条目写入的**公共前置**：非首条目先等首条目闸门，再取背压窗口。
+     * 取窗口必须发生在闸门**之后**，否则窗口会被一堆等闸门的条目占住。
+     */
+    async function acquireWriteTurn(isFirst) {
+      if (!isFirst) await firstEntryGate;
+      await waitForSlot();
+    }
+
+    /** 放行首条目闸门（成功/失败都放行，否则其余条目会永久阻塞） */
+    function releaseGate(isFirst) {
+      if (isFirst) releaseFirstEntry();
     }
 
     return {
@@ -186,28 +274,33 @@ export const zipIo = {
         written.add(name);
         const entryLevel = levelFor(name);
         noteStore(name, data.byteLength ?? data.length ?? 0);
-        if (!firstEntryDone) {
-          // 首条目（通常为 manifest.json / 顺序敏感条目）先落盘再放开并发，
-          // 保证中央目录首条顺序与恢复端 manifest 处理兼容
-          await track(writer.add(name, new zip.Uint8ArrayReader(new Uint8Array(data)), { level: entryLevel }));
-          firstEntryDone = true;
-          return;
-        }
-        await waitForSlot();
-        return track(writer.add(name, new zip.Uint8ArrayReader(new Uint8Array(data)), { level: entryLevel }));
+        const bytes = new Uint8Array(data);
+        const isFirst = claimFirst();
+        return enqueue((async () => {
+          try {
+            await acquireWriteTurn(isFirst);
+            await track(writer.add(name, new zip.Uint8ArrayReader(bytes), { level: entryLevel }));
+          } finally {
+            releaseGate(isFirst);
+          }
+        })());
       },
 
       /**
        * 流式直通条目（pass-through 大文件零拷贝）
+       *
+       * 背压顺序**不可颠倒**：先过首条目闸门，再取并发窗口。原实现把窗口放在
+       * `if (!firstEntryDone)` 之后，而 `convert()` 是同步紧凑投递，导致窗口形同虚设（Bug C）。
        */
       addLazy(name, openFn, byteSize = 0) {
         if (written.has(name)) return Promise.resolve();
         written.add(name);
         const entryLevel = levelFor(name);
         noteStore(name, byteSize);
-        const task = (async () => {
-          if (!firstEntryDone) {
-            // 首条目独占写入（同 add 的保序语义）
+        const isFirst = claimFirst();
+        return enqueue((async () => {
+          try {
+            await acquireWriteTurn(isFirst);
             const { readable, writable } = new TransformStream({}, { highWaterMark: 16 });
             const addPromise = writer.add(name, readable, { level: entryLevel });
             openFn((err, source) => {
@@ -217,31 +310,22 @@ export const zipIo = {
               }
               source.pipeTo(writable).catch((err) => writable.abort(err));
             });
-            await addPromise;
-            firstEntryDone = true;
-            return;
+            await track(addPromise);
+          } finally {
+            releaseGate(isFirst);
           }
-          await waitForSlot();
-          const { readable, writable } = new TransformStream({}, { highWaterMark: 16 });
-          const addPromise = writer.add(name, readable, { level: entryLevel });
-          openFn((err, source) => {
-            if (err) {
-              writable.abort(err);
-              return;
-            }
-            source.pipeTo(writable).catch((err) => writable.abort(err));
-          });
-          await addPromise;
-        })();
-        return track(task);
+        })());
       },
 
       /**
        * 背压等待：全部在飞条目落盘（供上层在内存峰值敏感处调用）
        */
       waitForRoom: async () => {
-        while (inflight.size > 0) {
-          await Promise.race(inflight);
+        // 等 `pending`（含排队者）而非 `inflight`（只有在跑者）：
+        // 本方法供上层在**内存峰值敏感**处调用，若只等在跑者，队列里积压的条目仍会持续占内存。
+        // `pending` 是 `inflight` 的超集 —— 每个被 track 的写入都发生在一个已 enqueue 的任务内。
+        while (pending.size > 0) {
+          await Promise.race(pending);
         }
       },
 
@@ -252,8 +336,9 @@ export const zipIo = {
       getStoreStats: () => ({ ...storeStats }),
 
       async close() {
-        // 收齐全部在飞写入再关闭，保证中央目录完整
-        await Promise.allSettled([...inflight]);
+        // 收齐**全部**未完成条目（含仍在排队的）再关闭 —— 只等 `inflight` 会漏掉排队者，
+        // 产出「少了条目却看着完整」的包。收齐后中央目录才完整。
+        await Promise.allSettled([...pending]);
         const result = await writer.close();
         if (isFilePath) {
           const fs = await import('node:fs/promises');
@@ -264,7 +349,7 @@ export const zipIo = {
       },
 
       async abort() {
-        await Promise.allSettled([...inflight].map((p) => p.catch(() => {})));
+        await Promise.allSettled([...pending].map((p) => p.catch(() => {})));
       },
     };
   },
