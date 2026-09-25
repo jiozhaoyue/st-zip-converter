@@ -1054,6 +1054,32 @@ export async function deleteExtensionViaHost(extensionName, isGlobal = false) {
 }
 
 /**
+ * 宿主主题色读取（JS 侧 `style.color = '…'` **不接受 `var()`**，必须取真实值）。
+ * 读不到（独立态 / Node / 宿主脚本未就绪）时返回回退值。
+ *
+ * 说明（2026-09-25 用户要求「插件必须按酒馆颜色」）：安装器模态的**表面/文字/强调色**
+ * 一律改为 `var(--SmartTheme*, 回退)`（HTML 内联样式与 cssText 均可）；
+ * 成功/告警/危险三个**语义色**在宿主未见官方变量记载（L1-MR-5：不凭源码猜 API），
+ * 故仍保留字面量并集中在本文件便于将来一处替换。
+ * @param {string} name CSS 变量名（如 `--SmartThemeQuoteColor`）
+ * @param {string} fallback 回退颜色
+ * @returns {string}
+ */
+function themeVar(name, fallback) {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 宿主强调色（JS 侧赋值用；与 CSS 的 `var(--SmartThemeQuoteColor, …)` 保持一致） */
+function themeAccent() {
+  return themeVar('--SmartThemeQuoteColor', '#f59e0b');
+}
+
+/**
  * 弹出扩展清单安装器现代化面板
  *
  * 只对**可在线安装**条目提供勾选；「包内已含实体」与「无法在线安装」两类仅作只读展示
@@ -1088,7 +1114,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
 
   const modalBox = document.createElement('div');
   modalBox.style.cssText = `
-    background: #1e1e2e; color: #cdd6f4; border: 1px solid rgba(255,255,255,0.15);
+    background: var(--SmartThemeBlurTintColor, #1e1e2e); color: var(--SmartThemeBodyColorInverted, #f2f4f8); border: 1px solid rgba(255,255,255,0.15);
     border-radius: 12px; width: 100%; max-width: 680px; max-height: 85vh;
     display: flex; flex-direction: column; box-shadow: 0 20px 40px rgba(0,0,0,0.6);
     overflow: hidden;
@@ -1097,10 +1123,10 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
   modalBox.innerHTML = `
     <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
       <div>
-        <h3 style="margin: 0; font-size: 1.15rem; color: #89b4fa; display: flex; align-items: center; gap: 8px;">
+        <h3 style="margin: 0; font-size: 1.15rem; color: var(--SmartThemeQuoteColor, #f59e0b); display: flex; align-items: center; gap: 8px;">
           <i class="fa-solid fa-puzzle-piece"></i> 扩展安装器
         </h3>
-        <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #a6adc8;">
+        <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: color-mix(in srgb, var(--SmartThemeBodyColorInverted, #f2f4f8) 78%, transparent);">
           数据包已恢复。以下扩展将由酒馆以 <strong>depth: 1</strong> 浅克隆在线拉取，保留一键更新能力。
         </p>
         <p style="margin: 2px 0 0 0; font-size: 0.78rem; color: #f9e2af;">
@@ -1108,7 +1134,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
           且<b>扩展仓库可访问</b>（私有仓需手动处理）。
         </p>
       </div>
-      <button id="ext-modal-close" style="background: transparent; border: none; color: #a6adc8; font-size: 1.5rem; cursor: pointer; padding: 4px 8px;">&times;</button>
+      <button id="ext-modal-close" style="background: transparent; border: none; color: color-mix(in srgb, var(--SmartThemeBodyColorInverted, #f2f4f8) 78%, transparent); font-size: 1.5rem; cursor: pointer; padding: 4px 8px;">&times;</button>
     </div>
 
     <div style="padding: 10px 20px; background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; gap: 12px; align-items: center; font-size: 0.85rem;">
@@ -1127,7 +1153,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       <div>
         <strong><i class="fa-solid fa-triangle-exclamation"></i> 检测到错误目录残留：</strong> 本地存在旧版/错误的 <code>data/&lt;user&gt;/extensions/third-party/</code> 文件夹，会导致插件识别失效。
       </div>
-      <button id="ext-btn-clean-anomaly" class="menu_button" style="padding: 4px 10px; font-size: 0.78rem; background: #f38ba8; color: #11111b; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">一键清理残留 third-party</button>
+      <button id="ext-btn-clean-anomaly" class="menu_button" style="padding: 4px 10px; font-size: 0.78rem; background: #f38ba8; color: var(--SmartThemeBodyColor, #14161c); font-weight: bold; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">一键清理残留 third-party</button>
     </div>` : '')}
 
     <div id="ext-list-container" style="padding: 12px 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px;">
@@ -1135,20 +1161,20 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
 
     <div id="ext-progress-bar-container" style="display: none; padding: 12px 20px; background: rgba(0,0,0,0.3); border-top: 1px solid rgba(255,255,255,0.05);">
       <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 6px;">
-        <span id="ext-progress-status" style="color: #89b4fa;">准备安装...</span>
-        <span id="ext-progress-num" style="color: #a6adc8;">0 / 0</span>
+        <span id="ext-progress-status" style="color: var(--SmartThemeQuoteColor, #f59e0b);">准备安装...</span>
+        <span id="ext-progress-num" style="color: color-mix(in srgb, var(--SmartThemeBodyColorInverted, #f2f4f8) 78%, transparent);">0 / 0</span>
       </div>
-      <div style="width: 100%; height: 8px; background: #313244; border-radius: 4px; overflow: hidden;">
+      <div style="width: 100%; height: 8px; background: var(--SmartThemeBorderColor, rgba(255,255,255,0.14)); border-radius: 4px; overflow: hidden;">
         <div id="ext-progress-fill" style="width: 0%; height: 100%; background: #a6e3a1; transition: width 0.3s ease;"></div>
       </div>
     </div>
 
     <div style="padding: 14px 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: flex-end; gap: 10px; align-items: center;">
       <button id="ext-btn-cancel" class="menu_button" style="padding: 8px 16px; cursor: pointer;">暂不安装</button>
-      <button id="ext-btn-start" class="menu_button menu_button_icon" style="padding: 8px 20px; background: #89b4fa; border: none; color: #11111b; font-weight: bold; cursor: pointer;">
+      <button id="ext-btn-start" class="menu_button menu_button_icon" style="padding: 8px 20px; background: var(--SmartThemeQuoteColor, #f59e0b); border: none; color: var(--SmartThemeBodyColor, #14161c); font-weight: bold; cursor: pointer;">
         <i class="fa-solid fa-play"></i> <span>开始安装勾选项</span>
       </button>
-      <button id="ext-btn-reload" class="menu_button menu_button_icon" style="display: none; padding: 8px 20px; background: #a6e3a1; border: none; color: #11111b; font-weight: bold; cursor: pointer;">
+      <button id="ext-btn-reload" class="menu_button menu_button_icon" style="display: none; padding: 8px 20px; background: #a6e3a1; border: none; color: var(--SmartThemeBodyColor, #14161c); font-weight: bold; cursor: pointer;">
         <i class="fa-solid fa-rotate"></i> <span>刷新酒馆生效</span>
       </button>
     </div>
@@ -1196,12 +1222,12 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     titleRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
 
     const nameEl = document.createElement('strong');
-    nameEl.style.cssText = 'color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+    nameEl.style.cssText = 'color: var(--SmartThemeBodyColorInverted, #f2f4f8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
     nameEl.textContent = ext.displayName || ext.name || folder || '未命名扩展';
     titleRow.appendChild(nameEl);
 
     const folderEl = document.createElement('span');
-    folderEl.style.cssText = 'font-size: 0.75rem; color: #6c7086;';
+    folderEl.style.cssText = 'font-size: 0.75rem; color: color-mix(in srgb, var(--SmartThemeBodyColorInverted, #f2f4f8) 58%, transparent);';
     folderEl.textContent = `(${folder || '未知目录'})`;
     titleRow.appendChild(folderEl);
 
@@ -1216,10 +1242,10 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: rgba(243,139,168,0.2); color: #f38ba8; border-radius: 4px;';
     } else if (isInstalled) {
       stateText = '本地已安装';
-      stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: #45475a; color: #a6adc8; border-radius: 4px;';
+      stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: var(--SmartThemeBorderColor, rgba(255,255,255,0.14)); color: color-mix(in srgb, var(--SmartThemeBodyColorInverted, #f2f4f8) 78%, transparent); border-radius: 4px;';
     } else {
       stateText = '待安装';
-      stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: rgba(137,180,250,0.2); color: #89b4fa; border-radius: 4px;';
+      stateStyle = 'font-size: 0.72rem; padding: 1px 6px; background: rgba(137,180,250,0.2); color: var(--SmartThemeQuoteColor, #f59e0b); border-radius: 4px;';
     }
     stateEl.style.cssText = stateStyle;
     stateEl.textContent = stateText;
@@ -1228,7 +1254,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
     mainCol.appendChild(titleRow);
 
     const metaRow = document.createElement('div');
-    metaRow.style.cssText = 'font-size: 0.78rem; color: #7f849c; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+    metaRow.style.cssText = 'font-size: 0.78rem; color: color-mix(in srgb, var(--SmartThemeBodyColorInverted, #f2f4f8) 58%, transparent); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
 
     // 渲染期校验：非 http(s) 协议（javascript: / data: / vbscript: 等）不输出原值
     const urlEl = document.createElement('span');
@@ -1254,7 +1280,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
 
     const itemStatusEl = document.createElement('span');
     itemStatusEl.id = `ext-item-status-${idx}`;
-    itemStatusEl.style.cssText = 'font-size: 0.8rem; color: #6c7086;';
+    itemStatusEl.style.cssText = 'font-size: 0.8rem; color: color-mix(in srgb, var(--SmartThemeBodyColorInverted, #f2f4f8) 58%, transparent);';
 
     itemEl.appendChild(chk);
     itemEl.appendChild(mainCol);
@@ -1354,7 +1380,7 @@ export async function renderExtensionInstallerModal(extensions, onFinish, option
       progressNum.textContent = progressText;
       progressFill.style.width = `${Math.round(((i + 1) / selected.length) * 100)}%`;
       progressStatus.textContent = `正在浅克隆: ${ext.displayName || ext.name} (${ext.url})...`;
-      setStatusContent(statusEl, 'fa-solid fa-spinner fa-spin', '克隆中...', '#89b4fa');
+      setStatusContent(statusEl, 'fa-solid fa-spinner fa-spin', '克隆中...', themeAccent());
 
       try {
         // 与核心层 extension-manifest.js 的 isInstallableUrl 同一规则，避免两套判定分叉

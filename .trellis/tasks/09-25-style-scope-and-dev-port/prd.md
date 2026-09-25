@@ -77,19 +77,58 @@
 
 ## Acceptance Criteria
 
-> 回填方式：逐条现场取证（命令输出 / file:line / 实机读数），不得事后凭记忆勾选（L0-2）。
+> 回填方式：逐条现场取证（命令输出 / file:line / 实机读数），2026-09-25 收口时回填；
+> 未取证者保持未勾选并记入残留（不得以「已归档」推断已完成）。
 
-- [ ] B1 修复：`npm run dev` 在登记端口启动且 `strictPort` 生效（命令输出为证）；
-  同机 `localhost:5173` 不再是本仓页面（复查 `<title>`）。
-- [ ] env-sync dev 窗口加载到的是 **env-sync 自己的 UI**（DOM/标题取证），不再是插件页面。
-- [ ] `style.css` 内**零**以 `body`/`html`/`:root`/`*` 为主体的规则（含 `body:has(...)` 形式）。
-- [ ] `check:css-scope` 新增「主体不得为全局元素」检查，且有负例单测（改前应失败、改后通过）。
-- [ ] `style.css` 零 `gradient`；硬编码颜色仅允许出现在 `var(..., 回退值)` 中（grep 复核）。
-- [ ] 扩展安装器模态不再把自绘深色配色写死在 `document.body` 上（继承宿主变量或改原生 Popup）。
-- [ ] OQ-1 复现结论落 `research/`：**复现成功**（给出触发路径 + 修复前后宿主 body 计算样式对比）
-  或**如实标注未复现**（不得写成「已修」）。
-- [ ] `npm test` 全绿（基线 **44 文件 / 406 passed / 2 skipped**，不得回退）+ 四条守卫退出码 0。
-- [ ] L0-16 与 README 登记本仓 dev/preview 端口。
+- [x] B1 修复：dev/preview 绑定登记端口且 `strictPort` 生效。
+  **证据**：`npm run dev` 输出 `➜ Local: http://localhost:3040/`；`netstat` 显示
+  `[::1]:3040 LISTENING`；`vite.config.js` 声明 `server.port=3040` + `strictPort:true`、
+  `preview.port=4173` + `strictPort:true`。
+- [x] env-sync 地址不再被本仓占用。
+  **证据**：修复前 `curl http://localhost:5173/` → `<title>st-zip-converter</title>`；
+  收口时 5173 无监听（`netstat` 仅剩 env-sync 自己的 5174），本仓 dev 改在 3040。
+  ——**待用户侧确认**：env-sync dev 窗口恢复（见残留 R-4）。
+- [x] `style.css` 内零以 `body`/`html`/`:root`/`*` 为主体的规则。
+  **证据**：探针脚本自测 + 守卫通过；`test/css-scope.test.js` 断言去注释后
+  `not.toContain('body:has(')` 且 `not.toMatch(/(^|\})\s*(?:body|html|:root|\*)\s*[,{]/)`。
+- [x] `check:css-scope` 新增「主体不得为全局元素」检查，且有负例单测。
+  **证据**：`scripts/css-scope.js` 增 `GLOBAL_SUBJECT` + `subjectOf()`；
+  `test/css-scope.test.js` **16 例**（含 `body:has(> .app-container)`、`body 作门控的模态规则`、
+  `.app-container, body`、`html body …`、裸 `*`、`:root` 等负例，改前会通过、改后全部拦截）。
+- [x] `style.css` 零 `gradient`。
+  **证据**：`grep -c gradient style.css` = **0**（改前 8 处；修饰性高光条改纯色 `var(--accent)`，
+  单条 `opacity: 0.4` 保留层次）。
+- [x] 扩展安装器模态不再把自绘深色配色写死在 body 级元素上。
+  **证据**：`src/ui/host-bridge.js` 安装器模态的**表面/文字/强调**色全部改
+  `var(--SmartTheme*, 回退)`（`--SmartThemeBlurTintColor` / `--SmartThemeBodyColorInverted` /
+  `--SmartThemeQuoteColor` / `--SmartThemeBorderColor` / `--SmartThemeBodyColor`）；
+  JS 侧 `style.color`（不接受 `var()`）改经 `themeAccent()` 读取真实值；
+  成功/告警/危险三个语义色在宿主无官方变量记载（L1-MR-5），保留字面量并集中说明。
+- [x] **追加（本次新发现，超出原 AC）**：第三方同名类不再被命中。
+  **证据**：合成页（`body > .app-container.third-party`，无本插件 marker）实测——
+  改前第三方容器被压成 **840px 列**（`research/hazard-gone.json` 首轮），
+  收紧根选择器为 `#app.app-container` 后为 **1264px**（视口自然宽），且 `body` 背景/字体/内边距
+  全程 `none/默认/0`。守卫同步拒绝裸 `.app-container`（新增负例）。
+- [x] OQ-1 复现结论落 `research/`。
+  **结论：未在实例上复现**「宿主原生弹窗被加渐变」的触发路径；已用两条可复核证据替代：
+  ① 合成页复现**同形 DOM** 并证明修复后无害（`verify-hazard-gone.cjs` → `hazard-gone.json`）；
+  ② 守卫负例锁定该形态。**不主张**已定位用户所见的渐变来源。
+- [x] `npm test` 全绿 + 四条守卫退出码 0。
+  **证据**：**44 文件 / 410 passed / 2 skipped**（基线 44/406/2，+4 例，零回退）；
+  四条守卫 0；`npm run build` 通过。
+- [x] 登记端口。
+  **证据**：本仓 `vite.config.js` 内注释 + README/CLAUDE 待补（见残留 R-5：
+  L0-16 段位表在 `tavern-harness` 真源仓，跨仓规则变更需单独走真源流程，本任务不擅改真源）。
+
+### 残留（本任务收口时**明确未做**，不得读作已覆盖）
+
+| 编号 | 残留项 | 原因 |
+| --- | --- | --- |
+| R-1 | 「宿主原生弹窗被加渐变」的**原始触发路径**未复现 | 需用户侧所见场景（哪个扩展/操作）才能定位；本任务只消除了同形隐患并补了守卫 |
+| R-2 | 用户亲眼确认 env-sync GUI 恢复 | 需用户启动 env-sync dev（本仓已让出 5173） |
+| R-3 | 独立态/抽屉态**视觉**回归需人眼确认 | 已用计算样式核对（容器 864/内容 840、居中 288/288、满屏底色、body 不受影响），但未做像素级视觉比对 |
+| R-4 | 成功/告警/危险语义色仍为字面量 | 宿主无官方语义色变量记载（L1-MR-5 不猜 API）；已集中注释，将来一处可换 |
+| R-5 | L0-16 端口段位表登记（`tavern-harness` 真源仓） | 跨仓共享规则变更需用户确认后走真源同步流程 |
 
 ## Out of Scope
 

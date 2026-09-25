@@ -390,7 +390,7 @@ PostCSS 只是 devDependency，用于这条解析期守卫，**不进浏览器�
 ### Guard commands (四条静态守卫)
 
 ```bash
-npm run check:css-scope         # CSS 作用域：每条选择器必须根在 .app-container / .st-converter-drawer-app
+npm run check:css-scope         # CSS 作用域：根必须为本插件自有容器，且主体不得是 body/html/:root/*
 npm run check:dom-injection     # innerHTML/outerHTML/insertAdjacentHTML 不得有未转义插值
 npm run check:template-source   # index.html 只许骨架；业务节点必须全部定义于 workbench-template.js
 npm run check:control-consumer  # 每个交互控件必须有消费点声明（防死控件）+ 声明表不得含僵尸条目
@@ -399,3 +399,56 @@ npm run check:control-consumer  # 每个交互控件必须有消费点声明（�
 四条都可以单独跑（无需 `npm test`）。DOM 注入守卫的豁免约定：单条语句用 `dom-injection-guard:allow <理由>` 注释，整文件用 `dom-injection-guard:allow-file <理由>`（当前仅死代码 `src/ui/split-deliver-modal.js` 使用）。
 第三条守卫的判据与三态一致性断言见上文「Single Template Source Mandate」。
 第四条守卫的由来与局限见 [`host-capabilities.md`](./host-capabilities.md) 的「UI 控件的合宪性」一节。
+
+---
+
+## 样式作用域：主体检查 + id 双条件（2026-09-25，有实测事故）
+
+### 背景：两条真实的越界路径
+
+`style.css` **同时被独立态与插件态加载**，所以「选择器是否含本插件前缀」**不等于**「样式只作用于本插件」。
+2026-09-25 实测到两条越界：
+
+1. **以 `body` 为主体**：`body:has(> .app-container) { … }`（原独立态页面骨架）——它**含** `.app-container`
+   字样，因此通过当时的守卫，但真正的样式主体是 `body`。只要宿主页面里出现 `.app-container` 的
+   **body 直接子元素**（宿主仓内确有第三方扩展用该类名，如 `card-app`、
+   `character-editor-assistant/studio`），本插件的独立态骨架（当时含 3 层渐变背景、字体、行高）
+   就会落到**宿主 body** 上。
+2. **只按类名限定根**：`.app-container { width:100%; max-width:840px; … }`（以及全部
+   `.app-container .x` 后代规则）会命中**任何**带 `app-container` 类名的第三方容器。
+   合成页实测（`body > .app-container.third-party`）：第三方容器被压成 **840px 列**。
+
+### 现行契约（违反即返工）
+
+- **根选择器**：独立态/模态态一律写 **`#app.app-container`**（本插件两处根
+  ——`index.html` 骨架、`index.js` 的模态容器——都带 `id="app"`）；抽屉态写 `.st-converter-drawer-app`；
+  模态覆盖层写 `#st-converter-modal-overlay`。**裸 `.app-container` 一律不允许**（守卫会拦）。
+- **主体禁止**：任何选择器的**最后一个复合选择器**（主体）不得是 `body`/`html`/`:root`。
+  （`*` 允许出现在容器之后，如 `#app.app-container *`；裸 `* { … }` 会被根检查拦下。）
+- **独立态专属样式**（页面背景/居中/最小高度）必须挂在 **marker 类**
+  `#app.app-container.app-standalone` 上——marker 只出现在 `index.html` 骨架里，第三方不可能带。
+  满屏底色用 `::before { position: fixed; inset: 0; z-index: -1 }` 实现，避免把「满屏底色」
+  与「840px 内容列宽」挤在同一元素上。
+- **插件自身配色**一律 `var(--SmartTheme*, 回退值)`，**禁止渐变**与硬编码品牌色
+  （2026-09-25 清理：`style.css` 8 处 `gradient` 全部改纯色 `var(--accent)`）。
+  宿主页上的自绘弹窗（如扩展安装器模态）同样如此；JS 侧 `style.color = '…'` **不接受 `var()`**，
+  须经 `hostBridge` 的 `themeAccent()` / `themeVar()` 读真实值。
+
+### 守卫的判据（`scripts/css-scope.js`）
+
+对每条规则的每个逗号分支：① 主体不得是全局元素 → 违规；② 根必须是上列自有容器 → 否则违规。
+负例在 `test/css-scope.test.js`（16 例），含 `body:has(> .app-container)`、`.app-container, body`、
+`html body …`、裸 `*`、`:root`、裸 `.app-container`——改前会通过、改后必须拦截。
+
+### 验证手段（可复用）
+
+- 独立态布局回归：计算样式读数（容器宽 864 / 内容 840、左右留白相等、`body` 背景 `none`）。
+- 越界消除：合成页 `body > .app-container.third-party` → 断言第三方容器为视口自然宽、
+  `body` 背景/字体/内边距全程未被改动。
+
+### 附：dev server 端口必须显式声明（同日事故）
+
+本仓 `vite` **不能**用默认端口：env-sync 桌面应用的 Tauri `devUrl` 就是
+`http://localhost:5173`（`env-sync/app/src-tauri/tauri.conf.json`），占用它会让该 GUI 窗口
+加载到**本插件页面**。现约定：`server.port = 3040`、`preview.port = 4173`，均 `strictPort: true`
+（端口被占时**直接失败**，不得静默顺延）。
