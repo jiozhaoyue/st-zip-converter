@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "宿主生命周期接入、备份/恢复端点、CSRF、无全局命名空间——②③④ 三项对接面的直接契约来源"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Host Native Dialog Adapter 是 T2 新沉淀的适配器样板（getContext() 官方路径 + 静默降级）；Button Factory Mandate 与注入幂等/自愈语义为 ② 的硬约束"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "三守卫与验证矩阵、禁止模式第 10 条（不得假设宿主能力须动态 import）、闭包内纯逻辑须抽出的约定"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "三形态入口与分层边界——宿主差异只许进 host-bridge.js（L0-9），src/core 禁 DOM 依赖"}
