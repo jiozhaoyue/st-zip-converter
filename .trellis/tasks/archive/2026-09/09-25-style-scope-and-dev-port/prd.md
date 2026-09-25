@@ -120,6 +120,13 @@
   **证据**：本仓 `vite.config.js` 内注释 + README/CLAUDE 待补（见残留 R-5：
   L0-16 段位表在 `tavern-harness` 真源仓，跨仓规则变更需单独走真源流程，本任务不擅改真源）。
 
+- [x] 插件态实机无回归（Dev Luker 8003，认证态）。
+  **证据**：`research/plugin-mode-check.json` —— `#app.st-converter-drawer-app` 存在、
+  抽屉内 2 张卡片与投放区可见；卡片背景/边框/圆角为**主题变量派生值**
+  （`color(srgb 0.863 0.863 0.824 / 0.45)` 等），`body` 背景仍是宿主自身颜色（未被本插件改动）。
+  控制台 3 条报错均为**其他扩展**所致（`$(...) is not a function`、
+  `SPresetSettings has already been declared`），无本插件报错。
+
 ### 残留（本任务收口时**明确未做**，不得读作已覆盖）
 
 | 编号 | 残留项 | 原因 |

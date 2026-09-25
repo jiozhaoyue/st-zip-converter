@@ -1268,3 +1268,49 @@ Session summary was not supplied.
 - 残留 R-1/R-2（实机界面读数）随样式修复后一并重验；R-3 探针残留物
   `worlds/zz-probe-a.json` 是否清除待用户决定
 - 浏览器端提示：实例重启后旧标签页需刷新（否则持续 `Invalid CSRF token`）
+
+## Session 28: 样式越界与 dev 端口占位修复（含两处实测越界）
+
+### Summary
+
+用户报「插件改酒馆原生弹窗样式 / 夺舍 env-sync GUI / Luker 两实例 CSRF + 端口冲突」。
+三件里**一件确证、两件查清并修复**：env-sync 的 GUI 被顶替＝本仓 vite dev 占了它 Tauri `devUrl`
+用的 5173；样式侧查出**两条实测越界**（以 body 为主体、只按类名限定根），并顺带把插件自身
+的渐变与硬编码配色清干净。CSRF 一项经取证为「实例 pull 后未重启」的代码/资源错配，已重启修复。
+
+### Main Changes
+
+- **端口让位**：`vite.config.js` 声明 `server.port=3040` / `preview.port=4173` 且 `strictPort`；
+  5173 已释放（修复前 `curl localhost:5173` 返回 `<title>st-zip-converter</title>`）。
+- **作用域收紧**：根选择器 `.app-container` → **`#app.app-container`**（两处自有根都带 `id="app"`）；
+  独立态骨架挂 marker 类 `#app.app-container.app-standalone` + `::before{position:fixed}` 铺满底色，
+  与「840px 内容列宽」解耦；`body` 全链路零样式。
+- **守卫补洞**：`scripts/css-scope.js` 增「主体不得为 body/html/:root」、移除 `body:has` 豁免、
+  拒绝裸 `.app-container`；负例 16 例（改前通过、改后拦截）。
+- **去渐变与硬编码**：`style.css` 8 处 `gradient` → 纯色 `var(--accent)`；
+  扩展安装器模态表面/文字/强调色 → `var(--SmartTheme*)`，JS 侧 `style.color` 经 `themeAccent()` 取真实值。
+- **合成页/实机双向验证**：第三方同形 DOM（`body > .app-container.third-party`）改前被压成 840px、
+  改后为视口自然宽 1264px；独立态容器 864/内容 840、居中 288/288；插件态抽屉与卡片正常、无本插件报错。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eec9cb9` | chore(dev): dev/preview 固定登记端口，让出 Vite 默认 5173 |
+| `925a2f1` | fix(style): 作用域收紧到「主体 + id 双条件」，去渐变与硬编码配色 |
+
+### Testing
+
+- [OK] `npm test` 44 文件 / 410 passed / 2 skipped（基线 44/406/2，+4 例零回退）；四守卫 0；build 通过
+- [OK] 独立态计算样式核对 + 合成页越界消除验证 + Dev 8003 插件态实机核对
+- [注意] OQ-1「宿主原生弹窗被加渐变」的**原始触发路径未复现**——只消除了同形隐患，如实登记
+
+### Status
+
+[OK] **Completed**（5 条残留，含「用户亲眼确认 env-sync 恢复」与「L0-16 真源登记」）
+
+### Next Steps
+
+- 用户侧：启动 env-sync dev 确认 GUI 恢复；本仓 dev 起在 3040
+- 残留 R-1：若仍能看到宿主弹窗渐变，请给出触发场景（哪个扩展/操作），据此定位
+- L0-16 端口段位表登记（`tavern-harness` 真源）需用户确认后走真源同步
