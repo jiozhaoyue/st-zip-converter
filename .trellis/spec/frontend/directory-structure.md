@@ -56,7 +56,7 @@ st-zip-converter/
 │   │   ├── fzstd.js            # 纯 JS Zstandard 解压（Method 93）
 │   │   └── zip.js              # @zip.js/zip.js 自包含副本
 │   └── ui/                 # DOM 层（仅此层可依赖 document / window）
-│       ├── workbench-template.js  # HTML 模板唯一来源（getWorkbenchHtml），块一/块二两块式结构
+│       ├── workbench-template.js  # HTML 模板唯一来源（getWorkbenchHtml 三态），分区式结构
 │       ├── host-bridge.js         # 宿主嗅探 / CSRF / 备份拉取 / 恢复 / 扩展安装器 / 原生 UI 注入 / OPFS 临时文件
 │       ├── escape.js              # DOM 注入防线：escapeHtml / isSafeHttpUrl / trustedStaticMarkup
 │       ├── stash-list.js          # 统一工作区单列表（来源徽标 + 载入/下载/写回/删除）
@@ -72,7 +72,8 @@ st-zip-converter/
 │       └── split-deliver-modal.js # 旧「分卷交付弹窗」：全仓已无调用点（保留待清理）
 ├── scripts/
 │   ├── css-scope.js        # CSS 作用域守卫（PostCSS AST 走查，允许 @media 内嵌）
-│   └── dom-injection-guard.js  # innerHTML/outerHTML/insertAdjacentHTML 未转义插值守卫
+│   ├── dom-injection-guard.js  # innerHTML/outerHTML/insertAdjacentHTML 未转义插值守卫
+│   └── single-template-source.js  # 单一模板源守卫：index.html 只许骨架 + 模板须含 REQUIRED_TEMPLATE_IDS
 ├── test/                   # Vitest（34 个文件；npm test 全绿即质量门槛）
 │   ├── advanced-controls.test.js
 │   ├── authority-store.test.js
@@ -121,12 +122,22 @@ st-zip-converter/
 
 ---
 
-## Multi-Entry Sync (多入口同源同改 · 摘要)
+## Single Template Source (单一模板源 · 2026-09-25 取代原「多入口同源同改」)
 
-`index.html`（独立态，静态 markup）与 `src/ui/workbench-template.js`（插件态/模态态，`getWorkbenchHtml()`）是**同一套 UI 的两份独立维护副本**：结构改动必须在**同一次提交内同时改两处**（`AGENTS.md` L1-MR-10）。
+`index.html` 是**空骨架**（仅 `<div id="app" class="app-container"></div>` + 脚本入口）。
+`src/ui/workbench-template.js` 的 `getWorkbenchHtml({ isStandalone | isDrawer | isModal })` 是**唯一**的结构来源，
+独立态由 `bootstrap()` 在 `#app` 为空时注入，插件抽屉态与模态态分别由 `mountSettingsDrawer()` 与
+`openConverterModal()` 注入。
 
-- 权威约定与已知偏差（两副本当前已分歧）写在 [Component Guidelines](./component-guidelines.md) 的 **Dual-Template Sync Mandate** 一节，**不要在此重复描述**。
-- 快速自查：`grep -c "<新元素 id>" index.html src/ui/workbench-template.js` —— 两处都须 ≥1。
+- **结构改动只需改一处**（`workbench-template.js`）；原「两份副本同时改」的自查法已作废。
+- 新增/删除业务节点须同步 `scripts/single-template-source.js` 的 `REQUIRED_TEMPLATE_IDS`，
+  否则 `npm run check:template-source` 的校验面与三态一致性断言同时失效。
+- 权威约定（三态分支差异、机器断言、历史事故）写在
+  [Component Guidelines](./component-guidelines.md) 的 **Single Template Source Mandate** 一节，**不要在此重复描述**。
+
+> `AGENTS.md` / `CLAUDE.md` 的 L1-MR-10「多入口同源同改」是**仓群通用规则**（且属禁止手改的真源同步块）：
+> 它描述的是「**若**存在两份副本」的情形。本仓自 2026-09-25 起已通过结构消除该前提，
+> 故该条在本仓**不适用**——判据是本节，而非那条通用规则。
 
 ---
 
@@ -144,13 +155,25 @@ st-zip-converter/
 - 扩展安装器：`discoverHostExtensions()` / `installExtensionViaHost()` / `deleteExtensionViaHost()` / `checkHostThirdPartyAnomaly()` / `renderExtensionInstallerModal()`。
 - OPFS 临时文件：`supportsOpfs()` / `opfsTmpHandle()` / `opfsHandleToFile()` / `opfsTmpCleanup()`。
 - UI 注入（**全部经共享 `watchHostDom`**）：`mountSettingsDrawer()`（设置抽屉 `#extensions_settings2` / `#extensions_settings`）、`registerMenuButton()`（扩展菜单，兼容保留）、`mountNativeBackupButton()`（账号弹层 + 管理面板的 `.userBackupButton` 旁）、`mountLukerBackupManagerButton()`（Luker `.userBackupManager .backupActionRow`）；`setupDrawerToggles(root)` 负责嵌套子抽屉折叠。
+- 宿主能力适配器（均在本模块，遵循「宿主差异只进桥接层」）：`confirmDialog(message) → Promise<boolean>`（官方文档路径 `getContext().Popup.show.confirm`，不可用时降级 `window.confirm`）、`makeHostButton({...})`（注入按钮工厂）。
+- 恢复链路：`restoreToHost()` / `isRestoreInFlight()` / `cancelRestoreInFlight()`（在途控制器由本模块持有，故无 DOM 的 Node 环境可单测）。
 
-### 3. `src/ui/workbench-template.js`（HTML 模板唯一来源 · 两块式）
-- 唯一出口 `getWorkbenchHtml({ isModal, isDrawer })`；设计文档：`docs/superpowers/plans/2026-09-07-workbench-two-block-redesign.md`。
-  - **块一** `wb-block wb-block-status`：状态行/徽标 + 配额条 `#usage-dashboard` + 上传暂存区（`#dropzone` / `#stash-list` / `#stash-batch-bar`）+ 待导出区 `#export-queue-panel`。
-  - **块二** `wb-block wb-block-controls`：进度条 + 转换报告折叠屏 + 统一选项（含 `#category-panel`）+ 执行按钮 + 日志挂载点 `#log-console-mount`。
+### 3. `src/ui/workbench-template.js`（HTML 模板**唯一来源** · 分区式）
+
+- 唯一出口 `getWorkbenchHtml({ isStandalone, isDrawer, isModal })`——**三态由同一函数产出**；
+  `index.html` 自 2026-09-25 起仅为空骨架（详见本节 Multi-Entry 一节的现行约定与 §「Single Template Source」）。
+- 渲染顺序按**操作流**（配置 → 执行 → 反馈），非字母序；本次改造的权威设计见任务 `09-25-ui-slim-native` 的 `design.md`：
+
+  | 区 | 内容 | 披露 |
+  | --- | --- | --- |
+  | A 状态 / B 源包 / C 产物 | 徽标 + 拖放区 `#dropzone` + `#stash-list` + `#stash-batch-bar` + `#export-queue-panel` | 常驻（`wb-block-status`，`workbench-template.js:47`） |
+  | G 内容范围 / F 输出三联 | `#category-panel`；`#target-select` + `#compression-select` + `#split-input` | 常驻 |
+  | H 垃圾清理 / I 扩展打包 / J 增量与差量 / K 包名 | 宿主原生 `.inline-drawer wb-fold`，标题栏带 `#fold-summary-*` 状态读数 | **折叠**（H 默认按语义全清理） |
+  | E 动作 / D 执行反馈 / 日志 | `#btn-host-fetch` / `#btn-convert` / `#btn-restore-luker`；进度 + `#task-controls` + `#report-panel`（空态 `hidden`）；`#log-console-mount` | 常驻 |
+
 - 复用宿主原生类（`.inline-drawer` / `.menu_button` / `.text_pole` / `.checkbox_label` / `.extension_block`），图标统一 Font Awesome（`fa-solid fa-...`），无 emoji。
-- 徽标组按模式**只渲染一份**（抽屉模式在块一 `status-row`，独立/模态在 `header`）——历史上两处同时渲染导致重复 id，第二份 `#env-badge` 永远停在「检测中」。
+- 徽标组按模式**只渲染一份**（抽屉模式在 `status-row`，独立/模态在 `header`）——历史上两处同时渲染导致重复 id，第二份 `#env-badge` 永远停在「检测中」。
+- **三态只允许三处分支差异**：模态多 `#btn-close-converter-modal`；抽屉不出 `app-header`、多 `#status-row` 与 `#btn-storage-inspector`。业务节点集合三态必须一致，由 `test/single-template-source.test.js` 机器断言（各 41 个必需节点）。
 
 ### 4. `src/ui/escape.js`（DOM 注入防线）
 - `escapeHtml()`（覆盖 `& < > " '`，元素上下文与**属性上下文**通用）、`isSafeHttpUrl()`（只放行 http/https）、`trustedStaticMarkup()`（恒等函数，唯一作用是让守卫放行并让 reviewer 一眼看完全部豁免点：`grep -rn "trustedStaticMarkup(" src/ index.js`）。

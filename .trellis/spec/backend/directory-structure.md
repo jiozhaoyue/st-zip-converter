@@ -66,10 +66,11 @@ st-zip-converter/
 │       └── workbench-template.js # 工作台 HTML 模板唯一来源
 ├── scripts/
 │   ├── css-scope.js            # CSS 双前缀守卫（npm run check:css-scope）
-│   └── dom-injection-guard.js  # innerHTML 注入守卫（npm run check:dom-injection）
+│   ├── dom-injection-guard.js  # innerHTML 注入守卫（npm run check:dom-injection）
+│   └── single-template-source.js  # 单一模板源守卫（npm run check:template-source）
 ├── fixtures/               # 测试固件（四平台布局）
 │   └── gen.js              # 固件生成脚本（npm run gen-fixtures）
-├── test/                   # Vitest（当前 34 个文件 / 226 passed / 2 skipped）
+├── test/                   # Vitest（当前 39 个文件 / 333 passed / 2 skipped）
 │   ├── convert.test.js         # 转换规则与矩阵
 │   ├── detect.test.js / detect-host.test.js  # 布局识别 / 宿主嗅探
 │   ├── read-write.test.js      # zip 读写往返
@@ -117,7 +118,7 @@ st-zip-converter/
 ### 4. `src/ui/` — 可 DOM 层
 
 - `host-bridge.js`：环境嗅探（`detectHost()`，判定顺序 st/luker 不可颠倒）、`hostLayoutCode()`、CSRF（`/csrf-token`）、用户句柄（`/api/users/me`）、备份拉取（`/api/users/backup`）、恢复写入（`/api/users/restore`）、原生入口按钮注入（共享 `watchHostDom` MutationObserver）、扩展安装器、`FULL_SELECTION`。
-- `workbench-template.js`：工作台 HTML 模板的**唯一来源**（独立模式与插件模式必须同源同改）。
+- `workbench-template.js`：工作台 HTML 模板的**唯一来源**（`getWorkbenchHtml()` 产出三态：独立 / 插件抽屉 / 模态；`index.html` 自 2026-09-25 起仅为空骨架）。
 - `escape.js`：`escapeHtml()` / `trustedStaticMarkup()`——所有进入 `innerHTML` 的用户可控数据必须经它，由 `scripts/dom-injection-guard.js` 强制。
 - 其余为界面模块：`view.js`、`log-console.js`、`task-controls.js`、`export-queue.js`、`stash-list.js`、`archive-manager.js`、`category-filter.js`、`file-drop.js`、`file-tree-picker.js`、`split-deliver-modal.js`、`usage-dashboard.js`。
 

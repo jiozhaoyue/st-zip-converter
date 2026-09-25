@@ -9,13 +9,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 常用命令
 
 ```bash
-npm test                          # Vitest 全量（当前 226 passed / 2 skipped / 34 文件）
+npm test                          # Vitest 全量（当前 333 passed / 2 skipped / 39 文件）
 npx vitest run test/xxx.test.js   # 单文件
 npx vitest run -t "用例名"         # 单条用例
 npm run dev                       # vite 开发服务器，独立模式手测（http://localhost:5173）
 npm run build                     # vite build --base=./（产出 GitHub Pages 静态站点）
 npm run check:css-scope           # CSS 双前缀铁律守卫（PostCSS AST）
 npm run check:dom-injection       # DOM 注入守卫（innerHTML 未转义插值）
+npm run check:template-source     # 单一模板源守卫（index.html 只许骨架）
 npm run gen-fixtures              # 重新生成测试固件 fixtures/
 ```
 
@@ -27,7 +28,7 @@ npm run gen-fixtures              # 重新生成测试固件 fixtures/
 
 同一份 `src/core/` 代码跑在三种环境，入口分别是：
 
-1. **独立 Web**：`index.html` + `#app`，`index.js` 直接渲染两块式工作台。
+1. **独立 Web**：`index.html` 仅为空骨架（`#app.app-container`），`bootstrap()` 检测到 `#app` 为空时注入 `getWorkbenchHtml({ isStandalone: true })`——与插件态共用同一模板函数。
 2. **酒馆扩展插件**：`index.js` 检测宿主后经 `host-bridge.js` 把工作台注入扩展设置抽屉，并向原生备份 UI 注入入口按钮。
 3. **Node/Vitest**：`worker-client.js` 检测无 `Worker` 时自动主线程降级，转换逻辑零改动可测。
 

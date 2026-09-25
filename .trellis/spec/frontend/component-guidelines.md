@@ -62,9 +62,27 @@ document.querySelectorAll('.userBackupButton').forEach((anchor) => {
   if (!anchor.parentElement) return;
   // 幂等：兄弟位已注入则跳过（弹层重渲染后标记随节点消失，observer 自动重注）
   if (anchor.nextElementSibling?.dataset?.stZipInjected === '1') return;
-  anchor.parentElement.insertBefore(makeButton(...), anchor.nextSibling);
+  anchor.parentElement.insertBefore(makeHostButton({ id: BTN_ID, icon: 'fa-right-left', label: '数据包互转', title: '…', onClick }), anchor.nextSibling);
 });
 ```
+
+### Button Factory Mandate (注入按钮必须经 `makeHostButton()` · 2026-09-25)
+
+注入按钮**一律**由 `src/ui/host-bridge.js` 的模块级工厂 `makeHostButton({ id, icon, label?, title?, onClick? })` 构造，不得就地手搓 DOM：
+
+- `className = 'menu_button menu_button_icon'`（宿主原生类，与原生按钮并排）；
+- `dataset.stZipInjected = '1'`（幂等标记，见上文兄弟位检查）；
+- 子节点固定为 **图标在前、文案在后**（`<i class="fa-fw fa-solid {icon}">` + `<span>`），文案走 `textContent` 而**非** `innerHTML`；
+- click 先 `e.preventDefault()` + `e.stopPropagation()` 再回调 `onClick`。
+
+契约由 `test/host-button-factory.test.js`（6 用例，最小 DOM 桩）锁定——项目**不引入 jsdom**（依赖自包含铁律），故用 `globalThis.document` 手搓桩驱动 `mountNativeBackupButton` / `mountLukerBackupManagerButton`，断言类名、幂等标记、子节点顺序与 tag、`textContent`、click 包裹效果、锚点缺失时静默无操作。
+
+**范围边界（有意不经该工厂）**：
+
+| 不纳入者 | 原因 |
+| --- | --- |
+| `registerMenuButton()` 注入的 宿主扩展菜单项 | 形态是 `list-group-item flexify-horizontal interactable` + `extensionsMenuExtensionButton` 图标类（宿主菜单项样式），不是 `menu_button`；硬套会破坏宿主菜单外观 |
+| 工作台的固定动作按钮（`#btn-convert` / `#btn-host-fetch` / `#btn-restore-luker`） | 是**声明式模板标记**，属单一模板源（见下节）；改由 JS 生成会与 R8 冲突 |
 
 四个注入点（**只注入「整包 ZIP 级」入口**，单体导出如单聊天/单角色卡/单世界书**不注入**）：
 
@@ -183,6 +201,100 @@ UI 文案必须是「已取消 + 宿主可能仍在处理，请稍后核对数�
 - 在途第二次 `restoreToHost` → reject `/已有恢复任务正在进行/`；首次 settle 后标志复位（含抛错路径）。
 - 取消入口：`cancelRestoreInFlight()` 无在途时返回 `false`；在途时返回 `true` 且 promise 抛 `AbortError`，
   事后控制器释放（再调仍为 `false`）；外部 `signal` 合流路径同样可中止。
+
+---
+
+## Host Native Dialog Adapter (宿主原生弹窗适配器 · 2026-09-25)
+
+### 1. Scope / Trigger
+
+新增或改动任何**确认/输入类对话框**。宿主的原生弹窗与 `window.confirm` 外观、模态层级、键盘行为都不同，
+混用会让插件在酒馆里显得「不是酒馆的一部分」。
+
+### 2. Signature
+
+```js
+// src/ui/host-bridge.js
+export async function confirmDialog(message: string): Promise<boolean>
+```
+
+### 3. Contract
+
+- **取能力的唯一合法路径是官方文档记载的上下文对象**：
+
+  ```js
+  const ctx = globalThis.SillyTavern?.getContext?.();
+  ctx.Popup.show.confirm(header, text)   // → Promise<POPUP_RESULT|null>
+  ctx.POPUP_RESULT.AFFIRMATIVE            // === 1
+  ```
+
+  据 `docs.sillytavern.app`（Writing Extensions）与两仓源码：
+  ST 的 `public/scripts/st-context.js:225` 与 Luker 的 `public/scripts/st-context.js:2663` 都把
+  `Popup` / `POPUP_TYPE` / `POPUP_RESULT` 挂在 `getContext()` 上；
+  `Popup.show = showPopupHelper`（ST/Luker 的 `public/scripts/popup.js:858`），其 `confirm(header, text, popupOptions)`。
+- **不需要、也不要动态 `import()` 宿主模块**：`getContext()` 已经给出全部所需能力。
+- 判定式：`result === ctx.POPUP_RESULT.AFFIRMATIVE`；返回 `null`（用户直接关闭弹窗）视为**取消**。
+- 标题用插件功能名 `数据包互转`（`CONFIRM_DIALOG_TITLE`），不写解释性文案（R4）。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| `Popup.show.confirm` 为函数 **且** `POPUP_RESULT.AFFIRMATIVE` 存在 | 走宿主原生弹窗，`result === AFFIRMATIVE` → `true` |
+| 原生返回 `null` / `NEGATIVE`(0) | `false` |
+| `POPUP_RESULT` 缺失 | **降级**（不猜常量值——宿主分支间可能不同） |
+| `getContext()` 抛错（宿主脚本未就绪） | 捕获 → **降级** |
+| 原生弹窗调用抛错 | `console.warn` 后**降级**，绝不上抛给调用方 |
+| `window.confirm` 也不可用（纯 Node） | 返回 `true`，不阻断调用方 |
+
+### 5. Cases
+
+- **Good**：8004 Luker 2.7.0 真机取证——`getContext().Popup.show.confirm` 为 `function`、
+  `AFFIRMATIVE = 1`、真实唤起后点「取消」返回 `0` 且 promise settle → 适配器映射 `false`。
+- **Base**：独立 Web 态（无 `SillyTavern`）→ 直接走 `window.confirm`。
+- **Bad**：把 `POPUP_RESULT.AFFIRMATIVE` 硬编码成 `1`，或假设「必须动态 import `popup.js`」而放弃原生路径。
+
+### 6. Tests Required
+
+`test/confirm-dialog.test.js`（7 用例，`globalThis.SillyTavern` 桩 + 可写 `globalThis.window`）断言：
+原生返回 AFFIRMATIVE → `true`；返回 `0` / `null` → `false`；无宿主 → `window.confirm` 且**原文案透传**；
+原生抛错 → 降级且不抛；`POPUP_RESULT` 缺失 → **不调用**宿主 confirm；双不可用 → `true`；`getContext` 抛错 → 降级。
+
+### 7. Wrong vs Correct
+
+#### Wrong —— 裸用 `confirm()`（组件层直接调）
+
+```js
+// src/ui/stash-list.js（旧写法）
+if (!confirm(`确定删除选中的 ${selected.size} 个源包吗？`)) return;
+```
+
+问题：独立态/插件态外观割裂；且组件无法脱离宿主单测。
+
+#### Correct —— 适配器 + DI 接缝
+
+```js
+// 组件层：只声明接缝，未注入时自行降级，保持可单测
+const askConfirm = typeof confirmFn === 'function'
+  ? confirmFn
+  : (msg) => Promise.resolve(typeof window !== 'undefined' ? window.confirm(msg) : true);
+if (!(await askConfirm(`确定删除选中的 ${selected.size} 个源包吗？`))) return;
+
+// 调用方（index.js）：注入 host-bridge 的实现
+renderStashList({ /* … */ confirmFn: confirmDialog });
+```
+
+**当前接入面（4 处，改动确认 UI 时须一并检查）**：
+`src/ui/stash-list.js` 批量删除与行内删除、`src/ui/export-queue.js` 「清空」与「取消在途恢复」。
+自查命令（应只剩适配器内部与已知死代码）：
+
+```bash
+grep -rn "[^a-zA-Z.]confirm(" src/ui/*.js index.js
+```
+
+> **注意**：`src/ui/archive-manager.js:188` 还有一处裸 `confirm()`，但该文件**全仓无引用**（死代码，
+> 仅被陈旧产物 `dist/index.html` 的注释提到）——不要把它当作可用参考实现。已另行登记处置。
+
 - 响应体解析失败 → `success === false && unconfirmed === true`；响应体挂起 → 短超时后同样 `unconfirmed`。
 
 ---
@@ -234,30 +346,57 @@ Luker 前端**同时暴露** `globalThis.SillyTavern`（script.js:360 `= lukerAp
 
 ---
 
-## Dual-Template Sync Mandate (多入口同源同改铁律 · AGENTS.md L1-MR-10)
+## Single Template Source Mandate (单一模板源 · 2026-09-25 取代原「双模板同源同改」)
 
-同一套 UI 有**两份独立维护的副本**：独立态 `index.html`（静态 markup，Vite 不经过模板模块处理，`index.js` 直接操作其 DOM）与插件态 `src/ui/workbench-template.js`（`getWorkbenchHtml()`，经 `mountSettingsDrawer` 与模态路径注入）。
+> **本节取代旧条目**（AGENTS.md L1-MR-10 的「两份副本必须同源同改」）。
+> 2026-09-25 起**不再有两份副本**，因此「同源同改」这条铁律在本仓**已不适用**——
+> 改为「只允许一个源」的结构性保证。旧条目的历史事故见本节末。
 
-**铁律**：任何结构改动（新增元素 id、区块重组）必须在**同一次提交内同时改两处**，否则某一种入口静默失效。
+**现行结构**：`index.html` 是**空骨架**，`src/ui/workbench-template.js` 的 `getWorkbenchHtml(opts)` 是**唯一**的结构来源。
 
-改动清单：
-1. 改 `src/ui/workbench-template.js`
-2. 同步改 `index.html`
-3. 对触碰到的 id 在两处各查一次：`grep -c "<new-id>" index.html src/ui/workbench-template.js` —— 两处都须 ≥1
-4. 独立态实机验证：`npm run dev` 打开 `http://localhost:5173`，确认新元素在 DOM 中
+```
+index.html（骨架，约 22 行）
+  └─ <div id="app" class="app-container"></div>   ← 空容器，无任何业务节点
+        ↑ bootstrap() 检测到 #app 存在且为空时注入
+     getWorkbenchHtml({ isStandalone: true })
+```
 
-### 已知偏差（2026-09-24 静态核对 · 未实机验证）
+三个入口共用同一函数（`src/ui/workbench-template.js:28`）：
 
-两副本**当前已分歧**：
+| 入口 | 调用 | 差异 |
+| --- | --- | --- |
+| 独立 Web | `getWorkbenchHtml({ isStandalone: true })`（`index.js` 的 `bootstrap()`） | `chrome = !isDrawer` → 有页头/页脚 |
+| 插件抽屉态 | `mountSettingsDrawer()` → `getWorkbenchHtml({ isDrawer: true })` | 不出页头；多一个 `#status-row` 与 `#btn-storage-inspector` 存储入口 |
+| 模态态 | `openConverterModal()` → `getWorkbenchHtml({ isModal: true })` | 多一个 `#btn-close-converter-modal` 关闭按钮 |
 
-- `src/ui/workbench-template.js` 已是两块式（`wb-block` / `#stash-list` / `#stash-batch-bar` / `#log-console-mount`）；
-- `index.html` 仍是旧版多抽屉布局（`#host-export-card` / `#workspace-panel-drawer` / `#workspace-archive-list`），**不含** `wb-block`、`#stash-list`、`#stash-batch-bar`、`#log-console-mount`；
-- 后果：`index.js` 的 `refreshArchiveManagerUI()` 在 `getElementById('stash-list')` 为空时**直接 return**（`index.js:257`）。
+**三态唯一允许的分支差异就是上表右列**，业务节点集合必须完全一致。
 
-证据（静态可证）：`grep -n "stash-list\|wb-block\|log-console-mount" index.html` → 无命中。
+### 机器断言（不得只靠人眼）
 
-**待验证**（验证方法）：独立 Web 模式下「上传暂存区列表」是否真的不渲染——`npm run dev` 后拖入一个 zip，观察 `#workspace-archive-list` 是否始终为空。
-**在验证之前，不要以任一侧为「正确版本」去删改另一侧。**
+`test/single-template-source.test.js` 用 `it.each` 对三态各跑一遍，断言：
+
+1. 三态均产出全部 **41 个**必需业务节点 id（清单源：`scripts/single-template-source.js` 的 `REQUIRED_TEMPLATE_IDS`）→ `missing` 必须为空数组；
+2. 折叠区为宿主原生 `inline-drawer`，且**不得**回退到 `<details>`；
+3. 三态的分支差异被**正向断言**锁死：`isModal` 才有 `btn-close-converter-modal`、`isStandalone` 没有；`isDrawer` 才不出 `class="app-header"`、才有 `btn-storage-inspector`。
+
+守卫 `npm run check:template-source`（`scripts/single-template-source.js`）双向扫：
+
+- 扫 `index.html`：出现业务节点 id、`menu_button` / `inline-drawer` 等宿主原生类 → 违规（只有 `app` 在白名单 `ALLOWED_STANDALONE_IDS` 内）；
+- 扫 `src/ui/workbench-template.js`：缺少 `REQUIRED_TEMPLATE_IDS` 中的任一节点 → 违规。
+- 输出约定沿用 `scripts/css-scope.js`：`文件:行号`，违规退出码 1。
+
+### 历史事故（旧「双模板」时期的真实偏差）
+
+`index.html` 曾是 441 行旧多抽屉结构（含 `#workspace-panel` / `#host-export-card` / `#btn-clear-workspace`），
+与插件态的 `workbench-template.js`（`wb-block` 两块式）**已经分歧**，
+后果是独立态 `refreshArchiveManagerUI()` 在 `getElementById('stash-list')` 为空时直接 return（L1-MR-10 违规）。
+`test/single-template-source.test.js` 保留了反向断言，确保这些旧节点**不得复活**：
+
+```javascript
+expect(html).not.toContain('workspace-panel');
+expect(html).not.toContain('host-export-card');
+expect(html).not.toContain('btn-clear-workspace');
+```
 
 ## Export Queue Pattern (统一待导出区 · 2026-09-07)
 
@@ -291,11 +430,13 @@ grep 只能看到顶层规则行；嵌在 `@media` / `@supports` 里的裸选择
 守卫：`npm run check:css-scope`（`scripts/css-scope.js` 用 PostCSS AST 走查，单测在 `test/css-scope.test.js`）必须通过，输出为 `CSS 作用域检查通过：style.css`。
 PostCSS 只是 devDependency，用于这条解析期守卫，**不进浏览器运行时**。
 
-### Guard commands (两条静态守卫)
+### Guard commands (三条静态守卫)
 
 ```bash
 npm run check:css-scope        # CSS 作用域：每条选择器必须根在 .app-container / .st-converter-drawer-app
 npm run check:dom-injection    # innerHTML/outerHTML/insertAdjacentHTML 不得有未转义插值
+npm run check:template-source  # index.html 只许骨架；业务节点必须全部定义于 workbench-template.js
 ```
 
-两条都可以单独跑（无需 `npm test`）。DOM 注入守卫的豁免约定：单条语句用 `dom-injection-guard:allow <理由>` 注释，整文件用 `dom-injection-guard:allow-file <理由>`（当前仅死代码 `src/ui/split-deliver-modal.js` 使用）。
+三条都可以单独跑（无需 `npm test`）。DOM 注入守卫的豁免约定：单条语句用 `dom-injection-guard:allow <理由>` 注释，整文件用 `dom-injection-guard:allow-file <理由>`（当前仅死代码 `src/ui/split-deliver-modal.js` 使用）。
+第三条守卫的判据与三态一致性断言见上文「Single Template Source Mandate」。

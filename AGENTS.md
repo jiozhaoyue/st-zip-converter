@@ -606,19 +606,20 @@ SillyTavern / Luker / TauriTavern / PureTavern 数据包互转工具，三形态
 - `src/ui/` — UI 模块（可 DOM）：`workbench-template.js`（HTML 模板唯一来源）、`host-bridge.js`（宿主嗅探/CSRF/备份拉取/恢复/扩展安装器，**含 `hostLayoutCode()`：宿主平台 luker→l 映射，宿主导出 target 必须经它归一**）、`index.js`（根控制器）、`category-filter.js`、`stash-list.js`、`export-queue.js`、`usage-dashboard.js`、`log-console.js`
 - `src/storage/db.js` — IndexedDB 封装（DB_VERSION 2，files store 带 `origin` 字段：upload/host-export/converted/delta/split-part）
 - `src/vendor/` — zip.js / fzstd 本地副本，勿升级改动
-- `test/` — Vitest（`npm test`，~137 项）
+- `test/` — Vitest（`npm test`，39 文件 / 333 项）
 - `docs/superpowers/specs/` 与 `docs/superpowers/plans/` — 设计规格与实施计划；`docs/research/` — Luker 机制研究报告
 - `.trellis/` — Trellis 任务系统（见上方 TRELLIS 块）
 
 ## 常用命令
 
 ```bash
-npm test          # Vitest 全量（34 文件 / 226 项）
+npm test          # Vitest 全量（39 文件 / 333 项）
 npx vitest run test/xxx.test.js   # 单文件
 npm run build     # vite build --base=./
 npm run dev       # vite 开发服务器（独立模式手测）
 npm run check:css-scope       # CSS 双前缀铁律守卫（PostCSS AST）
 npm run check:dom-injection   # DOM 注入守卫（innerHTML 未转义插值）
+npm run check:template-source # 单一模板源守卫（index.html 只许骨架）
 ```
 
 ## 关键规则（踩过的坑，务必遵守）
@@ -632,7 +633,7 @@ npm run check:dom-injection   # DOM 注入守卫（innerHTML 未转义插值）
 
 ## 文档与实例隔离
 
-- 改 `src/core/` 前读 `.trellis/spec/` 对应层规范；UI 改动前读 `docs/superpowers/specs/2026-09-07-workbench-two-block-redesign.md` 了解现行两块式结构。
+- 改 `src/core/` 前读 `.trellis/spec/` 对应层规范；UI 改动前读 `.trellis/spec/frontend/component-guidelines.md` 与 `directory-structure.md`（分区式结构 + 单一模板源 + 三态一致性断言）。
 - **严禁向本地酒馆实例目录（`Instance/Real/Luker/...` 等）复制/写入任何文件**；实例插件更新只能走 Git。
 
 # Custom Agent Guidelines

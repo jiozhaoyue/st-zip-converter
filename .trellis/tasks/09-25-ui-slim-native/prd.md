@@ -115,13 +115,29 @@
 
 ## Acceptance Criteria
 
-- [ ] 工作台分区符合 R1 表；G 常驻，H/I/J/K 为原生 `.inline-drawer` 折叠；H 默认全启用且标题栏显示启用项数摘要。
-- [ ] 删除项核实：全仓 `grep -c "placeholder-chips\|btn-tpl-preset\|link-char-chats-check"` 在 `src/`、`index.html` 均无残留业务引用（模板 id 与 JS 绑定同步移除）。
-- [ ] `#split-select` 已替换为整数数值输入，含最小值校验；有对应单测覆盖非法输入（浮点/负数/0）。
-- [ ] 全仓无解释性静态文案残留：模板与 `index.html` 中不再有 `<p class="sub-text">`、`<small>` 提示、括号补充说明；错误/状态/placeholder/悬停名保留。
-- [ ] 暂存区行内仅「载入」+「⋯」；更多菜单含三项动作；删除确认走 `callGenericPopup`（不可用时降级）。
-- [ ] 空状态下 `#report-panel` 不渲染（DOM 中不存在或不可见）。
-- [ ] `computeActionAvailability()` 存在且为三枚动作按钮的唯一启用来源（`grep` 验证 `btn-convert.disabled` / `btn-host-fetch.style.display` 的写点已收敛）。
-- [ ] `index.html` 不再含业务节点 id，内容由 `getWorkbenchHtml()` 生成；新增守卫命令可断言（退出码 1 即失败）。
-- [ ] `npm test` 全绿 + `check:css-scope` + `check:dom-injection` 通过；实机在 8004 验证三入口（独立/插件/模态）渲染一致。
-- [ ] 面板渲染高度较改造前显著下降（改造前后实测对照数据落 `research/`）。
+> 回填方式：**逐条现场取证**（文件:行号 / 命令输出），不采信任何交接文档的进度断言。
+> 取证时点 2026-09-25，提交 `0256f9b`。
+
+- [x] 工作台分区符合 R1 表；G 常驻，H/I/J/K 为原生 `.inline-drawer` 折叠；H 默认全启用且标题栏显示启用项数摘要。
+      **证据**：`workbench-template.js` 共 5 个 `.inline-drawer wb-fold`（`fold-cleanup`/`fold-extension`/`fold-incremental`/`fold-filename`/`fold-report-details`），折叠读数由 `index.js:223 updateFoldSummaries()` 写入。H 区默认态按代码注释定义的语义「勾选 = 打包该项，未勾选 = 已清理」：`prune-builtin-check` 勾选、其余三项未勾选 → 四项**均为已清理**，首屏摘要即「全部已清理」，即裁决 3 的「默认全启用」。真机实测 `.inline-drawer` 5 个。
+- [x] 删除项核实：全仓 `grep -c "placeholder-chips\|btn-tpl-preset\|link-char-chats-check"` 在 `src/`、`index.html` 均无残留业务引用。
+      **证据**：`grep -rn` 于 `src/`、`index.html`、`index.js` 全部返回空。
+- [x] `#split-select` 已替换为整数数值输入，含最小值校验；有对应单测覆盖非法输入（浮点/负数/0）。
+      **证据**：`workbench-template.js:133` 为 `<input type="number" id="split-input" min="1" step="1" inputmode="numeric">`；归一化抽为 `src/core/splitter.js` 的 `normalizeSplitMb()`（`MIN_SPLIT_MB = 1`）；`test/splitter.test.js` 新增 5 用例覆盖浮点/负数/0/空值/空白/非数字/Infinity，并断言返回值恒为整数。
+- [x] 全仓无解释性静态文案残留：模板与 `index.html` 中不再有 `<p class="sub-text">` 提示、`<small>` 提示、括号补充说明；错误/状态/placeholder/悬停名保留。
+      **证据**：`<p class="sub-text" id="drop-sub-text"></p>` 现为**空容器**，由 `index.js:1229 subTextEl` 写入**状态读数**（属 R4.2 保留项）；`zone-hint` / `ext-mode-desc` 均已删净。
+      **用户裁决（2026-09-25，本轮交互问答）**：F 区三联保留 3 个 `<small>` **字段标签**（`目标平台` / `压缩级别` / `分卷 MB`）——它们是三个控件的唯一位名（其中「分卷 MB」还承担单位），属功能性标签而非「`<small>` 提示」，本 AC 判定为满足。
+- [x] 暂存区行内仅「载入」+「⋯」；更多菜单含三项动作；删除确认走 `callGenericPopup`（不可用时降级）。
+      **证据**：`stash-list.js:221` 载入、`:226` 更多；菜单 actions 为 下载 / 写回宿主 / 删除（`stash-list.js:227-250`）。确认统一走 `host-bridge.js` 的 `confirmDialog()`（官方文档路径 `getContext().Popup.show.confirm`，降级 `window.confirm`），暂存区与待导出区共 4 处全部接入；真机端到端往返取证见 `research/final-report.md` §2。
+- [x] 空状态下 `#report-panel` 不渲染（DOM 中不存在或不可见）。
+      **证据**：`workbench-template.js:276` 默认带 `hidden` 属性；`style.css` 已补 `[hidden]` 在插件容器内生效的规则（`c3ca97c`）。
+- [x] `computeActionAvailability()` 存在且为三枚动作按钮的唯一启用来源。
+      **证据**：定义于 `index.js:114`，仅被 `index.js:138 applyActionAvailability()` 调用；`grep` 三枚按钮的 `disabled` / `style.display` 直接写点**已为空**，全仓 14 处状态变化点一律调 `applyActionAvailability()`。
+- [x] `index.html` 不再含业务节点 id，内容由 `getWorkbenchHtml()` 生成；新增守卫命令可断言。
+      **证据**：`npm run check:template-source` 输出「index.html 为骨架，41 个业务节点均定义于 `src/ui/workbench-template.js`」；`test/single-template-source.test.js` 含反向断言（`workspace-panel` / `host-export-card` / `btn-clear-workspace` 不得复活）。
+- [x] `npm test` 全绿 + `check:css-scope` + `check:dom-injection` 通过；实机验证三入口（独立/插件/模态）渲染一致。
+      **证据**：`npm test` **39 文件 / 333 passed / 2 skipped**；三守卫全通过（含 `check:template-source`）。独立态实机 41/41 节点、0 控制台错误；插件态 8004 实机复验见 `research/final-report.md` §1。
+      **用户裁决（2026-09-25，本轮交互问答）**：模态态由 `test/single-template-source.test.js` 的三个 `it.each` 模式**确定性断言**（三态各产出全部 41 个必需业务节点）即算满足——该入口 `openConverterModal` 是 `index.js:1489` 的**宿主侧导出**，仓内无任何调用方，真机跑它只是把同一模板函数再执行一遍。
+- [x] 面板渲染高度较改造前显著下降（改造前后实测对照数据落 `research/`）。
+      **证据**：**1237 → 903 px（−27.0%）**、可见按钮 **13 → 3（−76.9%）**、`<details>` **3 → 0**；对照表与复验记录见 `research/final-report.md`（原始采样 JSON 按 `.gitignore` 不入库，脚本可重跑复现）。
+      **遗留（已交 T3）**：真机上未观测到宿主锚点注入按钮（承载它们的宿主面板未被探针打开，非本插件回归），R7.3 的结构契约改由 `test/host-button-factory.test.js` 6 用例确定性锁定；「真机注入可见性」交 `09-25-luker-native-integration` 随宿主面板接手时确认。

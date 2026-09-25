@@ -241,10 +241,12 @@ rsync -av --delete --exclude='__pycache__' .trellis/scripts/ packages/cli/src/te
 | 备份内清单合成 | `src/core/transform.js` 的 `emitSynthesized` | 合成条目只允许出现在尾部合成块，且用固定时间戳 `FIXED_TIMESTAMP` |
 | 产物出口 | `src/ui/export-queue.js` 的 `ExportQueue` | 产物**生成**路径（转换 / 宿主拉取 / 增量 / 分卷）不得自动下载；下载动作只能由用户在待导出区或工作区列表显式触发 |
 | 宿主 UI 注入 | `src/ui/host-bridge.js` 的 `watchHostDom`（MutationObserver，200ms 去抖）+ `dataset.stZipInjected` | 不得各模块自开 `setInterval` 轮询 |
-| HTML 工作台模板 | `index.html`（独立态）与 `src/ui/workbench-template.js` 的 `getWorkbenchHtml()`（插件态） | **同一 UI 的两份副本**，结构改动必须同一提交内改两处：`grep -c "btn-convert" index.html src/ui/workbench-template.js` 两处均须 ≥ 1 |
+| 宿主注入按钮构造 | `src/ui/host-bridge.js` 的 `makeHostButton({ id, icon, label, title, onClick })` | `menu_button menu_button_icon` 形态的按钮一律经此工厂；不得就地手搓 DOM（`registerMenuButton` 的菜单项与工作台模板按钮形态不同，有意不纳入） |
+| 确认对话框 | `src/ui/host-bridge.js` 的 `confirmDialog()`（官方文档路径 `getContext().Popup.show.confirm`，不可用时降级） | 组件层不得裸用 `confirm()`／直接调宿主；经 `confirmFn` 参数注入，缺省时组件自行降级 |
+| HTML 工作台模板 | `src/ui/workbench-template.js` 的 `getWorkbenchHtml()` | **唯一来源**（`index.html` 自 2026-09-25 起仅为空骨架）；结构改动只改这一处，并同步 `REQUIRED_TEMPLATE_IDS` |
 
 命令与阈值同样只许有一处定义：`package.json` 的 `scripts`（`test` / `build` / `check:css-scope` /
-`check:dom-injection` / `gen-fixtures`）与其对应的 `scripts/*.js` 守卫脚本。
+`check:dom-injection` / `check:template-source` / `gen-fixtures`）与其对应的 `scripts/*.js` 守卫脚本。
 
 > `src/vendor/` 是**第三方本地副本**：只调用其现有 API，**不得**升级或就地改造
 > （用户通过酒馆「扩展管理器 Git URL 一键克隆」安装，不能要求跑 `npm install` / `npm run build`）。

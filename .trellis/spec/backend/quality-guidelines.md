@@ -16,7 +16,7 @@
 
 | 类别 | 命令 | 目的 |
 |---|---|---|
-| 单元 / 集成 | `npm test` | Vitest 全量：当前 **34 个文件 / 226 passed / 2 skipped** |
+| 单元 / 集成 | `npm test` | Vitest 全量：当前 **39 个文件 / 333 passed / 2 skipped** |
 | 单文件 | `npx vitest run test/xxx.test.js` | 只跑一个文件（调试用） |
 | 单条用例 | `npx vitest run -t "用例名"` | 只跑一条用例 |
 | CSS 作用域守卫 | `npm run check:css-scope` | 断言 `style.css` 每条规则都带 `.app-container` 或 `.st-converter-drawer-app` 前缀 |
@@ -89,7 +89,7 @@
 - [ ] `npm test` 全绿（零失败）。
 - [ ] `npm run check:css-scope` 退出码 0。
 - [ ] `npm run check:dom-injection` 退出码 0。
-- [ ] 若改了 UI 结构：确认 `index.html` 与 `src/ui/workbench-template.js` **同源同改**（grep 新 id 两处均须命中）。
+- [ ] 若改了 UI 结构：改 `src/ui/workbench-template.js` **一处即可**（单一模板源），并同步 `REQUIRED_TEMPLATE_IDS` + 跑 `npm run check:template-source`。
 
 ---
 
