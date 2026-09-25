@@ -1164,3 +1164,43 @@ T2 的已确认（裁决 1–15）、T4 的已出、**T3 的 ③ 扩展管理建
 ### Next Steps
 
 - 复用验时重启 Dev 8003；③-C 若要做需另开任务并先验 suggestUrl 预填；既有 09-22/09-23 规划任务仍在 planning
+
+
+## Session 26: Session 26: gitMode 三档 .git 瘦身落地（取证先行 + Dev 实例往返实测）
+<!-- trellis-session: v=2 fp=d9aedb31190b2fe1 -->
+
+**Date**: 2026-09-25
+**Task**: Session 26: gitMode 三档 .git 瘦身落地（取证先行 + Dev 实例往返实测）
+**Branch**: `main`
+
+### Summary
+
+Session summary was not supplied.
+
+### Main Changes
+
+- 新增 gitMode（keep/minimal/strip）：minimal 仅留 config/HEAD/index/refs/heads/** 并合成 .git/objects/.keep
+- transform/report/plan-preview/UI 全链路贯通；控件守卫登记 name:git-mode；测试 +28（386 passed）
+- Dev Luker 实例往返实测通过：3.02MB → 3592B，恢复后一键更新三条命令全过、更新后自愈为完整仓库
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cdc9772` | feat(git): 扩展 .git 历史瘦身三档策略（keep/minimal/strip） |
+| `18437ef` | docs(task): 勾选 §6.4/§6.5（已提交并推送） |
+| `205014e` | chore(task): archive 09-22-extension-git-slim |
+
+### Testing
+
+- [OK] npm test 42 文件 / 386 passed / 2 skipped；四条静态守卫退出码 0；npm run build 通过
+- [OK] Dev 实例内 git 取证：is-inside-work-tree=true、branch=* main、pull 快进成功、pull 后 status/fsck 干净
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 悬置路径 restoreToLuker 在 L 上必然 404 —— 后台任务建议已登记，待判定
+- 既有 09-23 三项规划（extension-cloud-migration 父 + 两子）仍在 planning

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 25
+- **Total Sessions**: 26
 - **Last Active**: 2026-09-25
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1166 | Active |
+| `journal-1.md` | ~1206 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 26 | 2026-09-25 | Session 26: gitMode 三档 .git 瘦身落地（取证先行 + Dev 实例往返实测） | `cdc9772`, `18437ef`, `205014e` | `main` |
 | 25 | 2026-09-25 | 四片合入 main + 新增第 4 条守卫（控件消费点）+ 父任务 8/8 收口 | `7220716`, `df9fe41` | `main` |
 | 24 | 2026-09-25 | T4 上下传收敛：揪出「增量合并」死开关 + 概念消歧 + spec 拆分防截断 | `69827c9`, `4bcf119`, `7c05883` | `fix/perf-hardening-transfer-memory` |
 | 23 | 2026-09-25 | T3 Luker 原生对接：备份锚点取证翻案 + 存储 Inspector 接入 + selection 显式化 | `1d80631`, `b49a409`, `d65ef96`, `4cb1b94` | `fix/perf-hardening-transfer-memory` |
