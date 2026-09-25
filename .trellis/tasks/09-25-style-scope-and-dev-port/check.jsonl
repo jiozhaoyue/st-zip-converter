@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核查：无裸/全局选择器、配色走宿主变量、注入元素幂等"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核查：测试基线不回退、四条守卫（含新增主体检查）退出码 0"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "核查：对话框/弹窗若改原生 Popup 是否按适配器契约实现（禁硬编码 POPUP_RESULT）"}
+{"file": ".trellis/tasks/archive/2026-09/09-22-css-scope-guard/design.md", "reason": "核查：守卫补洞未削弱原有双前缀检查，负例样本齐备"}
+{"file": ".trellis/spec/guides/subagent-collaboration.md", "reason": "核查：若检查阶段派发子代理，模型档位与并发纪律（L0-8）"}

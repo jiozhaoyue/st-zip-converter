@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "样式作用域铁律（双前缀、禁止全局选择器、配色继承 --SmartTheme*）与组件注入约定——本任务的核心依据"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门：测试基线（44 文件 / 406 passed / 2 skipped）、四条静态守卫命令与转义层契约"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "宿主原生弹窗适配器（confirmDialog / Popup.show.confirm）——OQ-3「改用原生 Popup」的落地依据"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "独立态与插件态两套根容器（#app.app-container vs .st-converter-drawer-app）的约定，改写作用域前必读"}
+{"file": ".trellis/tasks/archive/2026-09/09-22-css-scope-guard/design.md", "reason": "CSS 作用域守卫的原始设计（含双前缀规则的由来与实现取舍），补洞必须与之一致"}
+{"file": ".trellis/tasks/archive/2026-09/09-22-css-scope-guard/prd.md", "reason": "同上的需求背景与验收口径"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用既有件（守卫脚本 / 宿主变量 / 既有弹窗适配器）而非另造机制"}
