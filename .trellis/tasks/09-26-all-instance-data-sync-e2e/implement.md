@@ -1,0 +1,253 @@
+# 执行计划 —— 六实例数据同源 + 插件功能全自动化验证
+
+> 复选框**随执行实时勾选**（L0-2），禁止任务结束后凭记忆批量补勾。
+> 每个阶段末有**回滚点**；任一断言失败即停并回滚，不得「先跑完再看」。
+
+---
+
+## 阶段 0 · 评审门（`task.py start` 之前）
+
+- [x] **0.1** 向用户请批三项**扩大/偏离**（本文件末尾「请批清单」），获准后才 `start` ——
+      **2026-09-26 已裁决**：A-1 批准、A-2 否决（只备份 Real Luker）、A-3 批准、U-12 先跑阶段 1-2。
+
+```bash
+python ./.trellis/scripts/task.py start
+```
+
+- [x] **0.2** 回填 `implement.jsonl` / `check.jsonl`（各 8 / 6 条真实条目，已去 `_example`）。
+
+**回滚点**：未获批则本阶段即终止，任务停留在 `planning`。
+
+---
+
+## 阶段 1 · 备份先行（R1 → AC-1 / AC-1b）
+
+> 前置：用户已授权启动实例（U-6）。**本阶段结束前不得对任何实例做写入**。
+> **备份范围仅 Real Luker**（U-9）——其余目标只做只读清单快照，无回滚能力（见 `design.md` §6）。
+
+- [x] **1.1** 写 `e2e/lib/instances.cjs` 登记表（id → `{dir, port, url, profile, startCmd, stopCmd}`），
+      目录**相对解析**、端口写死登记值（8001/8002/8003/8004/8899）。
+      **实测**：`INSTANCES_ROOT` 解析为 `D:\Repo\Tavern-repo\Instance`，五个实例目录与四个
+      `userDir` 全部 `[OK]`；`pt-web` 的 `userDir` 按设计为 `n/a`（纯前端 Profile 存储）。
+      **踩坑**：首版 JSDoc 里写了 `` `.pw-profile*/` ``，其中的 `*/` **提前闭合了块注释**，
+      导致后续反引号把整个文件拖进模板串 —— `node --check` 报在 104 行，真凶在第 30 行。
+      二分定位后改正（注释内不得出现 `*/`）。
+- [x] **1.2** 写 `scripts/instance-sync/start-instance.cjs`，支持 `--id`，启动后**轮询端口就绪**
+      （有界等待，L1-MR-7），就绪超时即失败；端口已在监听则**幂等跳过**，不重复拉起。
+- [x] **1.3** 启动 **Real Luker :8004**：
+
+```bash
+node scripts/instance-sync/start-instance.cjs --id real-luker
+```
+
+      校验：`curl -sk https://127.0.0.1:8004/ -o /dev/null -w '%{http_code}'` 得 200/302。
+      **禁止**任何脚本绑定或请求 8000（L0-16）。
+      **实测结果**：:8004 **已在监听**（HTTP 200，pid 29452），启动器幂等跳过。
+      **并更正一处取证错误**：首版用 `grep -c "LISTENING.*:$p "` 判端口，正则顺序写反导致
+      **永远匹配 0**，误得「四端口全部未监听」。更正后：**8003（Dev Luker, pid 76784）与
+      8004（Real Luker, pid 29452）本来就在运行**，只有 8001/8002/8899 未监听。
+      端口归属经探针决定性确认（`:8003` 上 `third-party/st-authority-sdk` 返回 200、
+      `:8004` 返回 404）⇒ 与登记表一致，**未发生误连**。详见 `research/instance-inventory.md` §6。
+      ⚠️ 后续收尾**只关本次启动的实例**，8003/8004 保持原样（AC-11）。
+- [x] **1.4** **备份通路试跑**（**不下载全量**）：对 Real Luker 发一次 `POST /api/users/backup`，
+      读到**响应头 + 首块**即中止，确认 `200`、`content-type: application/zip`（或等价）、
+      响应体确为 zip 头（`PK\x03\x04`）。读数落 `research/backup-channel-probe.md`。
+      **不在其他实例上试跑**（备份范围仅 Real Luker，不为试跑触碰别处）。
+      **实测**：`200` + `content-type: application/zip` + 首 4 字节 `50 4b 03 04`；
+      **关键副作用发现：`transfer-encoding: chunked`、无 `content-length`** ⇒ 必须真流式，
+      且否掉了「Playwright download 事件」与「整包进内存」两条路。
+- [x] **1.5** 写 `scripts/instance-sync/export-backups.cjs`，按 1.4 验证的通路实现；
+      **3.8 G 必须走流式**（会话内 `fetch` → `fs.createWriteStream`，不经过浏览器内存，K-1）；
+      产出包与同名 `.json` 记录（`{instance, sourceDir, file, bytes, entryCount, sha256, exportedAt}`）落 Downloads。
+      实现取舍：浏览器只用于**取会话**（cookie + `/csrf-token`），字节改由 **Node 侧 `https.request` 流式**直写磁盘。
+- [x] **1.6** 全量导出 S0。导出期间对源目录**只读**（I-1）；记录耗时与峰值内存。
+      **实测**：1602.7 MB（压缩后）/ **3840.6 MB 未压缩** / 8683 条目 / **247.1 s**。
+      记录到 `Downloads/backup-real-luker-20260926-010422.json`。
+      **实测现象**：进入 `backups/` 后速率从 ≈7 MB/s 塌到 ≈0.9 MB/s（对已 deflate 的 111 个历史包再压一次，
+      是 K-1 的实测形态）。详见 `research/backup-export-readings.md`。
+- [x] **1.7** 校验备份：`sha256` 可重算、`entryCount > 0`、未压缩量级 ≈3.8 G。
+      **实测**：`inspect-pack.cjs` 读出未压缩总计 **3840.6 MB**，与源目录量级一致；
+      一级构成逐项对得上（`chats/` 1029 条 / `characters/` 430 条 / `backups/` 111 条 2479.5 MB …）
+      ⇒ **AC-1 达成**（记录 `research/backup-export-readings.md`）。
+- [x] **1.8** 写 `scripts/instance-sync/snapshot-manifest.cjs`，对**四个将被写入的目标**
+      （Dev Luker / Dev ST / Real ST / PT web）各做一次**只读**清单快照。
+      **实测**：`dev-st` 196 文件 / 15.4 MB；`dev-luker` 3238 / 1037.6 MB；
+      `real-st` 195 / 15.4 MB；`real-luker` 7986 / 3731.3 MB（各 <3 s）。
+      `pt-web` 按设计跳过（纯前端 Profile，无磁盘目录）。
+- [x] **1.9** 快照必须**在阶段 3 的任何写入之前**完成 —— 已完成（阶段 3 尚未开始）。
+      四份快照与「目标独有清单」的条目数汇总见 `research/pre-sync-manifest-*.json`。
+
+**回滚点**：本阶段只读（唯一写动作是往 Downloads 落产物）。失败即修脚本重跑，
+**不得跳过备份进入阶段 3**。
+
+---
+
+## 阶段 2 · 产包 + ST 导入路径探明（R2 前置）
+
+> **经用户批准（2026-09-26）修复了产品缺陷以解开阻塞** —— 这是对 `prd.md` Out of Scope
+> 「缺陷只登记、当轮不修」的一次**显式偏离**，由用户当面裁决「修产品代码（推荐）」。
+> 完整诊断见 `research/build-packs-blocker.md`。
+
+- [x] **2.0** 空转算账（`--dry-only`）**已完成**，三个目标的读数都正常：
+      `[l]` copied=7748 / dropped=934；`[st]` copied=7748 / dropped=935；`[tt]` copied=7747 / dropped=936。
+      丢弃项**全部对得上**：823 条 `.git` 内部冗余（产品安全清洗，`gitMode=KEEP` 仍保留 essentials）
+      + 111 条 `backups/`（**正是 U-4**）+ 1 条源 `manifest.json`（按目标重合成）。
+      读数落 `research/pack-build-readings.json`。
+
+- [x] **2.0a（新增·经批准）修复 `src/core/zip-io.js` 两处缺陷**：
+      - **`openStream`（原 :121）**：`readable.cancel(err)` 改为「已锁则不 cancel」并吞掉 cancel 自身失败。
+        原写法在消费方已 `pipeTo` 锁定时抛 `ERR_INVALID_STATE`，**升级为未处理拒绝杀死 Node 进程**
+        且**掩盖真正的主错误**。
+      - **`createWriter`（原 :145）**：`bufferedWrite` 由硬编码 `true` 改为**默认 `false`、可显式覆盖**。
+        实测该标志在真源包规模下使落点**恒为 0 字节、`close()` 永不返回**（RSS 1.0–1.5 GB）；
+        改 `false` 后 **82.4 s 完成 614 MB、RSS ~330 MB**。
+      **证据**：同源包/同 8572 条/同落点的对照实验（`research/build-packs-blocker.md` §根因）。
+      **回退基线**：`npm test` **45 passed / 1 skipped（46 文件）、429 passed / 2 skipped** —— 与基线逐项一致，**零回退**。
+      **未为它新增单测，且这是有意的**：实测证明该缺陷**无法被快速单测守护** ——
+      单条目 4 MiB 时 `bufferedWrite` 真假**都**边写边落盘；4000 条 × 4 KB 两种模式也都 0.8 s 正常；
+      唯一触发维度是**总字节**（1.3 GB 级），注定进不了 `npm test`。
+      故把可执行守护放进 **`node scripts/instance-sync/selftest-node-zip-io.cjs --large <zip>`**
+      （判据：落点字节在有界时间内持续增长，连续 90 s 零增长即判失败）。
+      **不留「看着像守护、其实无论怎样都通过」的测试**（首版写过一版，经实测确认无判别力后已删除）。
+
+- [x] **2.1** 写 `scripts/instance-sync/build-packs.cjs`，对 S0 调 `convert()`（Node 侧）产出
+      `P-luker.zip` / `P-st.zip` / `P-tt.zip`，三份均 `includeBackups: false`；
+      并加 `.partial` 保护（先写 `.partial`，成功后再改名 —— 首轮实跑留下的 8.6 MB 坏包即因缺此保护，
+      **该残件已按用户裁决删除**）。
+- [x] **2.2** **先 `dryRun: true` 空转**，核对计划读数 —— ✅ 已完成（见 2.0）。
+- [ ] **2.3** **探明 ST 导入路径（OQ-1）**：在 Dev ST :8001 上实地走一遍原生「导入用户数据」，
+      记录 UI 路径、触发端点序列、是否可脚本化。结论落 `research/st-import-path.md`。
+      **若不可自动化 → 触发 K-2 降级预案**，并在 PRD 残留登记。
+- [ ] **2.4** 校验三份产包：`target` 布局正确（ST 摊平 / TT `data/default-user/` 前缀）、
+      `backups/` 零条目、角色卡与聊天计数与源一致。
+
+**回滚点**：产包在 Downloads，未触碰任何实例；失败即重跑。
+
+---
+
+## 阶段 3 · 同步（R2 → AC-2 / AC-3 / AC-4）
+
+> 顺序：**先 Dev，后 Real**；每完成一处就跑一次核对，**不通过就不进入下一处**。
+
+- [ ] **3.1** 写 `scripts/instance-sync/diff-report.cjs`（三张表：源覆盖率 / 目标独有存活 / 内容量）。
+- [ ] **3.2** **空转对照**：不写入，只算差异，确认三张表能正确报出「目标缺什么」
+      —— **先证明判定会报差异，再相信它报 100%**。读数落 `research/diff-selfcheck.md`。
+- [ ] **3.3** `restore-luker.cjs` 同步 **Dev Luker :8003**：先 `/restore-backup/probe` 预检，
+      再 `mode=merge` + 全类目 `selection`，开流式进度。
+- [ ] **3.4** 对 Dev Luker 跑 `diff-report.cjs` → **AC-2 断言必须过**（覆盖率 100% / 独有零删除）。
+- [ ] **3.5** `import-st.cjs` 同步 **Dev ST :8001**（按 2.3 的路径）。
+- [ ] **3.6** 对 Dev ST 跑 `diff-report.cjs` → AC-2 过。
+- [ ] **3.7** 同步 **Real Luker :8004**（同 3.3）→ `diff-report` → AC-2 过。
+- [ ] **3.8** 同步 **Real ST :8002**（同 3.5）→ `diff-report` → AC-2 过。
+- [ ] **3.9** `import-pt.cjs` 同步 **PT web :8899**：先 dry-run 预览核对计数，再 `merge` 执行；
+      对 PT 跑 `diff-report` → AC-2 过。
+- [ ] **3.10** **AC-3 内容断言**：四处 + PT 上核对角色卡 430 / 聊天 1029（ST 侧按 ST 类目折算）。
+- [ ] **3.11** **AC-4 交付物**：确认 `P-st.zip` / `P-tt.zip` / `P-luker.zip` 在 Downloads；
+      写 `TT-导入说明.md`（含 data root 决议方式与核对步骤）同放 Downloads。
+
+**回滚点**：任一处 AC-2 失败 → 立即**停止后续目标**，按 `design.md` §6 处置已完成目标。
+⚠️ **回滚能力不对称**（U-9）：只有 **Real Luker** 有真回滚（S0 + `mode=overwrite`）；
+Dev Luker / Dev ST / Real ST **只有取证**（对比 `pre-sync-manifest-*.json` 报出改动路径，内容不可恢复）；
+PT 用 M21 导入前自动恢复点。**因此阶段 3 每写一处都必须先跑一次 AC-2 核对再前进。**
+
+---
+
+## 阶段 4 · E2E 基础设施（R3 → AC-5 / AC-8）
+
+- [ ] **4.1** 写 `e2e/lib/resolve-playwright.cjs`（先 `require('playwright')`，失败再 `npm root -g`）
+      —— 沿用上轮 `.pw-verify-changes.cjs:20-26` 的既有模式，**不新装包**。
+      附 **1.62.1 版本断言**：不符即 `console.warn`（K-7），**禁止**自动升级或覆盖。
+- [ ] **4.2** 写 `e2e/lib/guard.cjs`（契约见 `design.md` §3.3）。
+- [ ] **4.3** 写 `e2e/specs/guard.spec.cjs` **负例用例**：
+      喂 `http://127.0.0.1:8002` / `:8004` 必抛错、喂空值必抛错、喂非白名单端口必抛错。
+      **先看它成功抓到违规**，再用于后续判定（AC-8）。
+- [ ] **4.4** 写 `e2e/lib/harness.cjs`：持久化上下文、控制台与失败请求采集、
+      **本插件归因过滤**（只把来源为本插件资源的错误计入失败）。
+- [ ] **4.5** 写 `e2e/run.cjs`：串行跑 spec、汇总、**任一失败即非零退出**；支持 `--only` / `--url`。
+- [ ] **4.6** `package.json` 增加 `"e2e": "node e2e/run.cjs"`（**仅台账项，非依赖变更**）。
+- [ ] **4.7** 跑守卫与负例：
+
+```bash
+node e2e/run.cjs --only guard
+```
+
+**回滚点**：纯新增文件，删除即可；不进产品构建产物（`vite build` 不受影响）。
+
+---
+
+## 阶段 5 · 加载冒烟 + 功能矩阵（R3 → AC-6 / AC-7）
+
+- [ ] **5.1** 确保三目标在跑（8001 / 8003 / 8899）；**8899 的 PT web 需先起**。
+- [ ] **5.2** 写 `e2e/specs/smoke.spec.cjs`：插件加载成功、注入点齐全、
+      **本插件零报错、零失败请求**。参数化实例，逐目标跑。
+- [ ] **5.3** 写 `e2e/specs/matrix.spec.cjs`：覆盖 M-1…M-9 九条路径（`design.md` §3.4）。
+- [ ] **5.4** 全量跑：
+
+```bash
+node e2e/run.cjs
+```
+
+      要求：**退出码 0**；trace/截图落 `test-results/`（**严禁**写 `Instance/**`，I-5）。
+- [ ] **5.5** 提交前脱敏核对：`test-results/` 与任何将入库的读数里**无 token、无聊天内容、无本机用户路径**。
+
+**回滚点**：E2E 只读实例，不回滚数据；失败即修用例或如实登记为残留。
+
+---
+
+## 阶段 6 · 质量门（AC-9）
+
+- [ ] **6.1** `npm test` —— 全绿零回退（基线 **46 文件 / 429 passed / 2 skipped**）。
+      为 `guard.cjs` 等**纯逻辑**补 vitest 单测（E2E 本身不进 vitest 用例集）。
+- [ ] **6.2** 五条静态守卫退出码全 0：
+
+```bash
+npm run check:css-scope && npm run check:dom-injection && npm run check:template-source && npm run check:control-consumer && npm run check:dom-scope
+```
+
+- [ ] **6.3** `npm run build` 通过，产物与本次改动无关（L1-MR-11 未被破坏）。
+
+**回滚点**：质量门不过即修，不带着失败提交。
+
+---
+
+## 阶段 7 · 规范落库（AC-10）
+
+- [ ] **7.1** 新建 `.trellis/spec/guides/instance-e2e-and-data-sync.md`（**自包含**：内联读数与
+      `file:line`，**不写**「详见任务目录」）。至少涵盖：实例登记表与端口纪律、
+      端口守卫契约与负例、四宿主的导出/导入通道对照、同源同步的语义与核对方法。
+- [ ] **7.2** 更新 `.trellis/spec/frontend/index.md` 与 `quality-guidelines.md` 的**过时计数**
+      （测试文件数/用例数、守卫条数）。
+      ⚠️ **`component-guidelines.md` 距 32768 字节上限仅余 135 字节** ——
+      **禁止**向该文件追加任何内容；需要落内容就按主题新建文件。
+- [ ] **7.3** 三条平台文件（`CLAUDE.md` / `AGENTS.md` 等）与真源块若需同步，走真源仓
+      `tavern-harness` 的同步器，**不手改**。
+
+**回滚点**：spec 改动可 `git checkout` 还原。
+
+---
+
+## 阶段 8 · 收尾（AC-11 + 提交）
+
+- [ ] **8.1** **关闭本次启动的全部实例**（I-6）；复验四个端口恢复未监听。
+- [ ] **8.2** `git status --short` 做**范围门**（L0-17：**不用** `git diff --stat` 判断范围）。
+- [ ] **8.3** 回填 `prd.md` 的「残留」表，如实登记未做项（尤其 K-2 若触发）。
+- [ ] **8.4** 提交并**推送 origin**（L0-7：完成即推送）：
+
+```bash
+git add -A && git commit -m "test(e2e): 六实例数据同源同步 + 插件功能自动化验证基础设施" && git push origin main
+```
+
+- [ ] **8.5** 写 journal、`task.py archive`。
+
+---
+
+## 请批结果（阶段 0.1，2026-09-26 已裁决）
+
+| # | 事项 | 裁决 | 备注 |
+| --- | --- | --- | --- |
+| **A-1** | R2 向实例目录写入，与 L0-1 字面冲突 | ✅ **批准偏离** | 只走宿主原生通道；写入语义 `merge`；先备份 + 差异核对 |
+| **A-2** | 备份范围扩到四个 ST/Luker 实例 | ❌ **否决 —— 只备份 Real Luker**（U-9） | 后果已登记：Dev Luker / Dev ST / Real ST **无回滚手段**，见 `prd.md` R1 的 U-9 框与 `design.md` §6 |
+| **A-3** | `e2e/` 与 `scripts/instance-sync/` 入库 | ✅ **批准** | 路径相对解析，不含本机绝对路径与凭据（P-17 / L1-MR-14） |
+| **A-4** | ST 导入不可自动化时的降级预案 | ✅ 预先认可 | 降级为「产包 + 手工说明」+ 残留登记，**不拿裸文件拷贝凑数**（I-3） |
+| **A-5** | 把 Playwright 写入 `devDependencies` | ⏸ **默认不做** | 复用全局 1.62.1；确有必要时单独走 PARDON |
+| **U-12** | 推进节奏 | **先跑阶段 1-2** | 只读实例 + 只在 Downloads 产包；读数回报后再定阶段 3 |

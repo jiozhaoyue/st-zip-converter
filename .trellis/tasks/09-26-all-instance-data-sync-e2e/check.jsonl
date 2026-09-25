@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门槛：npm test 全绿零回退、守卫命令"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验证矩阵、转义层契约、禁止模式、纯逻辑可单测"}
+{"file": ".trellis/spec/frontend/dom-write-scope.md", "reason": "宿主 DOM 写入锚点白名单与归因仪器——E2E 报错归因要按此判定"}
+{"file": ".trellis/spec/guides/subagent-collaboration.md", "reason": "派发子代理前的来源唯一性与写权限边界"}
+{"file": ".trellis/tasks/09-26-all-instance-data-sync-e2e/research/host-import-export-contracts.md", "reason": "核对同步语义（Luker merge / PT merge）与端点契约"}
+{"file": ".trellis/tasks/09-26-all-instance-data-sync-e2e/research/instance-inventory.md", "reason": "核对实例/端口/内容量读数是否与验收一致"}

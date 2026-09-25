@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/guides/tavern-datapack-formats.md", "reason": "四平台包布局/导入语义/转换约定——本次同步与产包的核心依据"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "宿主生命周期接入、备份/恢复端点与 CSRF——同步通道直接相关"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "宿主能力决策树与降级契约——恢复能力探测与不出现死按钮"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "四平台 zip 布局、流式 IO、secrets 保真"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试矩阵、守卫命令、禁止模式、zip 写入并发契约"}
+{"file": ".trellis/tasks/09-26-all-instance-data-sync-e2e/research/host-import-export-contracts.md", "reason": "四宿主原生导出/导入端点与语义（含 file:line）——通道选型的唯一依据"}
+{"file": ".trellis/tasks/09-26-all-instance-data-sync-e2e/research/instance-inventory.md", "reason": "六实例清单、体积/内容量、端口现状、扩展差集"}
+{"file": ".trellis/tasks/09-26-all-instance-data-sync-e2e/research/prior-art-search.md", "reason": "检索先行记录：无现成方案，自建范围与复用资产"}

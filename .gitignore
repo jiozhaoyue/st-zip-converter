@@ -20,6 +20,8 @@ out/
 tmp/
 coverage/
 .nyc_output/
+# E2E 产物（trace / 截图 / 实例日志 / pid）——含实例侧真实数据风险，严禁入库（L1-MR-14）
+test-results/
 # Playwright 持久化 profile（含 Cookies / Session Storage / 缓存，严禁入库 —— L1-MR-14）
 # 通配以覆盖 .pw-profile/ 与 .pw-profile-dev/ 等分实例 profile
 .pw-profile*/
