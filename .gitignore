@@ -20,7 +20,9 @@ out/
 tmp/
 coverage/
 .nyc_output/
-.pw-profile/
+# Playwright 持久化 profile（含 Cookies / Session Storage / 缓存，严禁入库 —— L1-MR-14）
+# 通配以覆盖 .pw-profile/ 与 .pw-profile-dev/ 等分实例 profile
+.pw-profile*/
 
 # 环境配置与凭据安全
 .env

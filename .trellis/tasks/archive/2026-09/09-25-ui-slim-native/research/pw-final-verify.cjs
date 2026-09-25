@@ -51,20 +51,14 @@ async function roundTrip(page) {
   return page.evaluate(async () => {
     const ctx = SillyTavern.getContext();
     const p = ctx.Popup.show.confirm('数据包互转', '实机复验：点击取消');
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 700));
 
-    const popup = document.querySelector('.popup');
-    const buttonTexts = [];
-    let clicked = null;
-    if (popup) {
-      const btns = Array.from(popup.querySelectorAll('button, .popup-button'));
-      for (const b of btns) buttonTexts.push((b.textContent || '').trim().slice(0, 20));
-      const cancel = btns.find((b) => /取消|cancel|否|no/i.test(b.textContent || ''));
-      if (cancel) {
-        cancel.click();
-        clicked = (cancel.textContent || '').trim();
-      }
-    }
+    // 取消按钮必须从 document 查，不能从 `.popup` 容器内查——
+    // 实测 `.popup` 匹配到的不是对话容器，其下 `button, .popup-button` 为空
+    // （见 pw-probe-anchors.cjs 的成功路径）。
+    const cancelBtn = document.querySelector('.popup-button-cancel');
+    const cancelText = cancelBtn ? (cancelBtn.textContent || '').trim() : null;
+    if (cancelBtn) cancelBtn.click();
 
     // 有界等待（L1-MR-7）：弹窗未按预期关闭时不无限挂起
     const settled = await Promise.race([
@@ -72,15 +66,21 @@ async function roundTrip(page) {
       new Promise((r) => setTimeout(() => r({ settled: false, result: null }), 4000)),
     ]);
 
-    // 兜底清理：任何残留弹窗就地移除，避免污染后续面板采样
-    document.querySelectorAll('.popup').forEach((el) => el.remove());
+    // 兜底清理：任何残留弹窗就地隐藏，避免污染后续面板采样
+    const hidden = [];
+    for (const el of document.querySelectorAll('[class*="popup" i]')) {
+      if (el.getBoundingClientRect().height > 0) {
+        el.style.display = 'none';
+        hidden.push(String(el.className).slice(0, 40));
+      }
+    }
 
     return {
       affirmative: ctx.POPUP_RESULT.AFFIRMATIVE,
       negative: ctx.POPUP_RESULT.NEGATIVE ?? null,
-      popupFound: !!popup,
-      buttonTexts,
-      clicked,
+      popupFound: !!cancelBtn,
+      cancelButtonText: cancelText,
+      hidden,
       ...settled,
     };
   });
@@ -215,7 +215,7 @@ async function main() {
 
   console.log('\n===== 结论 =====');
   console.log('宿主原生 Popup.show.confirm:', adapter.popupShowConfirm, '| AFFIRMATIVE =', adapter.affirmative);
-  console.log('端到端往返 settle:', trip.settled, '| 返回', trip.result, '| 点中按钮', trip.clicked);
+  console.log('端到端往返 settle:', trip.settled, '| 返回', trip.result, '| 取消按钮文案', JSON.stringify(trip.cancelButtonText));
   console.log('注入按钮:', injected.injectedCount, '枚 →', injected.injected.map((b) => b.id).join(', ') || '(无)');
   console.log('控制台错误:', consoleErrors.length ? JSON.stringify(consoleErrors) : '0');
   console.log('落盘:', OUT);
