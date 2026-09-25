@@ -47,6 +47,59 @@ export const EXTENSION_MODES = Object.freeze({
   FULL: 'full',         // 完整离线包模式:打包代码文件，适合无网环境
 });
 
+/**
+ * 扩展 `.git` 目录处理策略（任务 09-22-extension-git-slim）。
+ *
+ * 实测依据（临时目录复现，见该任务 prd.md「本轮取证」表）：
+ * - git 的 `is_git_directory()` 要求 `.git/objects` 与 `.git/refs` 是**真实目录**；
+ *   只留 config/HEAD/refs/heads/<branch> 会被判为「不是仓库」（`rev-parse --is-inside-work-tree` rc=128）。
+ * - 本项目管线丢弃空目录条目（`zip-io.js:101/111`），故 `minimal` 必须**合成占位文件**
+ *   `.git/objects/.keep`，否则 objects 目录解压后不存在，策略整体失效。
+ * - 酒馆「一键更新」链路 = `checkIsRepo` → `branch()` → `pull()`（**不调用 status**）；
+ *   补齐 `index` 与占位文件后三条命令全部通过，且 `pull` 会自动从 origin 补齐缺失对象，
+ *   首次更新后仓库自愈为完整状态。
+ * - `keep` = 100% 现状；`strip` 会让接收方彻底失去在线更新能力。
+ */
+export const GIT_MODES = Object.freeze({
+  KEEP: 'keep',       // 原样保留全部 .git 条目（默认，零行为变化）
+  STRIP: 'strip',     // 剔除整个 .git/（接收方需重新 git clone 才能在线更新）
+  MINIMAL: 'minimal', // 仅保留识别与更新所需最小集 + 合成 .git/objects/.keep
+});
+
+/** minimal 策略合成的占位文件内容（非 0 字节：个别解压实现会跳过零长度条目）。 */
+export const GIT_KEEP_PLACEHOLDER = new TextEncoder().encode(
+  '# 由 ST-zip-converter 合成：占位文件，仅用于保证 .git/objects 目录在解压后存在\n',
+);
+
+/** 归一化 gitMode：未知取值一律回落 KEEP（防御式，不抛错）。 */
+export function normalizeGitMode(value) {
+  return Object.values(GIT_MODES).includes(value) ? value : GIT_MODES.KEEP;
+}
+
+/** `relPath`（相对扩展根）是否属于 `.git` 目录。注意 `.gitkeep` 不算。 */
+export function isGitEntry(relPath) {
+  return relPath === '.git' || relPath.startsWith('.git/');
+}
+
+/**
+ * `minimal` 策略下需要保留的 `.git` 条目：
+ * `config`（remote URL）/ `HEAD`（分支）/ `index`（使更新后 status 干净）/ `refs/heads/**`（分支指针）。
+ * 其余（含 `objects/pack/*.pack` 全部对象存储）一律剔除。
+ */
+export function isGitMinimalKept(relPath) {
+  return relPath === '.git/config'
+    || relPath === '.git/HEAD'
+    || relPath === '.git/index'
+    || relPath.startsWith('.git/refs/heads/');
+}
+
+/** 因 gitMode 剔除条目时的上报文案（两档各自写明代价）。 */
+export function gitDropReason(gitMode) {
+  return gitMode === GIT_MODES.STRIP
+    ? 'gitMode=strip：剔除扩展 Git 历史（接收方需重新 git clone 才能在线更新）'
+    : 'gitMode=minimal：仅保留 Git 识别与更新所需最小集，剔除对象存储';
+}
+
 const TT_USER_PREFIX = 'data/default-user/';
 const TT_THIRD_PARTY_PREFIX = 'data/extensions/third-party/';
 const TT_SOURCES_PREFIX = 'data/_tauritavern/extension-sources/';
@@ -191,6 +244,7 @@ export async function convert(sourcePath, targetPath, {
   includeAppPrivate = false,
   compressionLevel = 5,
   extensionMode = EXTENSION_MODES.FULL,
+  gitMode = GIT_MODES.KEEP,
   keepDevFiles = false,
   pruneBuiltinAssets = false,
   signal,
@@ -208,6 +262,8 @@ export async function convert(sourcePath, targetPath, {
   const resumedCrc = resumeCrcMap instanceof Map
     ? resumeCrcMap
     : (resumeCrcMap && typeof resumeCrcMap === 'object' ? new Map(Object.entries(resumeCrcMap)) : null);
+  // gitMode 归一：未知取值回落 KEEP，保证「默认行为零变化」这一约束不被任意输入击穿。
+  const resolvedGitMode = normalizeGitMode(gitMode);
   const checkAbort = () => {
     if (signal?.aborted) {
       throw new DOMException('转换任务已被中止/暂停', 'AbortError');
@@ -244,6 +300,7 @@ export async function convert(sourcePath, targetPath, {
     thirdPartyFlattenedCount: 0, // ST/L 目标: 消除错误的 third-party 嵌套并拉平的条目数
     userExtensionsMigrated: 0, // PT/TT 目标: 迁移为 third-party 布局的用户级扩展条目数
     userExtensionCollisions: new Set(), // 与 third-party 同名而被丢弃的扩展名
+    gitMinimalRoots: new Set(), // gitMode=minimal 下见过 .git/ 的扩展根(hub 路径),供尾部合成 .keep
   };
 
   // 数据条目一律惰性流直通(addLazy:泵到该条目才打开源流,配合 yazl 顺序泵
@@ -419,6 +476,14 @@ export async function convert(sourcePath, targetPath, {
         const extFolder = extensionFolderName(routed.hubPath);
         const relPath = extensionRelativePath(routed.hubPath);
 
+        // Git 目录策略闸（任务 09-22-extension-git-slim）：
+        // gitKeep 决定这条 .git 条目最终是否写出；不该写出的在下方各处理器内跳过，并连同字节数上报。
+        // keep 下恒为 true → 现有行为零变化。
+        const gitEntry = isGitEntry(relPath);
+        const gitKeep = gitEntry
+          && (resolvedGitMode === GIT_MODES.KEEP
+            || (resolvedGitMode === GIT_MODES.MINIMAL && isGitMinimalKept(relPath)));
+
         // 散文件过滤 (如 extensions/ 根目录下的 .gitkeep): TT/PT 目标只消费 目录名/文件 形态
         if ((target === TARGETS.TT || target === TARGETS.PT) && !restUnderExt.includes('/')) {
           entry.skip();
@@ -473,12 +538,17 @@ export async function convert(sourcePath, targetPath, {
               context.extensionGitMeta.set(extFolder, current);
             }
           } catch { /* 忽略读取错误 */ }
-          if (extensionMode !== EXTENSION_MODES.MANIFEST) {
+          // 解析在三档模式下都发生（extensionGitMeta 必须照常产出），只有写出与否受策略影响。
+          if (extensionMode === EXTENSION_MODES.MANIFEST) {
+            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git Remote URL，实体文件不打包');
+          } else if (!gitKeep) {
+            report.dropped(routed.hubPath, gitDropReason(resolvedGitMode), entry.uncompressedSize);
+          } else {
+            // 只有真正写出的扩展才登记合成目标——被同名冲突/散文件规则跳过的扩展不得产生孤儿 .keep。
+            if (resolvedGitMode === GIT_MODES.MINIMAL) context.gitMinimalRoots.add(`extensions/${extFolder}`);
             const outPath = targetEntryPath(routed.hubPath, target);
             if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
             report.copied(routed.hubPath, entry.uncompressedSize);
-          } else {
-            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git Remote URL，实体文件不打包');
           }
           continue;
         }
@@ -493,12 +563,16 @@ export async function convert(sourcePath, targetPath, {
               context.extensionGitMeta.set(extFolder, current);
             }
           } catch { /* 忽略读取错误 */ }
-          if (extensionMode !== EXTENSION_MODES.MANIFEST) {
+          if (extensionMode === EXTENSION_MODES.MANIFEST) {
+            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git 分支，实体文件不打包');
+          } else if (!gitKeep) {
+            report.dropped(routed.hubPath, gitDropReason(resolvedGitMode), entry.uncompressedSize);
+          } else {
+            // 只有真正写出的扩展才登记合成目标——被同名冲突/散文件规则跳过的扩展不得产生孤儿 .keep。
+            if (resolvedGitMode === GIT_MODES.MINIMAL) context.gitMinimalRoots.add(`extensions/${extFolder}`);
             const outPath = targetEntryPath(routed.hubPath, target);
             if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
             report.copied(routed.hubPath, entry.uncompressedSize);
-          } else {
-            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git 分支，实体文件不打包');
           }
           continue;
         }
@@ -512,13 +586,26 @@ export async function convert(sourcePath, targetPath, {
               context.extensionGitMeta.set(extFolder, current);
             }
           } catch { /* 忽略读取错误 */ }
-          if (extensionMode !== EXTENSION_MODES.MANIFEST) {
+          if (extensionMode === EXTENSION_MODES.MANIFEST) {
+            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git Commit，实体文件不打包');
+          } else if (!gitKeep) {
+            report.dropped(routed.hubPath, gitDropReason(resolvedGitMode), entry.uncompressedSize);
+          } else {
+            // 只有真正写出的扩展才登记合成目标——被同名冲突/散文件规则跳过的扩展不得产生孤儿 .keep。
+            if (resolvedGitMode === GIT_MODES.MINIMAL) context.gitMinimalRoots.add(`extensions/${extFolder}`);
             const outPath = targetEntryPath(routed.hubPath, target);
             if (!dryRun) writer.addLazy(outPath, lazyOpen(entry), entry.uncompressedSize);
             report.copied(routed.hubPath, entry.uncompressedSize);
-          } else {
-            report.dropped(routed.hubPath, '轻量清单模式：已解析 Git Commit，实体文件不打包');
           }
+          continue;
+        }
+
+        // 2.5 Git 目录策略兜底闸：未经上述元数据处理器接管的 .git 条目。
+        // strip 下全部命中；minimal 下命中的是白名单之外者（objects/pack/*.pack 等对象存储）。
+        // 轻量清单模式下本闸不生效——该模式由下方第 3 步统一按「清单模式」理由丢弃，文案不得被 gitMode 抢占。
+        if (gitEntry && !gitKeep && extensionMode !== EXTENSION_MODES.MANIFEST) {
+          entry.skip();
+          report.dropped(routed.hubPath, gitDropReason(resolvedGitMode), entry.uncompressedSize);
           continue;
         }
 
@@ -544,7 +631,7 @@ export async function convert(sourcePath, targetPath, {
       }
     }
 
-    await emitSynthesized(writer, report, context, target, selection, { extensionMode });
+    await emitSynthesized(writer, report, context, target, selection, { extensionMode, gitMode: resolvedGitMode, dryRun });
     // Store 直存统计汇入报告（zip-io 按扩展名分流 level 0 的条目）
     if (!dryRun && typeof writer.getStoreStats === 'function') {
       const storeStats = writer.getStoreStats();
@@ -707,7 +794,11 @@ function noteExtensionPackage(context, hubPath, data) {
 /**
  * 尾部合成条目:目标 manifest(L)、extension-sources(pt/tt)、官方扩展下载索引、离线脚本与 ST 安装说明。
  */
-async function emitSynthesized(writer, report, context, target, selection, { extensionMode = EXTENSION_MODES.FULL } = {}) {
+async function emitSynthesized(writer, report, context, target, selection, {
+  extensionMode = EXTENSION_MODES.FULL,
+  gitMode = GIT_MODES.KEEP,
+  dryRun = false,
+} = {}) {
   if (target === TARGETS.L) {
     const baseSelection = { ...L_SELECTION };
     if (selection && typeof selection === 'object') {
@@ -743,6 +834,22 @@ async function emitSynthesized(writer, report, context, target, selection, { ext
     gitMeta: context.extensionGitMeta.get(name) || {},
     sourceRecord: context.extensionSources.get(name)?.record || {},
   }));
+
+  // gitMode=minimal：为每个实际打包的 Git 扩展补一个占位文件，保证 `.git/objects` 目录解压后存在。
+  // 必要性：git 的 is_git_directory() 要求 objects/refs 是真实目录，而本管线丢弃空目录条目
+  // （zip-io.js:101/111），故只能靠一个普通文件把目录「撑」住；缺它则 minimal 与 strip 等价。
+  if (gitMode === GIT_MODES.MINIMAL && context.gitMinimalRoots.size > 0) {
+    for (const root of [...context.gitMinimalRoots].sort()) {
+      const keepPath = `${targetEntryPath(root, target)}/.git/objects/.keep`;
+      if (!dryRun) await writer.add(keepPath, GIT_KEEP_PLACEHOLDER);
+      report.synthesized(keepPath);
+    }
+    report.warn(
+      `已按 gitMode=minimal 精简 ${context.gitMinimalRoots.size} 个扩展的 Git 历史：仅保留识别与更新所需元数据`
+      + '（config/HEAD/index/refs），对象存储全部剔除。接收方首次「检查更新」时会从 origin 重新拉取对象，'
+      + '此后仓库自愈为完整状态；若接收方无网络，请改用 keep 或 strip。',
+    );
+  }
 
   // 清单在 FULL 与 MANIFEST **两种模式**下都产出（决策 D-1）；
   // 官方索引仅 MANIFEST 产出（决策 D-6，避免宿主对已内嵌实体重复安装）。

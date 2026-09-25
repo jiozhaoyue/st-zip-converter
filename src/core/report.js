@@ -92,7 +92,7 @@ export class Report {
   #module(name) {
     let bucket = this.#modules.get(name);
     if (!bucket) {
-      bucket = { copied: 0, dropped: 0, synthesized: 0, filtered: 0, bytes: 0 };
+      bucket = { copied: 0, dropped: 0, synthesized: 0, filtered: 0, bytes: 0, droppedBytes: 0 };
       this.#modules.set(name, bucket);
     }
     return bucket;
@@ -104,10 +104,17 @@ export class Report {
     bucket.bytes += bytes;
   }
 
-  dropped(hubPath, reason) {
+  /**
+   * 记录一条被丢弃的条目。
+   * @param {string} hubPath
+   * @param {string} reason
+   * @param {number} [bytes=0] 该条目未压缩字节数（可选，供体积类剔除策略上报影响面）
+   */
+  dropped(hubPath, reason, bytes = 0) {
     const bucket = this.#module(classifyModule(hubPath));
     bucket.dropped += 1;
-    this.#dropped.push({ path: hubPath, reason });
+    bucket.droppedBytes = (bucket.droppedBytes || 0) + (bytes || 0);
+    this.#dropped.push({ path: hubPath, reason, bytes: bytes || 0 });
   }
 
   filtered(hubPath, category) {
@@ -150,6 +157,7 @@ export class Report {
       totals: {
         copied: [...this.#modules.values()].reduce((sum, m) => sum + m.copied, 0),
         dropped: this.#dropped.length,
+        droppedBytes: [...this.#modules.values()].reduce((sum, m) => sum + (m.droppedBytes || 0), 0),
         filtered: this.#filtered.length,
         synthesized: this.#synthesized.length,
         resumed: this.#resumed.length,
@@ -171,6 +179,9 @@ export class Report {
     lines.push(
       `合计            ${String(json.totals.copied).padStart(6)} ${String(json.totals.dropped).padStart(6)} ${String(json.totals.synthesized).padStart(6)}`,
     );
+    if (json.totals.droppedBytes > 0) {
+      lines.push(`已剔除字节合计: ${json.totals.droppedBytes}`);
+    }
     if (json.dropped.length > 0) {
       lines.push(`丢弃清单 (${json.dropped.length}):`);
       for (const item of json.dropped) {

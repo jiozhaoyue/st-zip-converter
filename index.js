@@ -213,6 +213,18 @@ async function main(appRoot = document.getElementById('app')) {
     return checked ? checked.value : 'manifest';
   }
 
+  /** Git 历史策略（keep|minimal|strip）。缺省 keep——与 PRD 裁决一致，保默认行为零变化。 */
+  function getGitMode() {
+    const checked = document.querySelector('input[name="git-mode"]:checked');
+    return checked ? checked.value : 'keep';
+  }
+
+  /** 轻量清单模式整体不打包 .git，故 Git 策略组联动禁用（各档代价说明在 label 的 title 属性）。 */
+  function syncGitModeAvailability() {
+    const disabled = getExtensionMode() !== 'full';
+    document.querySelectorAll('input[name="git-mode"]').forEach((el) => { el.disabled = disabled; });
+  }
+
   function getKeepDevFiles() {
     const chk = document.getElementById('keep-dev-files-check');
     return chk ? chk.checked : false;
@@ -243,7 +255,13 @@ async function main(appRoot = document.getElementById('app')) {
     }
 
     const extEl = document.getElementById('fold-summary-extension');
-    if (extEl) extEl.textContent = getExtensionMode() === 'full' ? '完整离线包' : '轻量清单';
+    if (extEl) {
+      // Git 策略只在「完整离线包」下生效，摘要必须同时体现这一点，避免用户以为勾了没反应。
+      const gitLabels = { keep: 'Git 原样', minimal: 'Git 瘦身', strip: 'Git 剔除' };
+      extEl.textContent = getExtensionMode() === 'full'
+        ? `完整离线包 · ${gitLabels[getGitMode()] || 'Git 原样'}`
+        : '轻量清单（不打包 .git）';
+    }
 
     // 增量与差量：仅「差量补丁」是生效项（原「增量合并」开关经取证确认从不生效，已于 T4 移除）。
     // 该区必选项是基准 ZIP，故状态读数必须体现基准是否已就绪——否则用户勾了也不知道能不能跑。
@@ -277,10 +295,20 @@ async function main(appRoot = document.getElementById('app')) {
   document.querySelectorAll('input[name="extension-mode"]').forEach((el) => {
     el.addEventListener('change', () => {
       // 选中态视觉由 CSS :has(input:checked) 处理，不再写内联色值（禁止硬编码颜色）
+      syncGitModeAvailability();
       updateFoldSummaries();
       refreshPlan();
     });
   });
+
+  document.querySelectorAll('input[name="git-mode"]').forEach((el) => {
+    el.addEventListener('change', () => {
+      updateFoldSummaries();
+      refreshPlan();
+    });
+  });
+  // 初始联动：默认选中「轻量清单」，故 Git 策略组初始就是禁用态。
+  syncGitModeAvailability();
 
   const keepDevFilesCheck = document.getElementById('keep-dev-files-check');
   if (keepDevFilesCheck) {
@@ -568,6 +596,7 @@ async function main(appRoot = document.getElementById('app')) {
           includeCache,
           includeAppPrivate,
           extensionMode: getExtensionMode(),
+          gitMode: getGitMode(),
           keepDevFiles: getKeepDevFiles(),
         },
       });
@@ -946,6 +975,7 @@ async function main(appRoot = document.getElementById('app')) {
             includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
             includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
             extensionMode: getExtensionMode(),
+            gitMode: getGitMode(),
             keepDevFiles: getKeepDevFiles(),
             pruneBuiltinAssets: document.getElementById('prune-builtin-check')?.checked ?? true,
           },
@@ -1027,6 +1057,7 @@ async function main(appRoot = document.getElementById('app')) {
             includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
             compressionLevel,
             extensionMode: getExtensionMode(),
+            gitMode: getGitMode(),
             keepDevFiles: getKeepDevFiles(),
             pruneBuiltinAssets,
             signal,
@@ -1347,6 +1378,7 @@ async function main(appRoot = document.getElementById('app')) {
           includeAppPrivate,
           compressionLevel,
           extensionMode: getExtensionMode(),
+          gitMode: getGitMode(),
           keepDevFiles: getKeepDevFiles(),
           pruneBuiltinAssets,
         },

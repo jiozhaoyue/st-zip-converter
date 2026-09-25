@@ -116,6 +116,9 @@
     `_convert/extensions-manifest.json`（转换器结构化清单，供宿主插件自动呼出扩展安装面板）。
   - **不存在**“剥离 `.git` 历史 / Shallow Git 转换”这一能力——旧文档描述的浅层快照未实现；
     轻量模式的本质是**不打包实体**，由目标酒馆按清单重新克隆/拉取。
+    > **2026-09-25 更正**：本句此前成立，现已**作废**——`gitMode`（见下文 §5）已实现
+    > 「保留一键更新能力前提下剥离 `.git` 对象存储」的能力。轻量清单模式与 `gitMode` 是
+    > **互补**关系：前者解决「不打包实体」，后者解决「打包实体时历史体积过大」。
   - `extensionMode = 'full'`（缺省）则直通打包扩展代码。
 
 ### 4. 备份聊天记录与快照过滤机制 (Backup Chats & Snapshot Filtering)
@@ -125,6 +128,57 @@
 - **行为约定**:
   - 宿主直接导出面板（Host Export）与外部 ZIP 转换面板（External Convert）均默认**不勾选**导出备份聊天记录。
   - 必须由用户显式勾选后才允许包含入包，从源头清理数倍于有效对话的废弃备份堆积。
+
+### 5. 扩展 `.git` 历史策略 (gitMode) — 2026-09-25 落地
+
+**问题**：真实用户包 503 MB 里 **464 MB 是扩展 `.git` 的 packfile**——`git clone` 未加 `--depth 1`，
+且历史提交过的音视频/大文件即使已删也永久留在 packfile 里。`isJunkOrDevFile()` 只剔
+`.git/logs/`、`.git/hooks/`、`.git/refs/original/`，**packfile 必然全量直通**。
+
+**契约**（`src/core/transform.js` 的 `GIT_MODES`，默认 `keep`）：
+
+| 策略 | 包内保留的 `.git` | `checkIsRepo` | `branch()` | `pull()` | 首次更新前 `status` |
+| --- | --- | --- | --- | --- | --- |
+| `keep` | 全部条目 | ✅ | ✅ | ✅ | ✅ |
+| `minimal` | 下列白名单 + 合成的 `objects/.keep` | ✅ | ✅ | ✅（自动补齐对象，之后自愈为完整仓库） | ❌ `fatal: bad object HEAD` |
+| `strip` | 无 | ❌ 不认仓库 | — | — | — |
+
+`minimal` 的**确切保留集**（多一条少一条都算违约）：
+`.git/config`、`.git/HEAD`、`.git/index`、`.git/refs/heads/**`，外加**合成**的 `.git/objects/.keep`。
+
+**为什么必须有 `.keep`（本策略的命门，缺它则 minimal 与 strip 等价）**：
+git 的 `is_git_directory()` 要求 `.git/objects` 与 `.git/refs` 是**真实存在的目录**；
+而本项目管线**丢弃空目录条目**（`src/core/zip-io.js:101` `filter((e) => !e.directory)`、
+`:111` `if (entry.directory) continue`）。故只能用**一个普通文件**把 `objects/` 目录「撑」住。
+占位内容非 0 字节（个别解压实现会跳过零长度条目）。`git fsck` 对该文件无告警（实测 rc=0）。
+
+**实测取证**（两处，均可复现）：
+1. **git 二进制层**（临时目录）：只留 config/HEAD/refs 而**无** objects/refs 目录 →
+   `rev-parse --is-inside-work-tree` rc=128（判为非仓库）；补上 `index` 与 `objects/.keep` 后，
+   三条命令全过，`pull` 快进成功且新文件内容正确，更新后 `status` 干净、`fsck` 无告警。
+2. **Dev Luker 8003 实例往返**（2026-09-25，任务 `09-22-extension-git-slim`）：
+   3.02 MB 源包 → minimal 产物 **3592 B**（剔除 3 150 682 B）；
+   经宿主原生恢复接口落盘后 **`.git/objects/.keep` 被保留**；
+   实例目录内 `is-inside-work-tree=true`、`branch=* main`、
+   `git pull origin main` **rc=0 快进成功并拉到上游新提交**，更新后 `.git` 文件数 5→22、
+   `status` 空、`fsck` 无输出。详见该任务 `research/dev-instance-roundtrip.md`。
+
+**已知局限（必须如实告知用户）**：
+`minimal` 下**接收方必须能联网**——对象存储已被剔除，首次「检查更新」要从 origin 重新拉取；
+且首次更新**之前**该扩展的 `git status` 不可读（`bad object HEAD`）。宿主的更新链路
+（`checkIsRepo` → `branch` → `pull`，见 `src/endpoints/extensions.js:686-704`）不调用 `status`，
+故不受影响。完全离线的接收方应选 `keep` 或 `strip`。
+
+**实现落点**（改这块时一并看这些位置）：
+- `src/core/transform.js`：`GIT_MODES` / `isGitEntry()` / `isGitMinimalKept()` / `normalizeGitMode()`
+  / `gitDropReason()` / `GIT_KEEP_PLACEHOLDER`；三个 Git 元数据处理器改为三分支
+  （MANIFEST / 不保留 / 写出），**解析逻辑在三档下都必须执行**（`extensionGitMeta` 照常产出）；
+  `emitSynthesized()` 内合成 `.keep`。
+- `src/core/report.js`：`dropped(hubPath, reason, bytes)` 第三参可选（向后兼容），桶内 `droppedBytes`。
+- `src/core/plan-preview.js`：动作链分支插在 **MANIFEST 分支之后、扩展 MIGRATE 分支之前**。
+- `src/ui/workbench-template.js` + `index.js`：I 区单选框（`name="git-mode"`），
+  **复用既有 `.ext-mode-row`/`.ext-mode-opt` 类，不新增 CSS**；`manifest` 模式下联动 `disabled`。
+- `scripts/control-consumer-guard.js`：该组无 id，声明键为 `name:git-mode`。
 
 ## 环境教训
 
@@ -137,3 +191,20 @@
 - **写侧背压**:不得“逐条目读成 Buffer 再一次性 add”——旧 Node 实现在真实大包下把待压缩数据
   积压到峰值 884MiB。现行做法是 `zipIo` 的并发滑动窗口（`CONCURRENCY` 2–8）+ `waitForSlot` 背压,
   配合 vendor 内部 `CompressionStream`,峰值与包体积无关〔仓内 `src/core/zip-io.js` 头注释〕。
+- **Luker 的恢复路由不是 `/api/users/restore`**（2026-09-25 黑盒探测 Dev Luker 2.7.0）：
+  - `/api/users/restore` → **404**（无此路由）；`/api/users/me` 同样 404。
+  - `/api/users/restore-backup` → **存在**：空体 400 `No backup file uploaded`；字段名 `avatar`
+    + `handle` + `mode=merge` + `incremental=true` → **200**，响应体含
+    `{mode, restoredCount, failedCount, skippedCount, rejectedCount, preflight:{categoryStats…}}`。
+  - 本仓 `src/ui/host-bridge.js:728` 的 `restoreToHostInner` 固定 POST `/api/users/restore`，
+    而 `restoreToLuker()`（`:1260`）只是转发给它 —— 即**该函数在 L 上必然 404**。
+    插件在 Luker 下会**隐藏**恢复按钮（`#btn-restore-luker` = `display:none`），
+    且 09-01 任务的既有结论是「L 的 `restore-backup` 支持 selection + overwrite/merge；
+    插件不做导入端」，故这可能是有意为之；但这是一处**悬置路径**，改动前先判定「接线到
+    `restore-backup`」还是「显式标注 ST-only」。
+- **宿主请求的 CSRF 与会话绑定**：只带 `X-CSRF-Token` 而不带会话 cookie 会 403
+  `Invalid CSRF token`；必须先用 GET 取到 cookie 再带令牌。若实例开了 `enableUserAccounts`，
+  **匿名请求一律 403**（即使 `basicAuthMode: false`）——脚本化验收必须借已登录的浏览器会话上下文
+  （本机 Dev 用 `playwright` + `.pw-profile-dev` 持久化档案副本，**不要直接用原档案**，避免与在跑的
+  Chrome 争抢锁）。无头环境下宿主扩展菜单可能不渲染（`extBlocks: 0`），此时以
+  `POST /api/extensions/discover`（扩展管理 UI 的数据源）作为界面侧取证。

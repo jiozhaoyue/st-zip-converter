@@ -8,6 +8,7 @@ import { detectFromReader, LAYOUTS } from './detect.js';
 import { CATEGORIES, CATEGORY_LABELS, categoryOfHubPath, isBackupChatOrSnapshot } from './inspect.js';
 import {
   routeSource, targetEntryPath, TARGETS, isJunkOrDevFile, EXTENSION_MODES, parseJsonSafe,
+  GIT_MODES, normalizeGitMode, isGitEntry, isGitMinimalKept, gitDropReason, GIT_KEEP_PLACEHOLDER,
 } from './transform.js';
 import {
   extensionFolderName,
@@ -94,9 +95,11 @@ export async function generatePlan(source, target, {
   includeAppPrivate = false,
   keepAll = false,
   extensionMode = EXTENSION_MODES.FULL,
+  gitMode = GIT_MODES.KEEP,
   keepDevFiles = false,
   pruneBuiltinAssets = false,
 } = {}) {
+  const resolvedGitMode = normalizeGitMode(gitMode);
   const detector = await io.openReader(source);
   let detection;
   try {
@@ -156,6 +159,8 @@ export async function generatePlan(source, target, {
   const extensionManifests = new Map();
   const extensionGitMeta = new Map();
   const extensionSources = new Map();
+  // gitMode=minimal 下见过 .git/config 的扩展根(hub 路径)——供预测尾部合成的 .git/objects/.keep。
+  const gitRoots = new Set();
 
   try {
     for await (const entry of scanner.entries()) {
@@ -185,11 +190,18 @@ export async function generatePlan(source, target, {
         } else if (folder && relPath.endsWith('.git/config')) {
           const url = extractGitRemoteUrl(TEXT_DECODER.decode(await entry.read()));
           if (url) extensionGitMeta.set(folder, { ...(extensionGitMeta.get(folder) || {}), remoteUrl: url });
+          if (resolvedGitMode === GIT_MODES.MINIMAL) gitRoots.add(`extensions/${folder}`);
         } else if (folder && relPath.endsWith('.git/HEAD')) {
           const branch = extractGitBranch(TEXT_DECODER.decode(await entry.read()));
           if (branch) extensionGitMeta.set(folder, { ...(extensionGitMeta.get(folder) || {}), branch });
         }
       }
+
+      // gitMode 策略（仅扩展包内的 .git 条目）：keep 下恒为 false → 现有行为零变化。
+      const gitRelPath = routed.kind === 'extension-pkg' ? extensionRelativePath(routed.hubPath) : '';
+      const gitDropByMode = gitRelPath !== '' && isGitEntry(gitRelPath)
+        && resolvedGitMode !== GIT_MODES.KEEP
+        && !(resolvedGitMode === GIT_MODES.MINIMAL && isGitMinimalKept(gitRelPath));
 
       let action = ACTIONS.ROUTE;
       let targetPath = null;
@@ -205,6 +217,10 @@ export async function generatePlan(source, target, {
       } else if (extensionMode === EXTENSION_MODES.MANIFEST && routed.kind === 'extension-pkg') {
         action = ACTIONS.DROP;
         reason = '轻量清单模式：扩展代码由目标酒馆按清单下载';
+      } else if (gitDropByMode) {
+        // 置于扩展 MIGRATE 分支之前：strip/minimal 下这些 .git 条目应报「按策略剔除」而非「布局迁移」。
+        action = ACTIONS.DROP;
+        reason = gitDropReason(resolvedGitMode);
       } else if (routed.kind === 'manifest') {
         if (target === TARGETS.L) {
           action = ACTIONS.SYNTHESIZE;
@@ -351,6 +367,24 @@ export async function generatePlan(source, target, {
     expectedOutputFiles += 1;
     expectedOutputBytes += 300;
     actionStats[ACTIONS.SYNTHESIZE] += 1;
+  }
+
+  // gitMode=minimal：为每个实际打包的 Git 扩展预测一个占位文件合成项（与 transform 的产出对齐）。
+  // 类目未勾选时不预测——transform 侧在 selection 过滤处就 continue 了，不会登记合成目标。
+  if (resolvedGitMode === GIT_MODES.MINIMAL
+    && extensionMode !== EXTENSION_MODES.MANIFEST
+    && (!selection || selection.extensions !== false)) {
+    for (const root of [...gitRoots].sort()) {
+      synthesizedItems.push({
+        targetPath: `${targetEntryPath(root, target)}/.git/objects/.keep`,
+        action: ACTIONS.SYNTHESIZE,
+        reason: 'gitMode=minimal：合成占位文件，保证 .git/objects 目录在解压后存在',
+        estimatedSizeBytes: GIT_KEEP_PLACEHOLDER.length,
+      });
+      expectedOutputFiles += 1;
+      expectedOutputBytes += GIT_KEEP_PLACEHOLDER.length;
+      actionStats[ACTIONS.SYNTHESIZE] += 1;
+    }
   }
 
   return {

@@ -181,6 +181,21 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false, isStandalo
               <span>完整离线包</span>
             </label>
           </div>
+          <!-- Git 历史策略：仅在「完整离线包」下生效（轻量清单模式整体不打包 .git）。 -->
+          <div class="ext-mode-row">
+            <label class="ext-mode-opt" title="原样保留扩展的全部 .git（含历史 packfile）。包最大，但一键更新与本地状态完全不变。">
+              <input type="radio" name="git-mode" value="keep" checked>
+              <span>Git 原样</span>
+            </label>
+            <label class="ext-mode-opt" title="仅保留 Git 识别与更新所需元数据（config/HEAD/index/refs），对象存储全部剔除。包最小且仍可一键更新（首次更新会自动从源仓库补齐对象）；接收方必须能联网。">
+              <input type="radio" name="git-mode" value="minimal">
+              <span>Git 瘦身</span>
+            </label>
+            <label class="ext-mode-opt" title="完全剔除 .git 目录。包最小，但接收方彻底失去在线更新能力，只能重新 git clone。">
+              <input type="radio" name="git-mode" value="strip">
+              <span>Git 剔除</span>
+            </label>
+          </div>
           <div class="wb-checks">
             <label class="checkbox_label flex-container">
               <input type="checkbox" id="keep-dev-files-check">

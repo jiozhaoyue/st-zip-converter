@@ -63,6 +63,8 @@ export const CONTROL_CONSUMERS = Object.freeze({
 
   // ── 扩展打包（I 区）──
   'name:extension-mode': 'index.js getExtensionMode() — querySelector(:checked).value 轻量清单/完整离线包',
+  'name:git-mode': 'index.js getGitMode() — querySelector(:checked).value 转 transform 的 gitMode（keep|minimal|strip）；'
+    + '同步函数 syncGitModeAvailability() 读 extension-mode 决定本组是否 disabled',
   'keep-dev-files-check': 'index.js getKeepDevFiles() — .checked 是否保留构建配置',
   'btn-export-ext-manifest': 'index.js:502 — click 导出只读扩展清单',
 

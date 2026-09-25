@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "src/core 纯逻辑层禁止 DOM 依赖——gitMode 分流与 isGitEntry/isGitMinimalKept 必须落在 core 且可单测"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "零回归基线（npm test 全绿）、JSDoc + 运行时守卫为质量门槛、禁止新依赖的约定"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "三条既有静态守卫的通过口径；新增控件须同步 control-consumer 声明表的约定"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "单一模板源铁律（index.html 只许骨架，UI 只改 workbench-template.js）与宿主注入规范"}
+{"file": ".trellis/spec/guides/tavern-datapack-formats.md", "reason": "四宿主数据包目录布局与 extension-pkg 路由（targetEntryPath 的 TT/PT 映射依据）"}
+{"file": ".trellis/tasks/09-22-extension-git-slim/design.md", "reason": "gitMode 契约、minimal 白名单与 .keep 合成、Report 扩参、plan-preview 分支位置"}
+{"file": ".trellis/tasks/09-22-extension-git-slim/prd.md", "reason": "验收标准与 git 层实测取证表（本轮取证的唯一权威记录）"}

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "验收口径：npm test 全绿零回归、不得引入新依赖"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "四条静态守卫（css-scope/dom-injection/template-source/control-consumer）退出码 0 的复核依据"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核单一模板源未被打破、宿主协议字段（/api/users/restore 等）未被误改"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "复核 core/ui 分层边界——core 内不得引入 DOM 或宿主依赖"}
+{"file": ".trellis/tasks/09-22-extension-git-slim/prd.md", "reason": "逐条核对 10 条验收标准（含 Dev 往返实测与四条守卫）"}
+{"file": ".trellis/tasks/09-22-extension-git-slim/implement.md", "reason": "复核复选框是否随执行实时勾选（L0-2），以及未完成项是否如实留白"}
