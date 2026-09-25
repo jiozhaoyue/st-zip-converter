@@ -61,7 +61,16 @@
       **明确推荐 ③-B + ③-C**：原生安装器是**单 URL** 语义，而本仓真实场景是「从包内批量装回」，直接替代净损失批量能力
 - [x] 4.3 确认 `third-party/third-party` 嵌套异常探测与配套修复动作（L1-MR-12 防线）未被动过——
       本次 `host-bridge.js` 改动**零删除行**（用 `git diff | grep '^-'` 过滤核实）
-- [ ] 4.4 建议清单**交用户逐项确认** → 未获确认前不动 `discover/install/delete`（**待裁决，非阻塞其余交付项**）
+- [x] 4.4 建议清单**交用户逐项确认** —— **已裁决（2026-09-25）**：
+      **用户选定 ③-B「保留现状」**——不改动 `discover/install/delete` 任何流程。
+      裁决理由（写进交互问答的选项描述，用户据此选定）：Luker 的
+      `openThirdPartyExtensionMenu(suggestUrl)` 是**单 URL 安装器**语义，而本仓扩展安装的真实场景是
+      「从数据包里批量装回」（触发点：`restoreToHostInner` 之后的 `renderExtensionInstallerModal`），
+      直接替代会**净损失批量能力**。
+      · ③-C（自绘弹层内加「用宿主原生安装器打开」入口）经用户裁决**登记为可选增强、本任务不实施**——
+        若日后要做需另开任务，且需先实机验证 `suggestUrl` 是否真的预填
+      · **本任务对扩展管理流程零改动**：`git diff` 可证 `host-bridge.js` 改动零删除行，
+        `third-party/third-party` 嵌套异常探测（L1-MR-12 防线）与配套修复动作原样保留
 
 ## 阶段 5 · 验证与交付
 
