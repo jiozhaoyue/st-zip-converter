@@ -62,8 +62,18 @@
 
 ## Acceptance Criteria
 
-- [ ] ① `#btn-storage-inspector` 在 Dev 8003 上点击可唤起 Luker 原生 Inspector（实机证据）；模块不可用时按钮保持隐藏（有测试或实机反例）。
-- [ ] ① `openStorageInspector` 的 `dataSource` 形状有取证结论（或明确记录「未能取证，改为 X 方案」）。
+> 回填方式：**逐条现场取证**（文件:行号 / 命令输出 / 实机读数），不采信任何交接文档的进度断言。
+> 取证时点 2026-09-25，分支 `fix/perf-hardening-transfer-memory`。
+
+- [x] ① `#btn-storage-inspector` 在 Dev 8003 上点击可唤起 Luker 原生 Inspector（实机证据）；模块不可用时按钮保持隐藏（有测试或实机反例）。
+      **证据**：`research/pw-verify-storage-inspector.cjs` 正反两跑。正向：按钮 `hidden=false`/`display=flex`/h=32px，
+      点击后 `.storageInspectorContainerWrapper` 出现且可见，**数据取到**（`存储 1.1 GiB / 无限制` + 分类明细），无错误态。
+      反例：把宿主模块替换为「能加载但导出非函数」的桩 → 按钮保持 `hidden`、点击不唤起、无弹窗、页面不报错。
+      另有 `test/storage-inspector-adapter.test.js` 6 用例覆盖三条降级路径。
+- [x] ① `openStorageInspector` 的 `dataSource` 形状有取证结论（或明确记录「未能取证，改为 X 方案」）。
+      **证据**：宿主 `storage-inspector.js` 的 JSDoc 契约 `@param {{kind:'self'} | {kind:'any', target:string}} dataSource`；
+      官方调用点 `user.js:2361` 即 `openStorageInspector({ kind: 'self' })`——无需构造 `RestProvider`；
+      面板 mutator 为 `ThrowingMutator`（只读）。
 - [x] ② 真机记录宿主面板进入路径并确证注入按钮可见；确证结论与 `host-bridge.js` 注释一致。
       **证据（2026-09-25 阶段 1，Dev Luker 8003）**：`research/native-surfaces.md` §3 +
       `research/pw-probe-backup-anchors.cjs`。进入路径 `#account_button`(`user.js:3469`) →
@@ -71,12 +81,30 @@
       `openBackupManager()`(:1136) → `renderTemplateAsync('userBackupManager')`。
       逐步计数：初始 0 → 账号弹层 注入 **2** → 备份管理器 注入 **3**；结构逐项符合 `makeHostButton` 契约。
       **T2 遗留项结论**：注入本来就在工作，T2 的「未生效」是**入口 id 点错**所致（其探针点的 4 个 id 在 Luker 上均非正确入口）。
-- [ ] ③ `research/` 产出扩展管理可对接面盘点 + 建议清单；**未经用户逐项确认前不得改动既有流程**。
-- [ ] ④ selection 差异以显式数据表表达，且有对应单测断言 ST / Luker / 未知宿主三态。
-- [ ] 全仓宿主能力调用点均可溯源到「`getContext()` 官方路径」或「已注明理由的根绝对路径 import」；无第三类。
-- [ ] `npm test` 全绿 + `check:css-scope` / `check:dom-injection` / `check:template-source` 三条守卫通过。
-- [ ] Dev 8003 实机三入口（独立/插件/模态）渲染无回归。
-- [ ] 本任务不写 `Instance/Real/**`；Dev 实例若有写入（如 git 装载）须在收尾记录中说明且 `git status` 干净。
+- [x] ③ `research/` 产出扩展管理可对接面盘点 + 建议清单；**未经用户逐项确认前不得改动既有流程**。
+      **证据**：`research/extension-manager-surfaces.md`（盘点 + 四项建议 + 推荐）。
+      **未改动流程已核实**：本次 `host-bridge.js` 改动**零删除行**（`git diff | grep '^-'` 过滤为空），
+      `third-party/third-party` 嵌套异常探测（L1-MR-12 防线）与配套修复动作均原样保留。
+      **待办**：建议清单的逐项裁决属用户决策，`implement.md` 4.4 保持未勾选。
+- [x] ④ selection 差异以显式数据表表达，且有对应单测断言 ST / Luker / 未知宿主三态。
+      **证据**：`host-bridge.js` 的 `BACKUP_SELECTION_SUPPORT`（st:false / luker:true / tt:false / pt:false）
+      + 唯一求值点 `hostSelectionCapability()` → `{supported, known, reason}`；
+      `test/detect-host.test.js` 新增 6 用例，实际覆盖 **五态**（st / luker / tt / pt / 未列出）
+      外加「未知宿主必须与 ST 同路径、不得乐观放行」与 reason 非空。
+- [x] 全仓宿主能力调用点均可溯源到「`getContext()` 官方路径」或「已注明理由的根绝对路径 import」；无第三类。
+      **证据**：`grep` 全仓（排除 `src/vendor/`）后，能力获取点仅两处——
+      `host-bridge.js:202` 的 `getContext()`，与 `host-bridge.js:267` 的
+      `import(/* @vite-ignore */ '/scripts/storage-inspector.js')`（同行上方注释含理由与 HTTP 200 实测证据）。
+      其余 `globalThis.SillyTavern` / `globalThis.lukerContext` 引用全部位于 `detectHost()` 的宿主嗅探（合法用途，非能力获取）。
+- [x] `npm test` 全绿 + `check:css-scope` / `check:dom-injection` / `check:template-source` 三条守卫通过。
+      **证据**：`npm test` **40 文件 / 345 passed / 2 skipped**（本任务起点 39/333 → +12 用例）；三守卫全通过。
+- [x] Dev 8003 实机三入口（独立/插件/模态）渲染无回归。
+      **证据**：`pw-final-verify.cjs` @ 8003 复测——节点 **270** / 按钮 **29** / `<details>` **0** /
+      `.inline-drawer` **5**，与阶段 0.4 基线**逐项一致**；插件零控制台报错。
+      高度 921→**925**（+4px）与可见按钮 3→**4**（新增「存储」）均为**本次交付项**，非回归。
+- [x] 本任务不写 `Instance/Real/**`；Dev 实例若有写入（如 git 装载）须在收尾记录中说明且 `git status` 干净。
+      **证据**：Real 实例插件仓仍为 `main @ 3a98fb3`、`git status` **空**（本轮零写入）；
+      Dev 实例插件仓 `d65ef96`、`git status` **空**（写入仅限 `git clone` + `pull --ff-only`）。
 
 ## Out of Scope
 

@@ -325,6 +325,104 @@ grep -rn "[^a-zA-Z.]confirm(" src/ui/*.js index.js
 > **注意**：`src/ui/archive-manager.js:188` 还有一处裸 `confirm()`，但该文件**全仓无引用**（死代码，
 > 仅被陈旧产物 `dist/index.html` 的注释提到）——不要把它当作可用参考实现。已另行登记处置。
 
+---
+
+## Host Capability Acquisition (宿主能力获取决策树 · 2026-09-25)
+
+> 定稿于任务 `09-25-luker-native-integration`。适用于**任何**要调用宿主能力的场合。
+> 与上一节（Host Native Dialog Adapter）的区别：那节讲「确认对话框」这一具体能力，
+> 本节讲**取任何宿主能力的统一路径**，避免每次重新发明。
+
+### 1. 决策树（顺序不可颠倒）
+
+```
+取宿主能力
+ ├─ 1. globalThis.SillyTavern?.getContext?.()        ← 官方文档路径，**优先**
+ └─ 2. 仅当 getContext() 确实未暴露该能力时：
+        动态 import('<宿主根绝对路径>')
+        · 必须在该行上方注释写明「为何不能走 getContext」+ 实测证据（HTTP 状态码 / 体积）
+ └─ 3. 都不可用 → 静默降级（返回 false/null，调用方无需分支）
+```
+
+**第二类路径只允许「已注明理由的根绝对路径 import」**——出现任何第三类取法（相对路径
+`import()`、猜 `window.xxx` 全局、读宿主源码内部变量）都属违规。
+
+### 2. 根绝对路径为何跨宿主可用
+
+宿主把 `public/` 挂在**站点根**，故 `/scripts/<module>.js` 与插件自身安装位置无关：
+ST 装在 `public/scripts/extensions/third-party/**`、Luker 装在 `data/<user>/extensions/**`（平铺），
+两者都能取到同一个 URL。实测 `GET https://127.0.0.1:8003/scripts/storage-inspector.js` → **HTTP 200 / 16.4KB**。
+
+**相对路径 `import()` 不可靠**：它随宿主安装形态变化而失效，且四个宿主的插件目录深度不同。
+
+### 3. 形状校验优先于「加载成功」
+
+```js
+// src/ui/host-bridge.js
+export function hasStorageInspector(mod) {
+  return typeof mod?.openStorageInspector === 'function';
+}
+```
+
+判据必须是「**导出确实是函数**」而非「模块能加载」——只判加载成功会让调用方解除
+按钮隐藏后点了没反应，变成**死按钮**。宿主版本升级后导出名可能变化，这一层就是防线。
+
+### 4. 降级反例的正确构造法（**踩过的坑**）
+
+做「模块不可用 → 正确降级」的真机反例时，**不要用 Playwright `route` 把宿主模块 404 掉**：
+
+- 实测：`/scripts/storage-inspector.js` 是**宿主自身的静态依赖**
+  （Luker `user.js:17`、`browser-storage-inspector.js:6` 均 `import` 它）。
+  404 会让**Luker 自己崩掉**，插件根本不会挂载——测到的是宿主故障，不是本插件降级。
+  实测该模式下 `settingsBlock` / `drawerApp` / `statusRow` 全为 `false`。
+- **正确做法**：fulfill 一个「**能加载但导出非函数**」的桩，且必须把宿主所需的
+  全部命名导出补齐、`contentType` 设为 `text/javascript`：
+
+  ```js
+  const stub = 'export const openStorageInspector = null;\n'
+             + 'export const mountStorageInspector = null;\n'
+             + 'export const createStorageInspector = null;\n';
+  await page.route('**/scripts/storage-inspector.js', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/javascript', body: stub }));
+  ```
+
+  这样宿主自身照常启动，只让**我们的形状校验**走到降级分支——实测按钮保持 `hidden`、
+  点击不唤起、页面不报错。
+- **附带结论**：`storage-inspector.js` **仅 Luker 有**（ST / TauriTavern / PureTavern 均无此文件，
+  已用 GitHub API 逐个核实）。因此在 Luker 上「模块 404」这条路径**不可能发生**，
+  该降级分支实际是为**非 Luker 宿主**准备的。
+
+### 5. 现存宿主能力面与获取方式（逐个取证）
+
+| 能力 | 获取方式 | 备注 |
+| --- | --- | --- |
+| 确认对话框 | `getContext().Popup.show.confirm(header, text)` | 官方文档路径；见上一节 |
+| 存储面板 | **根绝对路径** `import('/scripts/storage-inspector.js')` → `openStorageInspector({ kind: 'self' })` | 无 window 挂载、`getContext()` 未暴露；`dataSource` 形状见宿主 JSDoc：`{kind:'self'}` 或 `{kind:'any',target}`；面板 mutator 为 `ThrowingMutator`（**只读**） |
+| 扩展安装器 | `getContext().openThirdPartyExtensionMenu(suggestUrl?)` | **单 URL 语义**；宿主**无「列出全部扩展」API**、**无原生删除 UI**（`deleteExtension` 只是 API） |
+| 扩展 manifest | `getContext().getExtensionManifest(name)` | 接受短名或 `third-party/<name>`；返回深拷贝或 `null` |
+| 跨扩展 API | `getContext().getExtensionApi(name)` / `registerExtensionApi(name, api)` | 本仓暂不需要 |
+
+### 6. 宿主能力差异用「显式声明表」，禁止布尔推导
+
+```js
+// src/ui/host-bridge.js
+const BACKUP_SELECTION_SUPPORT = Object.freeze({ st: false, luker: true, tt: false, pt: false });
+
+export function hostSelectionCapability(platform) {
+  const declared = BACKUP_SELECTION_SUPPORT[platform];
+  return {
+    supported: declared === true,
+    known: declared !== undefined,        // 区分「确认不支持」与「未取证」
+    reason: declared === true ? '宿主透传勾选' : '全量导出后插件内过滤',   // 状态读数
+  };
+}
+```
+
+**为何禁止 `platform === 'luker'` 这类推导**：新增宿主时会**静默**走入错误分支，
+且无法区分「确认不支持」与「没验过」。`known: false` 让调用方知情；
+未列出的宿主一律走**保守路径**（结果正确，只是多传字节），绝不乐观放行。
+`reason` 是状态读数（非解释性文案），可直接展示——受用户裁决 12 约束，不要写成解释句。
+
 - 响应体解析失败 → `success === false && unconfirmed === true`；响应体挂起 → 短超时后同样 `unconfirmed`。
 
 ---

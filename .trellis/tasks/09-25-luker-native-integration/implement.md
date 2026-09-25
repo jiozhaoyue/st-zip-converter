@@ -24,44 +24,69 @@
 - [x] 1.6 修复 `pw-final-verify.cjs` 的往返断言选择器（改用 `document.querySelector('.popup-button-cancel')`）；Dev 实测取消按钮文案「否」→ 返回 `0` → 适配器映射 `false` 语义正确
 - [x] 1.7 沉淀 spec：`component-guidelines.md` 的 UI Mounting 段新增 **Gotcha：锚点是「按需渲染」的**（含强制排查步骤，防止同类误判重演）
 
-## 阶段 2 · ① 存储配额接原生 Inspector（R1）
+## 阶段 2 · ① 存储配额接原生 Inspector（R1）—— **已闭环（正向 + 反例均真机验证）**
 
-- [ ] 2.1 取证 `openStorageInspector(dataSource)` 的 `dataSource` 必需形状（读 Luker `public/scripts/user.js` 的调用点）
-- [ ] 2.2 新增 `isStorageInspectorAvailable()` + `openStorageInspector()` 适配器（`host-bridge.js`；取模块与取 dataSource 分离，任一步失败即降级）
-- [ ] 2.3 「为何走根绝对路径 import 而非 `getContext()`」写进代码注释（附 HTTP 200 实测证据）
-- [ ] 2.4 `index.js` 接线：抽屉挂载后探测一次，为真才解除 `#btn-storage-inspector` 的 `hidden`；点击 → `openStorageInspector()`
-- [ ] 2.5 单测：模块导入失败 / 导出非函数 / dataSource 构造失败 → 三种降级路径均返回 `false` 且不抛
-- [ ] 2.6 **实机验证**：Dev 8003 点击「存储」→ 原生 Inspector 唤起（截图或 DOM 证据）
-- [ ] 2.7 反例验证：模拟模块 404 → 按钮保持 `hidden`，页面无报错
+- [x] 2.1 **dataSource 形状已取证**：宿主 `storage-inspector.js` 的 JSDoc 契约即
+      `@param {{kind:'self'} | {kind:'any', target:string}} dataSource`；官方调用点
+      `user.js:2361` 为 `openStorageInspector({ kind: 'self' })`——**不需要**构造 `RestProvider` 实例
+      （函数内部自行 `new RestProvider(dataSource)`）。该面板 mutator 为 `ThrowingMutator` = **只读**。
+- [x] 2.2 新增 `hasStorageInspector(mod)`（纯谓词，可单测）+ `isStorageInspectorAvailable()` + `openStorageInspector()`
+- [x] 2.3 「为何走根绝对路径 import 而非 `getContext()`」与实测证据（HTTP 200 / 16.4KB）写进代码注释
+- [x] 2.4 `index.js` 新增 `setupStorageInspectorButton()`：抽屉态探测一次，可用才解除 `hidden`，点击唤起
+- [x] 2.5 单测 `test/storage-inspector-adapter.test.js`（6 用例）：形状判定 3 + 降级路径 3（含「只尝试一次」缓存断言）
+- [x] 2.6 **实机验证（Dev 8003，正向）**：按钮 `hidden=false` / `display=flex` / h=32px；
+      点击后 `.storageInspectorContainerWrapper` 出现且可见，**数据真的取到**：
+      `存储 1.1 GiB / 无限制`，聊天 457.8 MiB、扩展 275.1 MiB、备份 224.9 MiB 等分类明细；
+      无错误态；插件零控制台报错。脚本 `research/pw-verify-storage-inspector.cjs`
+- [x] 2.7 **实机反例（Dev 8003）**：把宿主模块替换为「能加载但导出非函数」的桩 →
+      按钮保持 `hidden`、点击不唤起、无弹窗、页面不报错
+      - **重要更正**：最初用 Playwright `route` 把模块 404，结果**宿主自身崩掉**、插件根本不挂载
+        （`settingsBlock`/`drawerApp`/`statusRow` 全 false）——因该模块是宿主自己的静态依赖。
+        404 造不出有效反例；正确做法与原因已写入 spec（component-guidelines 的 Host Capability Acquisition §4）
+      - 附证：该模块**仅 Luker 有**（ST / TauriTavern / PureTavern 均无）→ 该降级分支实为**非 Luker 宿主**而设
 
-## 阶段 3 · ④ selection 语义显式化（R4）
+## 阶段 3 · ④ selection 语义显式化（R4）—— **已完成**
 
-- [ ] 3.1 `host-bridge.js` 新增 `BACKUP_SELECTION_SUPPORT` 数据表 + `hostSelectionCapability(platform)`
-- [ ] 3.2 `index.js` 的 `hostSupportsSelection` 消费点改为走该函数
-- [ ] 3.3 单测覆盖 `st` / `luker` / `tt` / `pt` / 未知宿主五态；**未知宿主必须走保守路径**
-- [ ] 3.4 验证：既有 `test/detect-host.test.js` 不回归
+- [x] 3.1 `host-bridge.js` 新增 `BACKUP_SELECTION_SUPPORT` 显式表 + `hostSelectionCapability(platform)`
+      → `{ supported, known, reason }`；未列出宿主 `known:false` 且走保守路径
+- [x] 3.2 `index.js` 的推导点（原 `host.platform === 'luker'`）改为调用该函数；日志由 `reason` 生成（状态读数）
+- [x] 3.3 单测 6 例（`test/detect-host.test.js`）：五态覆盖 + 「未知宿主必须与 ST 同路径（不得乐观放行）」+ reason 非空
+- [x] 3.4 `npm test` 全绿，`test/detect-host.test.js` 既有用例不回归（23 用例）
 
-## 阶段 4 · ③ 扩展管理盘点（R3，**只盘点不改流程**）
+## 阶段 4 · ③ 扩展管理盘点（R3，**只盘点不改流程**）—— **盘点完成，建议待裁决**
 
-- [ ] 4.1 产出 `research/extension-manager-surfaces.md`：盘点 `openThirdPartyExtensionMenu` / `getExtensionManifest` / `getExtensionApi` / `registerExtensionApi` / `extension_settings` 的可用面与语义
-- [ ] 4.2 产出「哪些自绘流程可替换 / 哪些必须保留」建议清单
-- [ ] 4.3 确认 `third-party/third-party` 嵌套异常探测（L1-MR-12 防线）**未被动过**
-- [ ] 4.4 建议清单交用户逐项确认 → 未获确认前**不动** `discover/install/delete`
+- [x] 4.1 产出 `research/extension-manager-surfaces.md`：盘点 `openThirdPartyExtensionMenu` /
+      `getExtensionManifest` / `getExtensionApi` / `registerExtensionApi` / `extension_settings` 的可用面与语义
+- [x] 4.2 产出四项建议（③-A 委托原生 / ③-B 保留现状 / ③-C 增原生入口 / ③-D 用 manifest API），
+      **明确推荐 ③-B + ③-C**：原生安装器是**单 URL** 语义，而本仓真实场景是「从包内批量装回」，直接替代净损失批量能力
+- [x] 4.3 确认 `third-party/third-party` 嵌套异常探测与配套修复动作（L1-MR-12 防线）未被动过——
+      本次 `host-bridge.js` 改动**零删除行**（用 `git diff | grep '^-'` 过滤核实）
+- [ ] 4.4 建议清单**交用户逐项确认** → 未获确认前不动 `discover/install/delete`（**待裁决，非阻塞其余交付项**）
 
 ## 阶段 5 · 验证与交付
 
-- [ ] 5.1 `npm test` 全绿（不低于 39 文件 / 333 passed 基线）
-- [ ] 5.2 三守卫通过（`check:css-scope` / `check:dom-injection` / `check:template-source`）
-- [ ] 5.3 Dev 8003 实机三入口渲染无回归（重跑 `pw-final-verify.cjs`，读数与 0.4 基线对照）
-- [ ] 5.4 降级证据：非 Luker 宿主或端点不可达时主路径不缺失（单测或实机反例）
-- [ ] 5.5 `git push` 到 origin（L0-7 完成即推送）
-- [ ] 5.6 收尾核对：`Instance/Real/**` 零写入；Dev 实例写入仅限 git 装载，且 `git status` 干净
+- [x] 5.1 `npm test`：**40 文件 / 345 passed / 2 skipped**（起点 39/333 → +12 用例）
+- [x] 5.2 三守卫通过（`check:css-scope` / `check:dom-injection` / `check:template-source`）
+- [x] 5.3 Dev 8003 实机三入口渲染无回归：节点 270 / 按钮 29 / `<details>` 0 / `.inline-drawer` 5 **与基线逐项一致**；
+      高度 921→925（+4px）与可见按钮 3→**4**（新增「存储」）均为**本次交付项**而非回归
+- [x] 5.4 降级证据：单测 3 条降级路径 + Dev 实机反例（见 2.7）
+- [x] 5.5 `git push` 到 origin（L0-7 完成即推送）
+- [x] 5.6 收尾核对：`Instance/Real/**` **零写入**（插件仓仍为 `main @ 3a98fb3`、`git status` 空）；
+      Dev 实例写入仅限 git 装载（`d65ef96`、`git status` 空）
 
-## 核验方式（预期）
+## 核验方式（实际执行）
 
-- 沿用本仓既定降级策略 **G-5**：`trellis-check` 子代理在本环境已复现 4 次「0 工具调用即退出」，
-  故**转主代理串行自核**，对照 `prd.md` 的 AC 逐条现场取证（文件:行号 + 命令输出），
-  并如实写进本文件。核验前**不采信**任何交接文档的进度断言。
+- **未派发 `trellis-check` 子代理**：本仓已复现 4 次（`09-23-extension-manifest-git` 2 次、
+  `09-24-perf-hardening-transfer-memory` 2 次）该子代理**输出一句开场白即退出、`tool_uses: 0`**，
+  每次白烧约 40k tokens。沿用既定降级策略 **G-5（转主代理串行自核）**。
+- **主代理自核口径**：对照 `prd.md` 的 9 条 Acceptance Criteria **逐条去代码/实机现场取证**
+  （文件:行号 + 命令输出 + 实机读数写进各条正文），不采信任何交接文档的进度断言。
+- **核验产出**：`npm test` 40 文件 / 345 passed / 2 skipped（零失败）；三条守卫退出码 0；
+  Dev 8003 实机正向 + 反例双向验证；Real 实例零写入核对。
+- **未通过核验而如实标注的项**：`implement.md` 4.4（③ 建议清单的逐项裁决）保持**未勾选**——
+  属用户决策，未拿到确认就不记作完成。
+- **过程更正（已如实记录）**：② 的降级反例最初用 `route` 造 404，实测证明那会让**宿主自身**
+  崩掉而测不到本插件降级；已改用「导出非函数」桩并把原因写进 spec（见 2.7）。
 
 ## 验证命令
 
