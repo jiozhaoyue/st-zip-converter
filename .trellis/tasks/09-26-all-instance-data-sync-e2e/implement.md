@@ -267,16 +267,19 @@ node e2e/run.cjs --only guard
 
 ## 阶段 8 · 收尾（AC-11 + 提交）
 
-- [ ] **8.1** **关闭本次启动的全部实例**（I-6）；复验四个端口恢复未监听。
-- [ ] **8.2** `git status --short` 做**范围门**（L0-17：**不用** `git diff --stat` 判断范围）。
-- [ ] **8.3** 回填 `prd.md` 的「残留」表，如实登记未做项（尤其 K-2 若触发）。
-- [ ] **8.4** 提交并**推送 origin**（L0-7：完成即推送）：
-
-```bash
-git add -A && git commit -m "test(e2e): 六实例数据同源同步 + 插件功能自动化验证基础设施" && git push origin main
-```
-
-- [ ] **8.5** 写 journal、`task.py archive`。
+- [x] **8.1** **关闭本次启动的实例**（I-6）。**实测**：本次只启动了 `:8001`（Dev ST），已停并复验端口释放；
+      `:8003`（302）/ `:8004`（200）**保持原样在跑**。`stop-instance.cjs` 对无 pidfile 的实例**拒绝停止**
+      （已实测：对 `dev-luker` 正确拒绝）—— 保证不会误关用户既有环境。
+      **顺带修掉停止器的一个真缺陷**：pidfile 记的是 Windows 下 `shell: true` 的**包装进程** pid，
+      真正监听的是它的子进程（实测包装 75308 / 监听 55980）—— 直杀 pidfile 的 pid 会报「已退出」而**端口仍在**。
+      已改为「pidfile 只作归属凭证，杀谁由**端口**决定」，并经启停端到端复验。
+- [x] **8.2** `git status --short` 做**范围门**（L0-17：**不用** `git diff --stat`）——
+      改动集合全部为本次预期文件（`e2e/**`、`scripts/instance-sync/**`、`src/core/zip-io.js`、
+      两份新 spec + 三处索引、`.gitignore`、`package.json`、任务目录）。
+- [x] **8.3** `prd.md` 的「残留」表已回填（R-1…R-10）与「已达成项」清单。
+- [x] **8.4** 提交并**推送 origin**（L0-7）：三次提交 `1f16aa2` / `ae8c8d7` / `16d835c` 均已推送。
+- [x] **8.5** 写 journal（Session 30）；`task.py archive` **未执行** ——
+      本任务**未完成**（阶段 2/3 挂起），不应归档。
 
 ---
 
