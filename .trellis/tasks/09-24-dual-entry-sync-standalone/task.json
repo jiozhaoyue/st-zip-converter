@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "2026-09-25 归档：课题已由 09-25-ui-slim-native 以方向 A（单一模板源）实现并取代，四条实质 AC 均达成——R2 方向选择=用户裁决 14「并入本任务」；R3 两入口一致由该任务 implement.md 8.3 达成（独立态 41/41 节点、0 控制台错误）；R4 守卫即 scripts/single-template-source.js + npm run check:template-source（含模板缺节点→退出码 1 的负向用例）；R5 满足。详见本任务 prd.md 末「收口记录」。",
   "meta": {}
 }
