@@ -810,3 +810,147 @@ index 表 + guides 复用表 + AGENTS/CLAUDE 项目段），并更正基线数�
 ### Next Steps
 
 - 父任务 T3（09-25-luker-native-integration）与 T4（09-25-transfer-pack-optimize）；T3 接手时确认真机注入按钮可见性；四片齐备后一并合入 main
+
+
+## Session 23: T3 Luker 原生对接：备份锚点取证翻案 + 存储 Inspector 接入 + selection 显式化
+<!-- trellis-session: v=2 fp=c6f88874d67f33d3 -->
+
+**Date**: 2026-09-25
+**Task**: T3 Luker 原生对接：备份锚点取证翻案 + 存储 Inspector 接入 + selection 显式化
+**Branch**: `fix/perf-hardening-transfer-memory`
+
+### Summary
+
+完成父任务第 3 片：① 存储配额接 Luker 原生 Storage Inspector（根绝对路径 import，真机正向+反例双向验证）；② 备份管理器锚点取证——推翻 T2「注入未生效」结论，根因是锚点按需渲染且 T2 探针入口 id 点错（正确是 #account_button）；③ 扩展管理只出建议（原生安装器是单 URL 语义，直接替代会净损失批量能力，推荐保留现状）；④ selection 能力改为显式声明表。实机全部改用 Dev 8003，并沉淀宿主能力获取决策树进 spec。中途发生一次 profile 误入公开仓事故，已按授权重写清除。
+
+### Main Changes
+
+执行 T3 `09-25-luker-native-integration`（父任务 `09-25-workbench-native-onesop` 的第 3 片），
+按用户「直接开任务，然后全部自动化测试，用 dev 实例」推进，四个阶段全部完成并归档。
+
+## 环境准备（用户的硬要求：改用 Dev 实例）
+
+- 起 `Instance/Dev/Luker`（`config.yaml` 显式 `port: 8003`，合规 L0-16）——**起效约 26s**
+  （含 webpack 编译前端库），首次轮询探活跑早了，实际是好的。
+- 插件按 Git 装进 Dev：`git clone` 到 `data/default-user/extensions/st-zip-converter`。
+- **Dev 与 Real 的关键差异**：Dev 是 `enableUserAccounts: true` + `whitelistMode: true`，
+  匿名 curl 访问 `/api/**` **一律 403**、`/` 302 跳 `/login`；但 **Playwright 浏览器直通无门禁**。
+  **以后对 Dev 做自动化不要用 curl 探活，一律走 Playwright。**
+
+## 中途一起事故：我把浏览器 profile 推到了公开仓
+
+`git add -A` 扫进了 `.pw-profile-dev/`（**39.46MB / 845 文件，含 `Network/Cookies`**）并推到
+**公开仓**。根因：`.gitignore` 只写了 `.pw-profile/`，没覆盖带 `-dev` 的分实例 profile。
+
+按用户授权重写清除（`reset --soft` → 重新提交 → `--force-with-lease`）：`6f35fb4` → `90c360d`，
+新树 0 个 profile 条目，**全历史复核干净**；`.gitignore` 改为 `.pw-profile*/` 通配。
+内容主体是 Luker UI 的 HTTP/V8 缓存（都是公开源码文件），Local Storage/IndexedDB 基本为空，
+cookie 限 `127.0.0.1:8003` —— 真实可利用性低，但确实违反 L1-MR-14，是本轮最该避免的失误。
+
+## 阶段 1 · ② 备份管理器锚点取证：T2 的结论被推翻
+
+T2 在 8003/8004 都测得注入计数为 0，据此把注入判为可疑。**不成立。**
+
+由宿主源码定位真实渲染链路，逐步真机验证：
+
+```
+#account_button (user.js:3469) → openUserProfile() → renderTemplateAsync('userProfile')
+  → 出现 .userBackupButton → 点它 → openBackupManager() → renderTemplateAsync('userBackupManager')
+    → 出现 .backupActionRow
+```
+
+逐步计数：初始 0 → 账号弹层 **注入 2** → 备份管理器 **注入 3**，结构逐项符合 `makeHostButton` 契约。
+
+**根因**：锚点是**按需渲染**的，初始 DOM 里根本不存在；T2 探针点的是
+`#user-settings-button` / `#sys-settings-button` / `#extensionsMenuButton` / `#user-settings-block`，
+**在 Luker 上全不是正确入口**（正确的是 `#account_button`）。
+→ 已把这条「强制排查步骤」写进 spec（component-guidelines 的 Gotcha 段），否则必重犯。
+
+落点也确认了：`.backupActionRow` 有 5 行，只有 index 0 含原生 ZIP 下载按钮，`querySelector` 取首个正确。
+
+## 阶段 2 · ① 存储配额接原生 Storage Inspector
+
+先取证 `dataSource` 形状（design.md 的「未证不得据此实现」门禁项）：宿主 JSDoc 即
+`{kind:'self'} | {kind:'any', target}`，官方调用点 `user.js:2361` 用 `{kind:'self'}`，
+**不需要构造 `RestProvider`**；面板 mutator 是 `ThrowingMutator`（只读）。
+
+取模块只能走**宿主根绝对路径** `import('/scripts/storage-inspector.js')`（该模块无 window 挂载、
+`getContext()` 未暴露；实测 HTTP 200 / 16.4KB），理由与证据写进代码注释。
+
+真机双向验证：正向 —— 按钮解除 hidden，点击**真的唤起**原生面板且**数据取到**
+（`存储 1.1 GiB / 无限制` + 聊天 457.8 MiB、扩展 275.1 MiB、备份 224.9 MiB 等分类明细）；
+反例 —— 按钮保持 hidden、点击不唤起、页面不报错。
+
+**反例构造踩的坑**：最初用 Playwright `route` 把模块 404，结果**宿主自己崩掉**、插件根本不挂载
+（`settingsBlock`/`drawerApp`/`statusRow` 全 false）——因该模块是宿主自身的静态依赖。
+改用「能加载但导出非函数」的桩才对。顺带查明该模块**仅 Luker 有**（ST/TT/PT 均无），
+故这条降级分支实为**非 Luker 宿主**而设。
+
+## 阶段 3 · ④ selection 语义显式化
+
+原状是 `index.js` 里一行 `host.platform === 'luker'` 推导——新增宿主会**静默**走错分支，
+且看不出别的宿主是「确认不支持」还是「没验过」。改为 `host-bridge.js` 的显式声明表
+`BACKUP_SELECTION_SUPPORT` + 唯一求值点 `hostSelectionCapability()` → `{supported, known, reason}`；
+未知宿主 `known:false` 且走保守路径，绝不乐观放行。单测 6 例覆盖五态。
+
+## 阶段 4 · ③ 扩展管理盘点（只出建议，未改流程）
+
+关键事实：`openThirdPartyExtensionMenu(suggestUrl)` 是**单 URL 安装器**语义，而本仓扩展安装的
+真实场景是「从数据包里批量装回」（触发点是 `restoreToHostInner` 之后的
+`renderExtensionInstallerModal`）——**直接替代会净损失批量能力**。宿主也**无「列出全部扩展」API**、
+**无原生删除 UI**。
+
+故建议清单推荐 **③-B（保留现状）+ ③-C（自绘弹层内加「用宿主原生安装器打开」入口）作为可选增强**；
+③-A / ③-D 净收益为负或接近零。**逐项裁决留待用户**（implement.md 4.4 保持未勾选）。
+`third-party/third-party` 嵌套异常探测（L1-MR-12 防线）未被动过——本次 `host-bridge.js`
+改动**零删除行**，用 `git diff | grep '^-'` 过滤核实。
+
+## 阶段 5 · 验证与交付
+
+- `npm test` **40 文件 / 345 passed / 2 skipped**（本任务起点 39/333 → +12 用例）
+- 三守卫全通过
+- Dev 8003 实机回归：节点 270 / 按钮 29 / `<details>` 0 / `.inline-drawer` 5 **与基线逐项一致**；
+  高度 921→925、可见按钮 3→**4**（新增「存储」）均为**本次交付项**而非回归
+- 宿主能力调用点溯源审计：全仓仅两处（`getContext()`、那一处已注明理由的根绝对路径 import），无第三类
+- Real 实例零写入（插件仓仍 `main @ 3a98fb3`、`git status` 空）
+
+## spec 沉淀
+
+新增 **Host Capability Acquisition（宿主能力获取决策树）** 一整节：决策树、根绝对路径为何跨宿主
+可用、形状校验优先于加载成功、**降级反例的正确构造法**（含 404 踩坑记录）、现存能力面与获取方式表、
+宿主能力差异必须用显式声明表（禁布尔推导）。
+
+## 核验方式（如实记录）
+
+沿用 G-5：`trellis-check` 子代理在本环境已复现多次「0 工具调用即退出」，故**转主代理串行自核**，
+对照 9 条 AC 逐条现场取证（文件:行号 + 命令输出 + 实机读数）。
+**未通过核验的项不记作通过**：implement.md 4.4 保持未勾选。
+
+## 下一步
+
+- ③ 建议清单待用户逐项裁决；选定后若实施需另开任务
+- 父任务 `09-25-workbench-native-onesop` 现 3/4，剩 **T4 `09-25-transfer-pack-optimize`**
+  （上下传链路与打包优化收敛，含「增量合并 vs 差量补丁」概念冗余、分卷/压缩率默认值）
+- 分支 `fix/perf-hardening-transfer-memory` 按用户裁决待 T4 完成后一并合入 `main`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1d80631` | test(host): ②备份管理器锚点真机取证闭环——T2「注入未生效」结论作废 |
+| `b49a409` | feat(host): ① 存储配额接 Luker 原生 Storage Inspector |
+| `d65ef96` | feat(host): ④ selection 语义显式化 + ③ 扩展管理盘点（只出建议） |
+| `4cb1b94` | docs(spec): 沉淀宿主能力获取决策树 + T3 验收逐条取证 |
+
+### Testing
+
+- [OK] npm test 40 文件 / 345 passed / 2 skipped；三守卫通过；Dev 8003 实机正向+反例双向验证；Real 实例零写入
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- T4 09-25-transfer-pack-optimize（父任务剩最后一片）；③ 建议清单待用户逐项裁决
