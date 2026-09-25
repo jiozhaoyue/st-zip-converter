@@ -87,6 +87,18 @@
 - [x] 9.5 4 处破坏性确认全部改走宿主原生弹窗（`stash-list.js` ×2、`export-queue.js` ×2）
 - [x] 9.6 实例还原核对：`Instance/.../st-zip-converter` 回到 `main @ 3a98fb3`，`git status` 干净
 
+## 核验方式（如实记录）
+
+- **未派发 `trellis-check` 子代理**：本仓已复现 4 次（`09-23-extension-manifest-git` 2 次、
+  `09-24-perf-hardening-transfer-memory` 2 次）该子代理**输出一句开场白即退出、`tool_uses: 0`**，
+  每次白烧约 40k tokens。按既定降级策略 **G-5（转主代理串行自核）**执行。
+- **主代理自核口径**：对照 `prd.md` 的 10 条 Acceptance Criteria **逐条去代码现场取证**
+  （文件:行号 + 命令输出写进各条正文），不采信任何交接文档的进度断言。
+- **核验产出**：`npm test` 39 文件 / 333 passed / 2 skipped（零失败）；三条守卫退出码 0；
+  8004 只读复验（`research/final-report.md`）；实例还原核对（`git status --short` 为空）。
+- **未通过核验而如实标注的项**：真机上未观测到宿主锚点注入按钮 —— 已写明原因与后续归属（T3），
+  **未**把它记作通过。
+
 ## 验证命令
 
 ```bash
