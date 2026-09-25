@@ -32,6 +32,7 @@ import {
 import { generateDeltaArchive } from './src/core/delta.js';
 import { buildExtensionManifest } from './src/core/extension-manifest.js';
 import { TaskManager, TASK_STATES } from './src/core/task-manager.js';
+import { BATCH_STATUS, ITEM_STATUS, createRestoreBatch } from './src/core/restore-batch.js';
 import { renderStashList, filterStashFiles } from './src/ui/stash-list.js';
 import { ExportQueue, renderExportQueue } from './src/ui/export-queue.js';
 import { initTaskControls } from './src/ui/task-controls.js';
@@ -45,6 +46,8 @@ import {
   restoreToHost,
   isRestoreInFlight,
   cancelRestoreInFlight,
+  isRestoreUnsupported,
+  getRestoreUnsupportedReason,
   confirmDialog,
   hostSelectionCapability,
   isStorageInspectorAvailable,
@@ -109,7 +112,8 @@ async function main(appRoot = document.getElementById('app')) {
   /**
    * 计算三枚动作按钮的可见性与可用性（纯函数）
    * @param {{isHost: boolean, hasSource: boolean, hasArtifact: boolean,
-   *          isTaskRunning: boolean, isRestoreInFlight: boolean}} s
+   *          isTaskRunning: boolean, isRestoreInFlight: boolean,
+   *          isRestoreUnsupported: boolean}} s
    * @returns {{fetch: {visible: boolean, enabled: boolean},
    *            convert: {visible: boolean, enabled: boolean},
    *            restore: {visible: boolean, enabled: boolean}}}
@@ -118,7 +122,11 @@ async function main(appRoot = document.getElementById('app')) {
     return {
       fetch: { visible: s.isHost, enabled: !s.isTaskRunning },
       convert: { visible: true, enabled: s.hasSource && !s.isTaskRunning },
-      restore: { visible: s.isHost && s.hasArtifact, enabled: !s.isTaskRunning && !s.isRestoreInFlight },
+      // 宿主无整包恢复能力（全部候选 404）时一并禁用：不留「点了必然失败」的按钮（R1.6）
+      restore: {
+        visible: s.isHost && s.hasArtifact,
+        enabled: !s.isTaskRunning && !s.isRestoreInFlight && !s.isRestoreUnsupported,
+      },
     };
   }
 
@@ -130,6 +138,7 @@ async function main(appRoot = document.getElementById('app')) {
       hasArtifact: !!lastConvertedBlob,
       isTaskRunning: workbenchBusy,
       isRestoreInFlight: isRestoreInFlight(),
+      isRestoreUnsupported: isRestoreUnsupported(),
     };
   }
 
@@ -148,9 +157,18 @@ async function main(appRoot = document.getElementById('app')) {
     apply(document.getElementById('btn-convert'), a.convert);
     apply(document.getElementById('btn-host-fetch'), a.fetch);
     apply(document.getElementById('btn-restore-luker'), a.restore);
+    // 宿主无恢复能力时把原因显式挂在按钮上（禁用而不是静默隐藏，用户可知为何不可用）
+    const restoreBtn = document.getElementById('btn-restore-luker');
+    if (restoreBtn) restoreBtn.title = isRestoreUnsupported() ? getRestoreUnsupportedReason() : '';
   }
   let isPlanning = false;
   let pendingRestoreFile = null;
+  /** 非 null 即批量恢复上下文（与 `pendingRestoreFile` 互斥，同一模态复用） */
+  let pendingRestoreBatch = null;
+  /** 当前批量恢复编排器（`createRestoreBatch` 实例） */
+  let activeBatch = null;
+  /** 批量恢复最近一次状态快照（供待导出区渲染） */
+  let lastBatchState = null;
   let currentBaseZip = null; // { name: string, blob: Blob, size: number }
 
   // 实时生成文件名预览（统一目标格式选择器；native 选项经 hostLayoutCode 归一）
@@ -541,7 +559,12 @@ async function main(appRoot = document.getElementById('app')) {
       isHostAvailable: host.isPlugin,
       confirmFn: confirmDialog,
       restoreInFlight: isRestoreInFlight(),
+      // 批量恢复状态（进行中/收尾）+ 宿主无恢复能力时的原因（禁用入口，R1.6）
+      restoreBatch: lastBatchState,
+      restoreUnsupportedReason: isRestoreUnsupported() ? getRestoreUnsupportedReason() : '',
       onCancelRestore: () => {
+        // 先请求编排器停批（未跑的项保持 queued 可续跑），再取消在途请求
+        if (activeBatch) activeBatch.abort();
         if (cancelRestoreInFlight()) {
           logger.warn('用户取消了在途恢复写入——宿主可能已收到部分数据，请稍后核对');
         }
@@ -549,10 +572,32 @@ async function main(appRoot = document.getElementById('app')) {
       onRestoreToHost: (item) => {
         openRestoreModal({ name: item.name, blob: item.blob, size: item.blob.size });
       },
+      onRestoreBatch: (items) => {
+        openBatchRestoreModal(items);
+      },
+      onRetryFailedBatch: async () => {
+        if (!activeBatch || isRestoreInFlight()) return;
+        activeBatch.retryFailed();
+        lastBatchState = activeBatch.getState();
+        refreshExportQueueUI();
+        logger.info(`重跑失败项：${lastBatchState.items.filter((i) => i.status === ITEM_STATUS.QUEUED).length} 项`);
+        const state = await activeBatch.start();
+        lastBatchState = state;
+        if (state.status === BATCH_STATUS.DONE) logger.success(`失败项重跑完成：全部 ${state.total} 项已恢复`);
+        else logger.warn('重跑结束但仍有未成功项——请查看待导出区的逐项原因');
+        refreshExportQueueUI();
+      },
+      onRefreshPage: () => {
+        // 显式按钮：只有用户点击才刷新（不自动强刷，避免打断宿主进行中的工作）
+        logger.info('用户请求刷新页面以让宿主加载已恢复的数据');
+        window.location.reload();
+      },
       onWorkspaceChanged: async () => {
         await updateWorkspaceUI();
       },
     });
+    // 能力探测结果可能刚刚变化（首次恢复尝试后）→ 同步工作台动作按钮的可用性
+    applyActionAvailability();
   }
 
   // 占位符 chip 与包名预设按钮已移除（用户裁决 4/6）：
@@ -1185,6 +1230,11 @@ async function main(appRoot = document.getElementById('app')) {
       alert('还原/写入功能仅在作为 SillyTavern 或 Luker 扩展插件运行且已登录时可用。');
       return;
     }
+    if (isRestoreUnsupported()) {
+      alert(getRestoreUnsupportedReason());
+      return;
+    }
+    pendingRestoreBatch = null;
     pendingRestoreFile = archiveFile;
     if (restoreModalDesc) {
       restoreModalDesc.innerHTML = `即将把数据包 <strong>「${escapeHtml(archiveFile.name)}」</strong> (${escapeHtml(formatBytes(archiveFile.size))}) 恢复写入到当前酒馆宿主 (${escapeHtml(host.platform.toUpperCase())})，请选择恢复模式：`;
@@ -1192,6 +1242,96 @@ async function main(appRoot = document.getElementById('app')) {
     if (restoreModalOverlay) {
       restoreModalOverlay.style.display = 'flex';
     }
+  }
+
+  /**
+   * 批量恢复模态：**复用**同一个恢复模态，只换描述文案与语义
+   * （用户 2026-09-25 裁决：开批前选一次模式，应用到全批；不新增自绘浮层，L1-MR-4）。
+   * @param {Array<{id: string, name: string, blob: Blob}>} items 待恢复产物（顺序即执行顺序）
+   */
+  function openBatchRestoreModal(items) {
+    if (!host.isPlugin) {
+      alert('还原/写入功能仅在作为 SillyTavern 或 Luker 扩展插件运行且已登录时可用。');
+      return;
+    }
+    if (isRestoreUnsupported()) {
+      alert(getRestoreUnsupportedReason());
+      return;
+    }
+    if (!items || items.length === 0) return;
+    // 单项时走单条路径，避免为 1 项多一层批量语义
+    if (items.length === 1) {
+      openRestoreModal({ name: items[0].name, blob: items[0].blob, size: items[0].blob.size });
+      return;
+    }
+    pendingRestoreFile = null;
+    pendingRestoreBatch = items;
+    const totalBytes = items.reduce((sum, it) => sum + (it.blob?.size || 0), 0);
+    if (restoreModalDesc) {
+      restoreModalDesc.innerHTML = `即将把 <strong>${escapeHtml(String(items.length))} 项</strong>产物`
+        + ` (共 ${escapeHtml(formatBytes(totalBytes))}) 依次恢复写入到当前酒馆宿主`
+        + ` (${escapeHtml(host.platform.toUpperCase())})。<br>本批统一使用所选模式；`
+        + '逐项写入期间部分数据已生效，全部完成前请勿视为已结束。';
+    }
+    if (restoreModalOverlay) {
+      restoreModalOverlay.style.display = 'flex';
+    }
+  }
+
+  /**
+   * 执行一批恢复：逐项写入、逐项记录结果、**单项失败不中断整批**。
+   *
+   * 编排逻辑在 `src/core/restore-batch.js`（纯状态机，Node 可直测）；
+   * 本函数只把宿主调用与 UI 刷新接上（依赖注入式接缝，L0-11）。
+   * @param {Array<{id: string, name: string, blob: Blob}>} items
+   * @param {'merge'|'overwrite'} mode 本批统一模式
+   */
+  async function runBatchRestore(items, mode) {
+    if (isRestoreInFlight()) {
+      alert('已有恢复任务正在进行，请等待其完成后再试');
+      return;
+    }
+    const targets = items.map((it) => ({ id: it.id, name: it.name, blob: it.blob }));
+    activeBatch = createRestoreBatch({
+      items: targets,
+      restoreOne: async ({ id }) => {
+        const target = targets.find((t) => t.id === id);
+        try {
+          return await restoreToHost(target.blob, {
+            mode, platform: host.platform, timeoutMs: UPLOAD_TIMEOUT_MS,
+          });
+        } catch (err) {
+          // 宿主根本没这个能力：后续每一项都会同样失败，立即停批（避免刷出 N 条相同失败）
+          if (err?.code === 'RESTORE_UNSUPPORTED' && activeBatch) activeBatch.abort();
+          throw err;
+        }
+      },
+      onUpdate: (state) => {
+        lastBatchState = state;
+        refreshExportQueueUI();
+      },
+    });
+    lastBatchState = activeBatch.getState();
+    refreshExportQueueUI();
+    logger.info(`开始批量恢复：${targets.length} 项，模式 ${mode === 'merge' ? '合并写入' : '覆盖写入'}`);
+
+    const state = await activeBatch.start();
+    const settled = state.doneCount + state.failedCount + state.unconfirmedCount;
+    // 收尾文案：如实区分四种收尾，**不出现**「合并完成」类表述
+    if (state.status === BATCH_STATUS.DONE) {
+      view.setProgress(100, `全部 ${state.total} 项恢复完成，请刷新页面生效`);
+      logger.success(`批量恢复完成：${state.doneCount}/${state.total} 项`);
+    } else if (state.status === BATCH_STATUS.ABORTED) {
+      view.setProgress(100, `批量恢复已中止：完成 ${settled}/${state.total}（部分数据已生效）`);
+      logger.warn('批量恢复已中止——宿主可能已收到部分数据，请核对数据完整性');
+    } else {
+      view.setProgress(100, `批量恢复结束：完成 ${state.doneCount}/${state.total}`
+        + `${state.failedCount ? `，失败 ${state.failedCount}` : ''}`
+        + `${state.unconfirmedCount ? `，未确认 ${state.unconfirmedCount}` : ''}（部分数据已生效）`);
+      logger.warn('批量恢复未全部成功——逐项原因见待导出区，可「重试失败项」');
+    }
+    if (isRestoreUnsupported()) alert(getRestoreUnsupportedReason());
+    refreshExportQueueUI();
   }
 
   if (btnCancelRestore) {
@@ -1203,20 +1343,30 @@ async function main(appRoot = document.getElementById('app')) {
 
   if (btnConfirmRestore) {
     btnConfirmRestore.addEventListener('click', async () => {
-      if (!pendingRestoreFile) return;
+      const batchItems = pendingRestoreBatch;
+      const fileToRestore = pendingRestoreFile;
+      if (!batchItems && !fileToRestore) return;
       // 并发互斥：恢复在途时拒绝再次发起（两个事务并发写同一用户目录，宿主侧行为未定义）
       if (isRestoreInFlight()) {
         alert('已有恢复任务正在进行，请等待其完成后再试');
         return;
       }
-      const fileToRestore = pendingRestoreFile;
       const modeRadio = document.querySelector('input[name="restore-mode"]:checked');
       const mode = modeRadio ? modeRadio.value : 'merge';
 
+      pendingRestoreBatch = null;
       if (restoreModalOverlay) restoreModalOverlay.style.display = 'none';
+
+      // 批量：整批交给编排状态机（模式在开批前选一次，逐项结果与失败原因均可见）
+      if (batchItems) {
+        await runBatchRestore(batchItems, mode);
+        return;
+      }
 
       try {
         btnConfirmRestore.disabled = true;
+        // 单条恢复开始：清掉上一批的收尾条，避免与本次进度并存造成误读
+        lastBatchState = null;
         view.setProgress(15, `正在恢复写入数据包至宿主 (${mode === 'merge' ? '合并写入' : '覆盖写入'})...`);
         logger.info(`向宿主发起数据包恢复请求: ${fileToRestore.name}, 模式: ${mode}`);
 

@@ -226,13 +226,23 @@ export class ExportQueue {
  * @param {ExportQueue} params.queue
  * @param {boolean} [params.isHostAvailable]
  * @param {boolean} [params.restoreInFlight] 是否有恢复事务在途（在途时禁用全部「写回宿主」入口）
- * @param {function(): void} [params.onCancelRestore] 取消在途恢复（仅 `restoreInFlight` 时渲染入口）
- * @param {function(object): void} [params.onRestoreToHost] (item) => void
+ * @param {object|null} [params.restoreBatch] 批量恢复状态快照（`createRestoreBatch().getState()`）——
+ *   传 `null`（缺省）时行为与既有单条恢复完全一致
+ * @param {string} [params.restoreUnsupportedReason] 宿主无整包恢复能力时的原因文案；
+ *   非空即禁用全部恢复入口并把它作为 `title`（R1.6 死按钮规则）
+ * @param {function(): void} [params.onCancelRestore] 取消在途恢复（批量与单条共用）
+ * @param {function(object): void} [params.onRestoreToHost] (item) => void（单条目入口）
+ * @param {function(Array<object>): void} [params.onRestoreBatch] (items) => void 批量入口；
+ *   未注入时「已选 N 项 → 写回宿主」退化为只处理第一项（**仅兼容旧调用方**，产品内不得依赖）
+ * @param {function(): void} [params.onRetryFailedBatch] 重跑本批失败项（只重跑 failed）
+ * @param {function(): void} [params.onRefreshPage] 用户点击「刷新页面生效」（由调用方决定是否 reload）
  * @param {function(): void} [params.onWorkspaceChanged] 工作区列表刷新回调
  */
 export function renderExportQueue({
   containerEl, queue, isHostAvailable = false, restoreInFlight = false,
-  onCancelRestore, onRestoreToHost, onWorkspaceChanged, confirmFn = null,
+  restoreBatch = null, restoreUnsupportedReason = '',
+  onCancelRestore, onRestoreToHost, onRestoreBatch, onRetryFailedBatch, onRefreshPage,
+  onWorkspaceChanged, confirmFn = null,
 }) {
   if (!containerEl) return;
   // 破坏性操作确认走宿主原生弹窗（由调用方注入 host-bridge 的 confirmDialog），
@@ -240,6 +250,9 @@ export function renderExportQueue({
   const askConfirm = typeof confirmFn === 'function'
     ? confirmFn
     : (msg) => Promise.resolve(typeof window !== 'undefined' ? window.confirm(msg) : true);
+  /** 宿主无恢复能力：禁用全部恢复入口（含单条目），并把原因作为 title */
+  const restoreBlocked = Boolean(restoreUnsupportedReason);
+  const restoreBlockedTitle = restoreUnsupportedReason || '已有恢复任务正在进行，请等待其完成';
   const selected = new Set();
 
   const render = () => {
@@ -273,27 +286,90 @@ export function renderExportQueue({
     }
     containerEl.appendChild(header);
 
-    // 恢复在途：提供取消入口（审计 R-01 / R1）——大包上传可能持续数分钟，
-    // 此前用户唯一能做的只有刷新页面。空队列时同样要出现，故置于空状态提前返回之前。
-    if (restoreInFlight && typeof onCancelRestore === 'function') {
-      const cancelBar = document.createElement('div');
-      cancelBar.className = 'eq-batch-bar eq-restore-bar';
-      const btnCancel = document.createElement('button');
-      btnCancel.type = 'button';
-      btnCancel.className = 'menu_button btn-tool';
-      btnCancel.innerHTML = trustedStaticMarkup('<i class="fa-solid fa-ban"></i> 取消恢复');
-      btnCancel.title = '中止正在进行的恢复写入（宿主可能已收到部分数据，取消后请核对）';
-      btnCancel.addEventListener('click', async () => {
-        if (await askConfirm('确定取消正在进行的恢复写入吗？\n宿主可能已收到部分数据，取消后请核对数据完整性。')) {
-          onCancelRestore();
-        }
-      });
-      cancelBar.appendChild(btnCancel);
+    // 恢复条：批量进度 / 收尾引导 / 取消入口。
+    // - 批量（restoreBatch 非空）：进行中显示「已完成 x/N（部分数据已生效）」，
+    //   收尾显示逐项结果 + 「重试失败项」/「刷新页面生效」；绝不显示「合并完成」类表述。
+    // - 单条（restoreInFlight 且无批次）：保留原有取消入口（审计 R-01）。
+    // - 空队列时同样要出现，故置于空状态提前返回之前。
+    if (restoreBatch || (restoreInFlight && typeof onCancelRestore === 'function')) {
+      const bar = document.createElement('div');
+      bar.className = 'eq-batch-bar eq-restore-bar';
+      const mkBarBtn = (html, title, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'menu_button btn-tool';
+        b.innerHTML = trustedStaticMarkup(html);
+        if (title) b.title = title;
+        b.addEventListener('click', onClick);
+        return b;
+      };
+      const askCancel = () => askConfirm(
+        '确定取消正在进行的恢复写入吗？\n宿主可能已收到部分数据，取消后请核对数据完整性。',
+      );
       const hint = document.createElement('span');
       hint.className = 'eq-selected-label';
-      hint.textContent = '恢复写入进行中…';
-      cancelBar.appendChild(hint);
-      containerEl.appendChild(cancelBar);
+
+      if (restoreBatch) {
+        const { status, total, doneCount, failedCount, unconfirmedCount } = restoreBatch;
+        const settled = doneCount + failedCount + unconfirmedCount;
+        if (status === 'running') {
+          // 非原子性如实展示：逐项恢复期间部分数据已生效
+          hint.textContent = `已完成 ${settled}/${total}（部分数据已生效）`;
+          if (typeof onCancelRestore === 'function') {
+            bar.appendChild(mkBarBtn(
+              '<i class="fa-solid fa-ban"></i> 取消批量恢复',
+              '中止本批恢复（宿主可能已收到部分数据，取消后请核对）',
+              async () => { if (await askCancel()) onCancelRestore(); },
+            ));
+          }
+        } else {
+          const parts = [];
+          if (status === 'done') parts.push(`全部 ${total} 项恢复完成`);
+          else if (status === 'aborted') parts.push(`已中止：完成 ${doneCount}/${total}（部分数据已生效）`);
+          else {
+            parts.push(`完成 ${doneCount}/${total}`);
+            if (failedCount) parts.push(`${failedCount} 项失败`);
+            if (unconfirmedCount) parts.push(`${unconfirmedCount} 项结果未确认`);
+            parts.push('部分数据已生效');
+          }
+          hint.textContent = parts.join('，');
+          if (restoreBatch.canRetryFailed && typeof onRetryFailedBatch === 'function') {
+            bar.appendChild(mkBarBtn(
+              '<i class="fa-solid fa-rotate-right"></i> 重试失败项',
+              '只重跑失败项；结果未确认的项不重跑（请求可能已落盘，重跑会重复写入）',
+              onRetryFailedBatch,
+            ));
+          }
+          if (settled > 0 && typeof onRefreshPage === 'function') {
+            bar.appendChild(mkBarBtn(
+              '<i class="fa-solid fa-rotate"></i> 刷新页面生效',
+              '点击后才刷新页面，让宿主重新加载已恢复的数据',
+              onRefreshPage,
+            ));
+          }
+        }
+        bar.appendChild(hint);
+
+        // 逐项失败/未确认原因（纯文本，避免注入面）
+        const bad = restoreBatch.items.filter((i) => i.status === 'failed' || i.status === 'unconfirmed');
+        if (bad.length > 0) {
+          const detail = document.createElement('span');
+          detail.className = 'eq-selected-label';
+          detail.textContent = bad
+            .map((i) => `${i.name}: ${i.status === 'unconfirmed' ? '结果未确认' : (i.reason || '失败')}`)
+            .join('；');
+          bar.appendChild(detail);
+        }
+      } else {
+        bar.appendChild(mkBarBtn(
+          '<i class="fa-solid fa-ban"></i> 取消恢复',
+          '中止正在进行的恢复写入（宿主可能已收到部分数据，取消后请核对）',
+          async () => { if (await askCancel()) onCancelRestore(); },
+        ));
+        hint.textContent = '恢复写入进行中…';
+        bar.appendChild(hint);
+      }
+      containerEl.appendChild(bar);
     }
 
     if (queue.items.length === 0) {
@@ -337,15 +413,21 @@ export function renderExportQueue({
         if (typeof onWorkspaceChanged === 'function') onWorkspaceChanged();
       }));
       if (isHostAvailable && typeof onRestoreToHost === 'function') {
-        // 并发互斥：恢复在途时禁用写回入口，避免两个 restore 事务并发写同一用户目录
+        // 批量入口：把「已选 N 项」**整批**交给调用方。
+        // 此前实现是 `const first = [...selected][0]`——勾 3 项只恢复 1 项且无任何提示
+        // （静默部分执行），本任务将其修正为整批编排。
         const btnRestore = mkSelBtn('<i class="fa-solid fa-rotate"></i> 写回宿主', '', () => {
-          const first = [...selected][0];
-          const item = queue.items.find((it) => it.id === first);
-          if (item) onRestoreToHost(item);
+          const items = [...selected]
+            .map((id) => queue.items.find((it) => it.id === id))
+            .filter(Boolean);
+          if (items.length === 0) return;
+          if (typeof onRestoreBatch === 'function') onRestoreBatch(items);
+          // 兼容旧调用方（产品内恒注入 onRestoreBatch）
+          else onRestoreToHost(items[0]);
         });
-        if (restoreInFlight) {
+        if (restoreInFlight || restoreBlocked) {
           btnRestore.disabled = true;
-          btnRestore.title = '已有恢复任务正在进行，请等待其完成';
+          btnRestore.title = restoreBlockedTitle;
         }
         selBar.appendChild(btnRestore);
       }
@@ -410,9 +492,9 @@ export function renderExportQueue({
       btns.appendChild(btnStash);
       if (isHostAvailable && typeof onRestoreToHost === 'function') {
         const btnRestoreRow = mkBtn('restore', '<i class="fa-solid fa-rotate"></i> 写回宿主', '', () => onRestoreToHost(item));
-        if (restoreInFlight) {
+        if (restoreInFlight || restoreBlocked) {
           btnRestoreRow.disabled = true;
-          btnRestoreRow.title = '已有恢复任务正在进行，请等待其完成';
+          btnRestoreRow.title = restoreBlockedTitle;
         }
         btns.appendChild(btnRestoreRow);
       }
