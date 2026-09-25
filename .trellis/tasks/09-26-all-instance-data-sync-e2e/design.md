@@ -204,12 +204,35 @@ POST /api/users/restore-backup        (multipart: file=P-luker.zip, handle, mode
 - **必须用 `merge`**；`overwrite` 会清目标同名数据（与 U-3 冲突）。
 - 大包要开流式进度（`wantsRestoreProgressStream`），否则 3.8 G 级请求可能超时。
 
-### 5.2 ST 目标
+### 5.2 ST 目标（**OQ-1 已答，此处为更正后的结论**）
 
-ST 无整包恢复 ⇒ 浏览器端逐类目导入。**OQ-1 未决**：ST 1.19.0 的「导入用户数据」确切 UI 路径与
-端点序列尚无实测记录。阶段 2 的**第一件事**是实地探明并写进 `research/`，然后才写用例。
-若 ST 原生导入只支持逐类目手动选择而无法自动化，则**如实降级**为「产出 ST 布局包 + 手工程序说明」，
-并在 PRD 残留登记——**不得**因为要凑「全自动」而改用裸文件拷贝（违反 I-3）。
+> **更正**：本节原写「浏览器端逐类目导入（**宿主原生 UI**）」——**该 UI 并不存在**。
+> 实测（`research/st-import-path.md`）：ST 1.19.0 的 `users-private.js` **只有 `/backup`，
+> 没有任何 import/restore 路由**；`public/scripts/user.js` 只实现 `backupUserData`。
+> ⇒ ST **没有整包恢复，也没有整合的导入 UI**。
+
+可用的**逐类目端点**（无 bulk 通道）：
+
+| 类目 | 端点 |
+| --- | --- |
+| 角色卡 | `POST /api/characters/import` |
+| 聊天 / 群聊 | `POST /api/chats/import`、`POST /api/chats/group/import` |
+| 世界书 | `POST /api/worldinfo/import` |
+| 设置 | `POST /api/settings/save`（**整份替换**语义） |
+| 背景 | `POST /api/backgrounds/upload`（逐文件） |
+| 预设 / 主题 / QuickReplies / instruct | **无导入端点** |
+
+**由此产生的硬约束**（阶段 3 若走这条通道，必须先满足）：
+
+1. **顺序强制**：`chats/import` 带 `validateAvatarUrlMiddleware` ⇒ **必须先导角色卡**。
+2. **设置类目与 U-3 冲突**：`settings/save` 整份替换会丢掉目标实例的自定义项 ⇒
+   必须先读回目标 settings 再合并后写，不能直接覆盖。
+3. **预设 / 主题等无法通过 API 同步** ⇒ **AC-2 的「源覆盖率 100%」在 ST 目标上不可达**，
+   ST 侧的验收标准必须按**可达类目**折算，不得照搬 Luker 侧。
+4. 调用量约 **1500 次**（430 角色卡 + 1029 聊天 + 21 世界书 + 23 背景 + settings）。
+
+**这构成阶段 3 的第二个独立阻塞**（与产品缺陷 E 无关）：即使 E 修好，ST 目标仍需按上表重设计。
+在重设计通过前，**不得**改用裸文件拷贝来凑（违反 I-3）。
 
 ### 5.3 PT 目标
 

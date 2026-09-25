@@ -144,6 +144,34 @@
 | OQ-3 | E2E 运行器是否应写入 `devDependencies` | 默认**不写**（复用全局 Playwright）；确有必要则走 PARDON 单独请批 |
 | OQ-4 | 同步完成后实例保持运行还是关闭 | 默认**关闭**（AC-11）；E2E 期间按需启停 |
 
-## 残留（收口时回填，明确未做项）
+## 残留（**明确未做**，不得读作已覆盖）
 
-> 待阶段 3 收口登记。
+> 截至 2026-09-26，本任务按用户裁决「转做不依赖产包的部分」收口。
+
+| 编号 | 残留项 | 原因与证据 |
+| --- | --- | --- |
+| **R-1** | **产包（P-luker / P-st / P-tt）未产出**，阶段 3 同步全部未执行 | 产品缺陷 **E**：`convert()` 在真源包规模上仍会停滞（首次落盘 5.0 s、写到 299.8 MB / 2000 条后停滞；纯全量投递则 5.8 MB 后停滞）。A–D 已修并保留，吞吐从 0 字节提升到 300 MB，但 **E 成因未定位**。证据：`research/build-packs-blocker.md` |
+| **R-2** | **ST 目标的同步通道需重新设计** | OQ-1 结论推翻了设计假设：**ST 1.19.0 没有整包导入、也没有整合的导入 UI**。可达的只有逐类目端点，且有四条硬约束（顺序强制、`settings/save` 整份替换与 U-3 冲突、预设/主题无通道、约 1500 次调用）。⇒ **AC-2 的「源覆盖率 100%」在 ST 目标上不可达**。证据：`research/st-import-path.md` |
+| **R-3** | **PT（:8899）未纳入 E2E**，PT 上插件未安装 | PT 无磁盘扩展目录（扩展存浏览器 Profile 的 M13 blob），需经其自身扩展管理器从远程 URL 安装；本轮未做。故冒烟只覆盖 `:8001` / `:8003` |
+| **R-4** | **TT 侧未做任何事** | TT 是 Tauri 桌面应用（无浏览器端口，不可自动化），且其 data root 运行期可选；按 U-5 本就是「人工」交付，而人工交付物（TT 布局包 + 导入说明）**因 R-1 未能产出** |
+| **R-5** | **功能矩阵 M-1…M-9 未实现** | 其中 M-4（转换）依赖缺陷 E；为避免写一批必然失败的用例而整体与 E 一并挂起 |
+| **R-6** | **Luker 目标的 `restore-backup` 未实测** | 依赖 R-1 的产物；通道契约已取证（`mode=merge`，见 `research/host-import-export-contracts.md`）但**未跑过一次真实恢复** |
+| **R-7** | **⚠️ 风险接受：Dev Luker / Dev ST / Real ST 无原生备份** | 用户裁决 U-9「只备份 Real Luker」。这三处**没有回滚手段**，只有 `research/pre-sync-manifest-*.json` 只读快照可事后报出改动路径。**因阶段 3 未执行，三者至今未被写入，风险尚未兑现** |
+| **R-8** | **`Real Luker` 的 `backups/` 2.5 G 历史备份未清理** | 不在本任务范围（Out of Scope 明列表）；仅登记其导致导出速率从 7 MB/s 塌到 0.9 MB/s |
+| **R-9** | **`Dev/Luker/.../extensions/third-party/` 空目录未清理** | P-10 隐患形态（Luker 扩展须平铺），但用户裁决 U-3「不删独有」⇒ **只登记不动手**；清理须另走 PARDON |
+| **R-10** | **既有抖动：`test/real-samples.test.js` 在满载时超时** | 该用例用 `zipIo.openReader()` 读 `out/` 下**上一轮生成的真实产物**（`real-l-to-l.zip` = **560 MB**，`out/` 共 3.0 G，被 gitignore），**5 s 默认 vitest 超时在机器满载时不够**。实测：单跑 3/3 全过（6 项）；全量跑 5 次里抖了 2 次，每次都是同一条 `Test timed out in 5000ms`。**与本次改动无关**——该文件只用 `openReader` + `entry.skip()`，而本次只改 `openStream` / `createWriter`（出现 0 次）。已另开后台任务建议（另需注意：`out/` 不入库 ⇒ **换机器该用例会整组 skip**，属「本地才有样本」的既有形态） |
+
+## 已达成项（供收口核对）
+
+- [x] **AC-1** Real Luker 原生数据包导出：`Downloads/backup-real-luker-20260926-010422.zip`
+      = 1602.7 MB 压缩 / **3840.6 MB 未压缩** / 8683 条目 / 247.1 s，附 `bytes/entryCount/sha256` 记录
+- [x] **AC-1b** 四个落盘目标的同步前只读清单快照（`pre-sync-manifest-*.json`）
+- [x] **AC-5** E2E 运行器入库且可重跑：`npm run e2e` 退出码 0
+- [x] **AC-6** 加载冒烟在 `:8001` / `:8003` 全过（`:8899` 见 R-3）
+- [x] **AC-8** 端口守卫负例用例存在且通过（17/17），含「Real 端口在启动浏览器前抛错」的集成证明
+- [x] **AC-9** `npm test` 45 passed / 1 skipped（46 文件）、429 passed / 2 skipped —— 与基线逐项一致、零回退
+- [x] **AC-10** 本任务规范已落 `.trellis/spec/`（**自包含**，内联读数与 `file:line`）：
+      新建 `backend/node-zip-writer-pitfalls.md`、`guides/instance-e2e-and-data-sync.md`，
+      并更新 `guides/index.md`、`backend/index.md`、`frontend/index.md`
+- [x] **AC-11** 收尾只关本次启动的实例（`:8001`），`:8003` / `:8004` 保持原样
+- [ ] **AC-2 / AC-3 / AC-4 / AC-7** —— 未达成，见 R-1 / R-2 / R-5

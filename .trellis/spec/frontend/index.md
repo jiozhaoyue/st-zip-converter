@@ -30,6 +30,10 @@
 > 外加**五条**静态守卫 `npm run check:css-scope`、`npm run check:dom-injection`、
 > `npm run check:template-source`、`npm run check:control-consumer` 与 `npm run check:dom-scope`
 > （详见 quality-guidelines.md 与 dom-write-scope.md）。
+>
+> **实例 E2E（`npm run e2e`）不是发版门槛**，因为它需要实例在跑且**只许连 Dev 白名单**
+> （`8001` / `8003` / `8899`，Real 端口出现即拒绝）。当前覆盖：端口守卫负例（17 项）
+> + 加载冒烟（`8001` / `8003`）。契约与纪律见 `../guides/instance-e2e-and-data-sync.md`。
 > 同一事实只允许一处权威表述；遇到冲突以本目录文档与根 `CLAUDE.md` 为准。
 >
 > ⚠ **单个 spec 文件不得超过 Trellis 的 `context_injection.max_file_bytes`（32768 字节）**——

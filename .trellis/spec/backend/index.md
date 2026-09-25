@@ -24,6 +24,7 @@
 | [Datapack Storage Guidelines](./database-guidelines.md) | 四平台 zip 布局、流式 IO、IndexedDB 暂存、secrets 保真 | Ready |
 | [Error Handling](./error-handling.md) | 核心抛错边界、报告警告/丢弃账本、资源收尾 | Ready |
 | [Quality Guidelines](./quality-guidelines.md) | 测试矩阵、守卫命令、禁止模式、zip 写入并发契约 | Ready |
+| [Node Zip Writer Pitfalls](./node-zip-writer-pitfalls.md) | **`zip-io.js` 的四处静默缺陷**（已锁流 cancel 杀进程 / `bufferedWrite` 永不落盘 / 背压自锁 / 无界并发）与四条硬约束、`io` 契约陷阱、大包不进内存的可用做法、可执行守护 | Ready（2026-09-26 新建） |
 | [Logging Guidelines](./logging-guidelines.md) | 结构化 logger、报告输出、密钥脱敏 | Ready |
 
 ---

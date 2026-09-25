@@ -5,6 +5,13 @@
 
 ---
 
+> ## ⚠️ 执行顺序改道（2026-09-26，用户裁决）
+>
+> 阶段 2 被产品缺陷 E 阻塞（A–D 已修并保留；E 成因待查）。
+> 用户裁决：**转做不依赖产包的部分**。故实际执行顺序为
+> **阶段 1 → 阶段 2（部分，挂起）→ 阶段 4 → 阶段 5.2（加载冒烟）→ 阶段 2.3（OQ-1 探路）→ 阶段 3（挂起）**。
+> 阶段 3（同步）与 2.1/2.4（产包）在 E 解决前不执行，残留已登记。
+
 ## 阶段 0 · 评审门（`task.py start` 之前）
 
 - [x] **0.1** 向用户请批三项**扩大/偏离**（本文件末尾「请批清单」），获准后才 `start` ——
@@ -115,11 +122,16 @@ node scripts/instance-sync/start-instance.cjs --id real-luker
       并加 `.partial` 保护（先写 `.partial`，成功后再改名 —— 首轮实跑留下的 8.6 MB 坏包即因缺此保护，
       **该残件已按用户裁决删除**）。
 - [x] **2.2** **先 `dryRun: true` 空转**，核对计划读数 —— ✅ 已完成（见 2.0）。
-- [ ] **2.3** **探明 ST 导入路径（OQ-1）**：在 Dev ST :8001 上实地走一遍原生「导入用户数据」，
-      记录 UI 路径、触发端点序列、是否可脚本化。结论落 `research/st-import-path.md`。
-      **若不可自动化 → 触发 K-2 降级预案**，并在 PRD 残留登记。
+- [x] **2.3** **探明 ST 导入路径（OQ-1）** —— 结论落 `research/st-import-path.md`。
+      **答案推翻了设计的一条假设**：ST 1.19.0 **没有整包导入、也没有整合的导入 UI** ——
+      `users-private.js` 只有 `/backup`（无任何 import/restore 路由），
+      `public/scripts/user.js` 只实现 `backupUserData`。
+      可用的只有**逐类目端点**（characters / chats / worldinfo / settings.save / backgrounds.upload），
+      且有四条硬约束（顺序强制、settings 整份替换与 U-3 冲突、预设主题无通道、
+      约 1500 次调用）。⇒ **AC-2 的「源覆盖率 100%」在 ST 目标上不可达**，
+      `design.md` §5.2 已按此更正。**这是阶段 3 的第二个独立阻塞。**
 - [ ] **2.4** 校验三份产包：`target` 布局正确（ST 摊平 / TT `data/default-user/` 前缀）、
-      `backups/` 零条目、角色卡与聊天计数与源一致。
+      `backups/` 零条目、角色卡与聊天计数与源一致。⛔ 未开始（依赖 2.1）。
 
 **回滚点**：产包在 Downloads，未触碰任何实例；失败即重跑。
 
@@ -154,22 +166,28 @@ PT 用 M21 导入前自动恢复点。**因此阶段 3 每写一处都必须先�
 
 ## 阶段 4 · E2E 基础设施（R3 → AC-5 / AC-8）
 
-- [ ] **4.1** 写 `e2e/lib/resolve-playwright.cjs`（先 `require('playwright')`，失败再 `npm root -g`）
-      —— 沿用上轮 `.pw-verify-changes.cjs:20-26` 的既有模式，**不新装包**。
-      附 **1.62.1 版本断言**：不符即 `console.warn`（K-7），**禁止**自动升级或覆盖。
-- [ ] **4.2** 写 `e2e/lib/guard.cjs`（契约见 `design.md` §3.3）。
-- [ ] **4.3** 写 `e2e/specs/guard.spec.cjs` **负例用例**：
-      喂 `http://127.0.0.1:8002` / `:8004` 必抛错、喂空值必抛错、喂非白名单端口必抛错。
-      **先看它成功抓到违规**，再用于后续判定（AC-8）。
-- [ ] **4.4** 写 `e2e/lib/harness.cjs`：持久化上下文、控制台与失败请求采集、
-      **本插件归因过滤**（只把来源为本插件资源的错误计入失败）。
-- [ ] **4.5** 写 `e2e/run.cjs`：串行跑 spec、汇总、**任一失败即非零退出**；支持 `--only` / `--url`。
-- [ ] **4.6** `package.json` 增加 `"e2e": "node e2e/run.cjs"`（**仅台账项，非依赖变更**）。
-- [ ] **4.7** 跑守卫与负例：
+- [x] **4.1** 写 `e2e/lib/resolve-playwright.cjs`（先 `require('playwright')`，失败再 `npm root -g`）
+      —— **不新装包**，实测解析到全局 `playwright@1.62.1`；附版本漂移告警（不抛错，避免他机无谓失效）。
+- [x] **4.2** 写 `e2e/lib/guard.cjs`（契约见 `design.md` §3.3）。
+- [x] **4.3** 写 `e2e/specs/guard.spec.cjs` **负例用例**。**实测 17/17 全过**，含：
+      Real `:8002`/`:8004` 被拒**且错误信息点名 Real**（先于「不在白名单」）、
+      空/undefined/空白被拒（无静默兜底）、未写端口被拒、`8000` 被拒（L0-16）、
+      非白名单 `5173` 被拒、不可解析被拒、三个 Dev 端口放行；
+      **以及一条集成断言**：`openInstance()` 对 Real 端口**在启动浏览器之前**就抛错
+      —— 证明守卫真的接在自动化路径上，而不是「写了个函数没人用」。
+- [x] **4.4** 写 `e2e/lib/harness.cjs`：持久化上下文、控制台/页面错误/失败请求采集，
+      并把读数分成**两栏**：整页背景（30 个第三方扩展的噪音，**不参与判定**）与
+      **本插件归因**（URL/位置/堆栈含插件 slug 的才算，**判定只看这栏**）。
+- [x] **4.5** 写 `e2e/run.cjs`：串行跑 spec、汇总、**任一失败即非零退出**；支持 `--only` / `--url`
+      （`--url` 覆盖也先过守卫）与多实例 spec（`requiresInstances`）。
+- [x] **4.6** `package.json` 增加 `"e2e": "node e2e/run.cjs"`（**仅台账项，非依赖变更**）。
+- [x] **4.7** 跑守卫与负例：
 
 ```bash
 node e2e/run.cjs --only guard
 ```
+
+      **实测：断言 17 项 / 通过 17 / 失败 0，退出码 0**（AC-8 达成）。
 
 **回滚点**：纯新增文件，删除即可；不进产品构建产物（`vite build` 不受影响）。
 
@@ -177,18 +195,32 @@ node e2e/run.cjs --only guard
 
 ## 阶段 5 · 加载冒烟 + 功能矩阵（R3 → AC-6 / AC-7）
 
-- [ ] **5.1** 确保三目标在跑（8001 / 8003 / 8899）；**8899 的 PT web 需先起**。
-- [ ] **5.2** 写 `e2e/specs/smoke.spec.cjs`：插件加载成功、注入点齐全、
-      **本插件零报错、零失败请求**。参数化实例，逐目标跑。
+- [x] **5.1** 确保目标在跑。**实测**：`:8003`（Dev Luker）与 `:8004`（Real Luker）**取证时本就在运行**；
+      本次**只启动了 `:8001`（Dev ST）**。`:8899`（PT web）未启动 —— 且**PT 上并未安装本插件**
+      （PT 无磁盘扩展目录，需经其自身扩展管理器从远程 URL 安装），故本轮**不纳入冒烟**，
+      已登记为残留。
+      **同时更正一处我自己的错误**：实例登记表首版把 ST 两个实例写成 `https://`，
+      实测 ST `ssl.enabled: false` 是**明文 HTTP**（Luker 才是 https）——
+      是启动器的就绪探针以 `TCP 已开但 HTTP EPROTO` 抓出来的，已更正并留证于 `instances.cjs` 注释。
+- [x] **5.2** 写 `e2e/specs/smoke.spec.cjs`：插件资源可取、注入点齐全、
+      **本插件零报错、零失败请求**；多实例（`requiresInstances: ['dev-luker','dev-st']`）逐个跑。
+      **实测：全量 E2E `npm run e2e` = 断言 53 项 / 通过 53 / 失败 0，退出码 0**（AC-5 / AC-6 达成）。
+      **过程中修正了两处我自己的错误断言**（回源码核实后确认是断言写错、非插件缺陷）：
+      ① 抽屉态**本来就没有** `.app-header`（`workbench-template.js:30` `const chrome = !isDrawer`）
+      ⇒ 改为断言抽屉态真实存在的 `#status-row`/`#dropzone`/`#stash-list`/`#export-queue-panel`/
+      `#usage-dashboard`，并**顺带断言页头确实不存在**把该约定钉住；
+      ② 未打开账号弹层时 `data-st-zip-injected` 为 0 是**设计行为**（`host-bridge.js:1770` 明写
+      「初始页面查询 `.userBackupButton` → 0 个，本函数自然什么都不做」）⇒ 改为断言**不变量**：
+      **注入按钮数 == 宿主原生锚点数（1:1、绝无孤儿）**。
+      另修正一处**测量时机**问题：宿主菜单先渲染成空壳（`#extensionsMenu` 子节点 `0 → 16`），
+      插件的菜单项要到 **t≈7 s** 才出现 ⇒ 改为**有界等待**（15 s，L1-MR-7），
+      不再用瞬时值判定（首版因此同一个实例时红时绿）。
 - [ ] **5.3** 写 `e2e/specs/matrix.spec.cjs`：覆盖 M-1…M-9 九条路径（`design.md` §3.4）。
-- [ ] **5.4** 全量跑：
-
-```bash
-node e2e/run.cjs
-```
-
-      要求：**退出码 0**；trace/截图落 `test-results/`（**严禁**写 `Instance/**`，I-5）。
-- [ ] **5.5** 提交前脱敏核对：`test-results/` 与任何将入库的读数里**无 token、无聊天内容、无本机用户路径**。
+      ⛔ 未开始 —— 其中 **M-4（转换）依赖产品缺陷 E 的修复**，故整条矩阵与 E 一并挂起。
+- [ ] **5.4** 全量跑 `node e2e/run.cjs`：**当前（guard + smoke）已退出码 0**；
+      完整矩阵待 5.3。trace/截图落 `test-results/`（**严禁**写 `Instance/**`，I-5）。
+- [x] **5.5** 脱敏核对：`test-results/` 已被 `.gitignore` 覆盖；本轮入库内容已核对
+      **无 token、无聊天内容、无本机绝对路径**（工具脚本一律相对解析）。
 
 **回滚点**：E2E 只读实例，不回滚数据；失败即修用例或如实登记为残留。
 
@@ -196,15 +228,19 @@ node e2e/run.cjs
 
 ## 阶段 6 · 质量门（AC-9）
 
-- [ ] **6.1** `npm test` —— 全绿零回退（基线 **46 文件 / 429 passed / 2 skipped**）。
-      为 `guard.cjs` 等**纯逻辑**补 vitest 单测（E2E 本身不进 vitest 用例集）。
-- [ ] **6.2** 五条静态守卫退出码全 0：
-
-```bash
-npm run check:css-scope && npm run check:dom-injection && npm run check:template-source && npm run check:control-consumer && npm run check:dom-scope
-```
-
-- [ ] **6.3** `npm run build` 通过，产物与本次改动无关（L1-MR-11 未被破坏）。
+- [x] **6.1** `npm test` —— **实测 46 文件 / 429 passed / 2 skipped，exit 0，零回退**（基线逐项一致）。
+      **如实登记一条既有抖动**：全量跑 5 次里抖了 2 次，均为 `test/real-samples.test.js` 的
+      `Test timed out in 5000ms`（该用例读 `out/` 下 560 MB 的真实产物，默认 5 s 超时满载时不够）；
+      单跑 3/3 全过。**与本次改动无关** —— 该文件只用 `openReader`，本次只改 `openStream`/`createWriter`。
+      见残留 R-10。
+      为 `guard.cjs` 等纯逻辑补 vitest 单测的**计划未执行**：这些模块的判定已由
+      `npm run e2e --only guard` 的 17 项断言**覆盖并逐条留读数**，再写一份 vitest 版属重复；
+      E2E 本身仍**不进** vitest 用例集（且已用 `.e2e.cjs` 后缀规避 vitest 的 `*.spec.*` 收集 —— 实测踩过）。
+- [x] **6.2** 五条静态守卫退出码全 0：**实测 css-scope / dom-injection / template-source /
+      control-consumer / dom-scope 全部 `exit=0`**。
+- [x] **6.3** `npm run build` 通过（**实测 `✓ built in 1.26s`**），
+      新增能力全是 Node 脚本与 `e2e/` 目录，`vite build` 产物不变（L1-MR-11 未被破坏）。
+- [x] **6.4（附加）** `npm run e2e` 退出码 0（**断言 53 项 / 通过 53**）—— 见阶段 4/5。
 
 **回滚点**：质量门不过即修，不带着失败提交。
 
@@ -212,15 +248,18 @@ npm run check:css-scope && npm run check:dom-injection && npm run check:template
 
 ## 阶段 7 · 规范落库（AC-10）
 
-- [ ] **7.1** 新建 `.trellis/spec/guides/instance-e2e-and-data-sync.md`（**自包含**：内联读数与
-      `file:line`，**不写**「详见任务目录」）。至少涵盖：实例登记表与端口纪律、
-      端口守卫契约与负例、四宿主的导出/导入通道对照、同源同步的语义与核对方法。
-- [ ] **7.2** 更新 `.trellis/spec/frontend/index.md` 与 `quality-guidelines.md` 的**过时计数**
-      （测试文件数/用例数、守卫条数）。
-      ⚠️ **`component-guidelines.md` 距 32768 字节上限仅余 135 字节** ——
-      **禁止**向该文件追加任何内容；需要落内容就按主题新建文件。
-- [ ] **7.3** 三条平台文件（`CLAUDE.md` / `AGENTS.md` 等）与真源块若需同步，走真源仓
-      `tavern-harness` 的同步器，**不手改**。
+- [x] **7.1** 新建 **`.trellis/spec/backend/node-zip-writer-pitfalls.md`**（**自包含**：内联症状速查表、
+      四条硬约束与正误代码对照、实测读数、`io` 契约陷阱、大包不进内存的可用做法、
+      可执行守护命令，**不写**「详见任务目录」）。
+      另新建 **`.trellis/spec/guides/instance-e2e-and-data-sync.md`**（自包含：实例端口/协议纪律、
+      Dev-only 守卫契约与四条不可省约束、四宿主导出/导入通道对照、ST 逐类目端面与三条硬约束、
+      备份通道的 chunked/速率塌方实测、搬数据的语义纪律）。
+- [x] **7.2** 更新 `.trellis/spec/guides/index.md` 与 `.trellis/spec/backend/index.md` 的索引表；
+      `frontend/index.md` 补一行说明 **`npm run e2e` 不是发版门槛**（需实例在跑且只许连 Dev）。
+      **`npm test` 的测试计数未变**（46 文件 / 429 passed / 2 skipped），无需改动。
+      ⚠️ **未向 `component-guidelines.md` 追加任何内容**（该文件距 32768 字节上限仅余 135 字节）。
+- [x] **7.3** 三条平台文件与真源块的同步**本次未做** —— 本任务未改统一规则正文；
+      若需改动，须走真源仓 `tavern-harness` 的同步器，**不手改**。
 
 **回滚点**：spec 改动可 `git checkout` 还原。
 

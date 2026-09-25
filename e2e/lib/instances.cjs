@@ -4,11 +4,16 @@
  * 纪律（违反即本仓红线）：
  *  1. **端口写死登记值**（L0-16）。Dev/Real 只能靠端口区分——两个宿主的版本号完全一致
  *     （ST 1.19.0 / Luker 2.7.0 在 Dev 与 Real 上相同），`P-11` 明确「风险不是端口冲突而是误连」。
- *  2. **目录按标准仓群布局相对解析**，不写本机绝对路径（`P-17` / `L1-MR-14`：
+ *  2. **协议按宿主各自 `config.yaml` 的 `ssl.enabled` 决定，不靠猜**（2026-09-26 实测）：
+ *     - **ST（Dev/Real）`ssl.enabled: false` ⇒ 明文 `http://`**（首版登记表误写 https，
+ *       被 `start-instance.cjs` 的就绪探针以 `TCP 已开但 HTTP EPROTO` 抓出——探针只信 `inst.url`）；
+ *     - **Luker（Dev/Real）`ssl.enabled: true` ⇒ `https://`**（自签证书，故需 `ignoreHTTPSErrors`）；
+ *     - **PT `apps/web` 是 vite dev ⇒ `http://`**。
+ *  3. **目录按标准仓群布局相对解析**，不写本机绝对路径（`P-17` / `L1-MR-14`：
  *     绝对路径进公开仓等于把本机目录结构交出去，换机器必然失效）。
  *     可用环境变量 `TAVERN_INSTANCES_ROOT` 覆盖，便于他机复用。
- *  3. **禁止 8000**：任何启动都不得绑定或请求 8000（L0-16 出厂默认段）。
- *  4. 本文件**不含任何凭据**；登录态一律由 Playwright 持久化档案承载（`.pw-profile*`，已 gitignore）。
+ *  4. **禁止 8000**：任何启动都不得绑定或请求 8000（L0-16 出厂默认段）。
+ *  5. 本文件**不含任何凭据**；登录态一律由 Playwright 持久化档案承载（`.pw-profile*`，已 gitignore）。
  *
  * @module e2e/lib/instances
  */
@@ -51,7 +56,8 @@ const PROFILES = Object.freeze({
 const INSTANCES = Object.freeze({
   'dev-st': Object.freeze({
     id: 'dev-st', side: 'dev', host: 'st', port: 8001,
-    url: 'https://127.0.0.1:8001',
+    // ST `config.yaml` 的 `ssl.enabled: false` ⇒ 明文 HTTP（实测 http=200 / https=EPROTO）
+    url: 'http://127.0.0.1:8001',
     dir: path.join(INSTANCES_ROOT, 'Dev', 'SillyTavern'),
     profile: PROFILES.dev,
     userDir: 'data/default-user',
@@ -60,7 +66,8 @@ const INSTANCES = Object.freeze({
   }),
   'real-st': Object.freeze({
     id: 'real-st', side: 'real', host: 'st', port: 8002,
-    url: 'https://127.0.0.1:8002',
+    // 同 Dev ST：`ssl.enabled: false` ⇒ HTTP
+    url: 'http://127.0.0.1:8002',
     dir: path.join(INSTANCES_ROOT, 'Real', 'SillyTavern'),
     profile: PROFILES.real,
     userDir: 'data/default-user',
