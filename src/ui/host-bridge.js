@@ -59,6 +59,106 @@ export function cancelRestoreInFlight() {
 }
 
 /**
+ * 恢复端点候选表（**只作首选顺序**，不是「平台 ↔ 端点」的静态断言）。
+ *
+ * 事实依据（2026-09-25 认证态黑盒实测，见任务
+ * `.trellis/tasks/09-25-batch-restore-luker-endpoint/research/host-endpoint-facts.md`）：
+ *   - Luker 2.7.0：`/api/users/restore` → 404；`/api/users/restore-backup` 存在（空体 → 400）。
+ *   - ST 1.19.0：两者**均为 404** —— ST 不提供整包恢复能力。
+ * 命中结果记入会话缓存，宿主版本演进时靠 404 回退自愈，故本表无需随版本维护。
+ */
+const RESTORE_ENDPOINT_CANDIDATES = Object.freeze({
+  luker: Object.freeze(['/api/users/restore-backup', '/api/users/restore']),
+  st: Object.freeze(['/api/users/restore', '/api/users/restore-backup']),
+});
+
+/** 会话内命中的恢复端点（不持久化；刷新页面即重新探测） */
+let restoreEndpointHit = null;
+
+/**
+ * 会话内恢复能力标记：`'unknown'` | `'available'` | `'unsupported'`。
+ *
+ * `'unsupported'` = 全部候选返回 404/405 ⇒ **本宿主没有整包恢复能力**（ST 实测如此）。
+ * 此时必须禁用恢复入口并给出「改用宿主原生方式导入」的说明：既不得把 404 报成「恢复失败」，
+ * 也不得留下点了必然失败的按钮（本仓「不出现死按钮」原则）。
+ */
+let restoreCapability = 'unknown';
+
+/** 判定为不支持时记录「已探测端点 → 状态码」，供 UI 展示原因 */
+let restoreUnsupportedDetail = '';
+
+/** @returns {'unknown'|'available'|'unsupported'} 本会话内探测到的恢复能力 */
+export function getRestoreCapability() {
+  return restoreCapability;
+}
+
+/** @returns {boolean} 本宿主是否已被判定为「无整包恢复能力」 */
+export function isRestoreUnsupported() {
+  return restoreCapability === 'unsupported';
+}
+
+/** @returns {string} 不支持时的人类可读原因（含已探测端点），否则空串 */
+export function getRestoreUnsupportedReason() {
+  return restoreUnsupportedDetail;
+}
+
+/** 构造「本宿主无恢复能力」错误（统一文案，避免各处措辞漂移） */
+function restoreUnsupportedError() {
+  const err = new Error(
+    `本宿主未提供整包恢复接口（已探测：${restoreUnsupportedDetail}）。`
+    + '请改用宿主原生的导入方式恢复数据包。',
+  );
+  err.code = 'RESTORE_UNSUPPORTED';
+  return err;
+}
+
+/**
+ * 按平台候选序提交恢复请求，**仅在 404/405 时**回退下一候选。
+ *
+ * 安全约束（硬）：非 404/405 的失败（超时 / 5xx / 413 / 网络中断 / 取消）一律原样交回，
+ * **绝不**改试另一端点——那些情况下请求可能已被宿主处理，换端点重试等于对同一用户目录重复写入。
+ *
+ * `formData` 内的 body 是 Blob（非流），可安全重复提交。
+ *
+ * @param {FormData} formData 含 `avatar` / `handle` / `mode` / `incremental` 的表单体
+ * @param {{platform: string, token: string, signal?: AbortSignal, timeoutMs?: number}} opts
+ * @returns {Promise<Response>} 首个「非 404/405」响应（无论其成败，交由调用方按既有三态处理）
+ * @throws {Error} 全部候选均 404/405 时抛 `code='RESTORE_UNSUPPORTED'`
+ */
+async function postRestoreWithFallback(formData, { platform, token, signal, timeoutMs }) {
+  const candidates = RESTORE_ENDPOINT_CANDIDATES[platform] || RESTORE_ENDPOINT_CANDIDATES.st;
+  // 命中缓存优先（会话内后续恢复直接打已验证端点，省一次 404 往返）
+  const ordered = restoreEndpointHit && candidates.includes(restoreEndpointHit)
+    ? [restoreEndpointHit, ...candidates.filter((ep) => ep !== restoreEndpointHit)]
+    : candidates;
+  const attempted = [];
+  for (const endpoint of ordered) {
+    const response = await fetchWithTimeout(endpoint, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'X-CSRF-Token': token,
+      },
+      body: formData,
+    }, { timeoutMs, signal, label: '恢复数据包至宿主' });
+
+    if (response.status !== 404 && response.status !== 405) {
+      restoreEndpointHit = endpoint;
+      restoreCapability = 'available';
+      return response;
+    }
+    // 404/405 = 该路径无此路由（或方法不符）→ 请求未达处理器，无副作用，可安全试下一候选
+    logger.warn(`恢复端点不可用，尝试下一候选：${endpoint} → HTTP ${response.status}`);
+    attempted.push(`${endpoint} → ${response.status}`);
+  }
+  restoreCapability = 'unsupported';
+  restoreUnsupportedDetail = attempted.join('、');
+  const err = restoreUnsupportedError();
+  logger.error(err.message);
+  throw err;
+}
+
+/**
  * 安全渲染状态文本：图标拆为独立节点，文本走 textContent。
  *
  * 存在原因：安装失败时的错误消息可能来自宿主响应正文（用户/服务端可控），
@@ -398,9 +498,29 @@ export async function validateBackupShape(blob, platform) {
 }
 
 /**
+ * 从宿主官方前端 API 读 CSRF Token（**纯增强**，读不到返回 `null` 即回退 `/csrf-token`）。
+ *
+ * `getContext().getRequestHeaders()` 是宿主官方公开路径（本仓 `host-capabilities.md`
+ * 已确立「取能力的唯一合法路径是 getContext()」）；2026-09-25 实测两宿主均存在且含该头。
+ * 防御式访问：宿主脚本未就绪 / 非浏览器环境（Node/Vitest）一律 `null`，绝不抛出。
+ * @returns {string|null}
+ */
+function readContextCsrfToken() {
+  try {
+    const ctx = globalThis.SillyTavern?.getContext?.();
+    const token = ctx?.getRequestHeaders?.()?.['X-CSRF-Token'];
+    return typeof token === 'string' && token ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 获取宿主 CSRF Token（短超时兜底，避免宿主挂起时永久 pending）
  */
 export async function getCsrfToken({ signal } = {}) {
+  const fromContext = readContextCsrfToken();
+  if (fromContext) return fromContext;
   const response = await fetchWithTimeout('/csrf-token', { credentials: 'same-origin' }, {
     timeoutMs: SHORT_FETCH_TIMEOUT_MS,
     signal,
@@ -413,6 +533,11 @@ export async function getCsrfToken({ signal } = {}) {
 
 /**
  * 获取当前登录用户句柄（短超时兜底）
+ *
+ * ⚠ **该端点是句柄的唯一权威来源**（2026-09-25 认证态实测：Luker 与 ST 均 200，
+ * 返回 `{handle:'default-user',…}`）。**不要**改用 `getContext().name1`——那是
+ * **用户人设名**（本机实测为中文名），当成句柄会把数据包写进错误目录。
+ * 取证见任务 `09-25-batch-restore-luker-endpoint/research/host-endpoint-facts.md`。
  */
 export async function getHandle({ signal } = {}) {
   const response = await fetchWithTimeout('/api/users/me', { credentials: 'same-origin' }, {
@@ -714,6 +839,11 @@ export async function restoreToHost(zipBlob, { mode = 'merge', platform = 'st', 
 
 /** `restoreToHost` 的实现体（互斥标志由外层 `try/finally` 保证复位）。 */
 async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }) {
+  // 已判定本宿主无整包恢复能力（全部候选 404/405）：直接拒绝，不再重复探测，
+  // 也不让调用方把「宿主没这个能力」误读成「恢复失败」（R1.6 死按钮规则）。
+  if (restoreCapability === 'unsupported') {
+    throw restoreUnsupportedError();
+  }
   // 中文名刻意避开「增量合并」——该词曾是 J 区一个从不生效的开关名，
   // 与这里的宿主端 merge 语义完全无关。此处语义是「把包并入现有数据」vs「整体覆盖」。
   logger.info(`准备向宿主 [${platform.toUpperCase()}] 恢复写入数据包 (模式: ${mode === 'merge' ? '合并写入' : '覆盖写入'})...`);
@@ -725,14 +855,10 @@ async function restoreToHostInner(zipBlob, { mode, platform, signal, timeoutMs }
   formData.append('mode', mode);
   formData.append('incremental', mode === 'merge' ? 'true' : 'false');
 
-  const response = await fetchWithTimeout('/api/users/restore', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'X-CSRF-Token': token,
-    },
-    body: formData,
-  }, { timeoutMs, signal, label: '恢复数据包至宿主' });
+  // 端点按平台候选序解析，仅 404/405 回退（见 postRestoreWithFallback 的硬约束）
+  const response = await postRestoreWithFallback(formData, {
+    platform, token, signal, timeoutMs,
+  });
 
   if (!response.ok) {
     let detail = '';

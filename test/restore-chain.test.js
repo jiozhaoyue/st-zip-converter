@@ -337,3 +337,151 @@ describe('readJsonBounded：响应体读取的有界兜底（L1-MR-7）', () => 
     await expect(readJsonBounded(res, { timeoutMs: 5000 })).rejects.toBeInstanceOf(SyntaxError);
   });
 });
+
+/**
+ * 恢复端点候选解析（R1.3 / R1.4 / R1.6）。
+ *
+ * 需求见 `.trellis/tasks/09-25-batch-restore-luker-endpoint/` 的 `prd.md` §R1 与 `design.md` §1。
+ * 事实依据：Luker `/api/users/restore` = 404、`/api/users/restore-backup` 存在；
+ * ST 1.19.0 两者**均 404**（无整包恢复能力）。
+ */
+
+/** 端点感知的 fetch 替身：凭证端点恒 200，恢复端点按映射返回（缺省 404） */
+function endpointFetch(statusByEndpoint) {
+  return vi.fn(async (url) => {
+    const u = String(url);
+    if (u.includes('csrf-token')) return { ok: true, status: 200, json: async () => ({ token: 't' }) };
+    if (u.includes('/api/users/me')) return { ok: true, status: 200, json: async () => ({ handle: 'default-user' }) };
+    const status = statusByEndpoint[u] ?? 404;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => ({ success: true, restoredCount: 7, error: 'boom' }),
+    };
+  });
+}
+
+/** 只取恢复端点（排除凭证端点）的调用序列 */
+function restoreCalls(spy) {
+  return spy.mock.calls
+    .map((c) => String(c[0]))
+    .filter((u) => u.startsWith('/api/users/') && !u.endsWith('/me'));
+}
+
+describe('restoreToHost：端点候选解析（R1.3 / R1.4 / R1.6）', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('Luker：首选 restore-backup 直接命中，不去试 ST 端点', async () => {
+    const spy = endpointFetch({ '/api/users/restore-backup': 200 });
+    globalThis.fetch = spy;
+    const { restoreToHost } = await import('../src/ui/host-bridge.js');
+
+    const result = await restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'luker' });
+    expect(result).toMatchObject({ success: true });
+    expect(restoreCalls(spy)).toEqual(['/api/users/restore-backup']);
+  });
+
+  it('平台候选序生效：ST 首选 404 时回退 restore-backup，并缓存命中端点', async () => {
+    // ST 首选 /api/users/restore 不存在 → 回退；第二候选存在（模拟宿主版本演进后 ST 有了该端点）
+    const spy = endpointFetch({ '/api/users/restore-backup': 200 });
+    globalThis.fetch = spy;
+    const { restoreToHost } = await import('../src/ui/host-bridge.js');
+
+    await restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'st' });
+    expect(restoreCalls(spy)).toEqual(['/api/users/restore', '/api/users/restore-backup']);
+
+    // 第二次：会话缓存命中 → 直接打 restore-backup，不再试首选
+    await restoreToHost(new Blob(['y']), { mode: 'merge', platform: 'st' });
+    expect(restoreCalls(spy)).toEqual([
+      '/api/users/restore', '/api/users/restore-backup', // 第一次
+      '/api/users/restore-backup',                       // 第二次（缓存）
+    ]);
+  });
+
+  it('非 404 失败（500）不得换端点重试——请求可能已被宿主处理（R1.4 硬约束）', async () => {
+    const spy = endpointFetch({ '/api/users/restore': 500 });
+    globalThis.fetch = spy;
+    const { restoreToHost } = await import('../src/ui/host-bridge.js');
+
+    await expect(
+      restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'st' }),
+    ).rejects.toThrow(/500/);
+    // 只打过首选端点，第二个候选一次都没试
+    expect(restoreCalls(spy)).toEqual(['/api/users/restore']);
+  });
+
+  it('全部候选 404：抛 RESTORE_UNSUPPORTED，且会话内不再重复探测（R1.6 死按钮规则）', async () => {
+    const spy = endpointFetch({}); // 全 404
+    globalThis.fetch = spy;
+    const { restoreToHost, isRestoreUnsupported, getRestoreCapability, getRestoreUnsupportedReason } =
+      await import('../src/ui/host-bridge.js');
+
+    expect(getRestoreCapability()).toBe('unknown');
+    await expect(
+      restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'st' }),
+    ).rejects.toMatchObject({ code: 'RESTORE_UNSUPPORTED' });
+
+    expect(isRestoreUnsupported()).toBe(true);
+    expect(getRestoreCapability()).toBe('unsupported');
+    // 文案不得是「恢复失败」，且须给出已探测端点，便于用户理解
+    expect(getRestoreUnsupportedReason()).toContain('/api/users/restore');
+
+    const callsAfterFirst = spy.mock.calls.length;
+    await expect(
+      restoreToHost(new Blob(['y']), { mode: 'merge', platform: 'st' }),
+    ).rejects.toMatchObject({ code: 'RESTORE_UNSUPPORTED' });
+    expect(spy.mock.calls.length).toBe(callsAfterFirst); // 未再发任何请求
+  });
+
+  it('Luker 端点命中后能力标记为 available', async () => {
+    globalThis.fetch = endpointFetch({ '/api/users/restore-backup': 200 });
+    const { restoreToHost, getRestoreCapability } = await import('../src/ui/host-bridge.js');
+    await restoreToHost(new Blob(['x']), { mode: 'merge', platform: 'luker' });
+    expect(getRestoreCapability()).toBe('available');
+  });
+});
+
+describe('getCsrfToken：官方上下文优先（R1.2）', () => {
+  const realSillyTavern = globalThis.SillyTavern;
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (realSillyTavern === undefined) delete globalThis.SillyTavern;
+    else globalThis.SillyTavern = realSillyTavern;
+  });
+
+  it('getContext().getRequestHeaders() 可用时不打 /csrf-token', async () => {
+    const spy = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ token: 'net' }) }));
+    globalThis.fetch = spy;
+    globalThis.SillyTavern = {
+      getContext: () => ({ getRequestHeaders: () => ({ 'X-CSRF-Token': 'ctx-token' }) }),
+    };
+    const { getCsrfToken } = await import('../src/ui/host-bridge.js');
+
+    await expect(getCsrfToken()).resolves.toBe('ctx-token');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('上下文抛错时静默回退到 /csrf-token（不得上抛）', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ token: 'net' }) }));
+    globalThis.SillyTavern = { getContext: () => { throw new Error('宿主脚本未就绪'); } };
+    const { getCsrfToken } = await import('../src/ui/host-bridge.js');
+
+    await expect(getCsrfToken()).resolves.toBe('net');
+  });
+
+  it('无宿主（Node 环境）时走 /csrf-token', async () => {
+    delete globalThis.SillyTavern;
+    const spy = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ token: 'net' }) }));
+    globalThis.fetch = spy;
+    const { getCsrfToken } = await import('../src/ui/host-bridge.js');
+
+    await expect(getCsrfToken()).resolves.toBe('net');
+    expect(spy).toHaveBeenCalled();
+  });
+});
