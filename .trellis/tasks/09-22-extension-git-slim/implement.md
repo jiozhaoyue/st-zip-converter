@@ -67,8 +67,8 @@
 - [x] 6.1 四条静态守卫全部退出码 0：`check:css-scope` / `check:dom-injection` / `check:template-source` / `check:control-consumer`
 - [x] 6.2 `git status --short` 核对改动范围（**注意：不得用 `git diff --stat` 判断范围**，L0-17）——产品代码仅 7 个文件 + 1 个新测试文件
 - [x] 6.3 spec 沉淀：`.trellis/spec/guides/tavern-datapack-formats.md` 新增 §5「扩展 `.git` 历史策略 (gitMode)」（自包含：白名单、`.keep` 命门、两处实测取证、实现落点），**并更正该文件 §3 中「不存在 Shallow Git 转换能力」这一已作废条文**；「环境教训」补记 Luker 恢复路由与 CSRF/会话绑定两处宿主端事实
-- [ ] 6.4 提交（含任务归档元数据：真实分支名写进 `task.json`）
-- [ ] 6.5 `git push` 到 origin（L0-7）
+- [x] 6.4 提交（`cdc9772`；分支 `feat/git-history-slim` 已在 `task.py start` 时登记进 `task.json`）
+- [x] 6.5 `git push` 到 origin（L0-7）——`origin/feat/git-history-slim` = `cdc9772`
 
 ## 回滚点
 
