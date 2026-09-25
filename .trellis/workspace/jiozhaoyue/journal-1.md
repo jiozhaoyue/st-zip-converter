@@ -697,3 +697,116 @@ detectHost改为lukerContext优先协议(实测Luker同时暴露SillyTavern与lu
 ### Status
 
 [OK] **Completed**
+
+
+## Session 22: T2 收尾：分包归一化抽纯函数 + 宿主原生确认弹窗 + 按钮工厂 + spec 沉淀与归档
+<!-- trellis-session: v=2 fp=d2c7ac92494b0ed0 -->
+
+**Date**: 2026-09-25
+**Task**: T2 收尾：分包归一化抽纯函数 + 宿主原生确认弹窗 + 按钮工厂 + spec 沉淀与归档
+**Branch**: `fix/perf-hardening-transfer-memory`
+
+### Summary
+
+接续被中断的 09-25-ui-slim-native：补齐 4.3/5.3/6.2 三项，检索证伪并撤回上一轮「原生确认弹窗需移交 T3」的判断（getContext().Popup.show.confirm 是官方文档路径，真机往返验证通过），新增 12 条单测与三入口一致性断言（333 passed），8004 只读复验无回归（未观测到注入锚点，如实记录并交 T3），spec 沉淀四条契约并更正已被作废的「双模板同源同改」旧条文，归档 T2 与已被其取代的 09-24-dual-entry-sync-standalone。
+
+### Main Changes
+
+接续上个会话（`cdae1b39`，第 1166 行被用户中断）继续 T2 任务 `09-25-ui-slim-native`，
+补齐三项未完成条目、做收尾复验、沉淀 spec 并收口归档。
+
+## 中断点定位
+
+上个会话停在：刚修完 `[hidden]` 被宿主原生类覆盖的 bug（`c3ca97c`），已推送、已在 8004 验证
+（可见按钮 4→3）、实例已还原 `main`。核对现场：工作区干净、无未推送提交、`npm test` 308 passed。
+
+未完成条目（`implement.md`）：4.3 分包单测、5.3 `makeHostButton` 工厂、6.2 原生确认弹窗，
+以及 8.4–8.7 的勾选回填。其中 5.3/6.2 上一轮被标注「移交 T3」。
+
+## 关键裁决：撤回上一轮的 T3 移交判断（L0-3 检索取证）
+
+上一轮记「`callGenericPopup` 不挂全局，仅 `popup.js` export，须动态 import 宿主模块」——
+**经检索不成立**。GitHub API 检索＋官方文档核实：
+
+- ST `public/scripts/st-context.js:225` 与 Luker `public/scripts/st-context.js:2663` 都把
+  `Popup` / `POPUP_TYPE` / `POPUP_RESULT` 挂在 `getContext()` 上；
+- `docs.sillytavern.app` 记载 `const { Popup } = SillyTavern.getContext(); Popup.show.confirm(title, message)`；
+- 真机取证（8004 Luker 2.7.0）：`getContext().Popup.show.confirm` 为 `function`、`AFFIRMATIVE = 1`，
+  真实唤起→点取消→返回 `0` 且 promise settle。
+
+**教训**：凭印象断定宿主 API 不可用，会凭空造出一个假依赖并把可一次做完的事推到跨任务。
+已写入 spec 的禁止模式第 10 条。
+
+## 实现（`0256f9b`）
+
+1. **4.3**：分包归一化从 `index.js` 的 `main()` 闭包抽为 `src/core/splitter.js` 的
+   `normalizeSplitMb()` 纯函数（`MIN_SPLIT_MB = 1`），闭包内只做 DOM 取值；5 条单测覆盖
+   浮点/负数/0/空值/空白/非数字/Infinity，并断言返回值恒为整数（R3.2）。
+2. **6.2**：`host-bridge.js` 新增 `confirmDialog()` 适配器（特性检测 + 静默降级）。
+   不猜宿主常量：`POPUP_RESULT` 缺失时直接降级。接入面扩到**全部 4 处**破坏性确认
+   （暂存区批量删除 / 行内删除、待导出区清空 / 取消在途恢复），经 `confirmFn` DI 接缝注入。
+3. **5.3**：抽出 `makeHostButton()` 工厂，收敛两处重复的按钮构造。**范围边界**：
+   `registerMenuButton` 的菜单项（`list-group-item` 形态）与工作台声明式模板按钮
+   **有意不经**该工厂——第一版注释写成「统一四个注入点」属过度声明，已修正。
+
+## 单测与守卫（333 passed）
+
+新增 `test/confirm-dialog.test.js`（7 用例）、`test/host-button-factory.test.js`（6 用例，
+**最小 DOM 桩**——项目不引入 jsdom，遵 L1-MR-11 依赖自包含）、
+三入口渲染一致性断言（`test/single-template-source.test.js` 增至 14 用例：三态各产出全部 41 个
+必需节点、折叠区为原生 inline-drawer 非 `<details>`、三态唯一合法分支差异被正向锁死）。
+
+## 8004 实机复验（只读，实例已还原）
+
+抽屉读数与上一轮**逐项一致**（903px / 270 节点 / 29 按钮 / 3 可见 / 0 `<details>` / 5 个 inline-drawer）
+→ 无回归。**未观测到宿主锚点注入按钮**：真机全程 `.userBackupButton` / `.userBackupManager` /
+`.backupActionRow` 均为 0（探针点了 4 个候选入口）。判为「承载它们的宿主面板未被打开」而非回归
+（锚点在 ST 与 Luker 源码中确实存在），已如实记录并交 T3 确认。
+
+## 两处经用户裁决的验收口径
+
+1. F 区三联的 3 个 `<small>`（目标平台/压缩级别/分卷 MB）按**字段标签**保留，AC4 判定为满足；
+2. 模态态由单测断言即算满足——`openConverterModal` 是 `index.js` 的**宿主侧导出**、仓内无调用方。
+
+## spec 沉淀（`e7cd79d`）
+
+新增：Host Native Dialog Adapter（7 段式契约）、Button Factory Mandate、Single Template Source Mandate。
+**更正被本次改造作废的旧条文**：原「双模板同源同改」整节（component/quality/directory 三处 +
+index 表 + guides 复用表 + AGENTS/CLAUDE 项目段），并更正基线数字与守卫数量（两条→三条）。
+`CLAUDE.md`/`AGENTS.md` 的真源同步块按约定未手改，改在 spec 中写明 L1-MR-10 在本仓已不适用。
+
+## 归档
+
+- `09-25-ui-slim-native`（T2）→ `archive/2026-09/`
+- `09-24-dual-entry-sync-standalone` → 经用户确认一并归档。它的课题已被 T2 以
+  **方向 A（单一模板源）**实现并取代，四条实质 AC 均达成（守卫形态比原设想更强：
+  不再断言两处 id 一致，而是结构上消除第二份副本）。归档时因「从未有自己的分支」被门禁拦下，
+  按提示用 `--skip-branch-validation` 放行。
+
+## 下一步
+
+分支 `fix/perf-hardening-transfer-memory` 保持现状，待父任务
+`09-25-workbench-native-onesop` 的 T3（Luker 原生对接）/ T4（上下传优化）做完后一并合入 `main`
+（用户 2026-09-25 裁决）。T3 接手时需确认真机注入按钮可见性。
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0256f9b` | feat(ui): 分包归一化抽纯函数 + 破坏性确认走宿主原生弹窗 + 按钮工厂复用 |
+| `e7cd79d` | docs(spec): 沉淀四条 UI 契约 + 更正已被本次改造作废的旧条文 |
+| `6506c52` | docs(task): 补记 T2 核验方式（子代理 0 工具调用 → 转主代理自核） |
+| `8041bc4` | docs(task): 09-24 双入口分歧任务收口记录（已由 T2 以方向 A 取代） |
+
+### Testing
+
+- [OK] npm test 39 文件 / 333 passed / 2 skipped；check:css-scope / check:dom-injection / check:template-source 三守卫通过；8004 只读复验（抽屉读数与上轮逐项一致）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 父任务 T3（09-25-luker-native-integration）与 T4（09-25-transfer-pack-optimize）；T3 接手时确认真机注入按钮可见性；四片齐备后一并合入 main
