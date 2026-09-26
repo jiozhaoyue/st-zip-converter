@@ -176,7 +176,7 @@
 | **R-17** | **`fixtures/gen.js` 的 CLI 入口在本机静默空操作**（既有缺陷，非本任务引入） | `fixtures/gen.js:144` 的入口守卫用 `` `file://${process.argv[1].replace(/\\/g,'/')}` `` 构造 URL，而 `import.meta.url` 是 `file:///D:/…`（**三个**斜杠）⇒ **永不相等**。实测 `node fixtures/gen.js <dir>` 退出码 0、零输出、不产文件（即 `npm run gen-fixtures` 从未生效）。本任务的矩阵 spec 绕过该 CLI，用动态 `import()` 直调 `generateAll()`。**只登记不修**（Out of Scope） |
 | **R-18** | ~~疑似产品缺陷 N-1：外部包路径上 `native` 未走布局码归一~~ → **已修复（用户 2026-09-26 裁定「本轮修 + 补单测」）** | **症状**（本任务 E2E 矩阵 M-3 查出）：同一小包、同一宿主，只改目标选项即得不同读数 —— `native` → 「直通 7 / **无合成** / 产物 7」；显式 `st` → 「直通 7 / **合成 1** / 产物 8」。**根因**：归一只在宿主拉取路径做了（原 `index.js:193`），而 `refreshPlan` / `btnConvert` / `runBatchConversion` / 扩展清单的 `targetLayout` **直接取 `targetSelect.value`** ⇒ 字符串 `'native'` 直达计划器/转换器，而 `plan-preview.js` 的合成分支只认 `TARGETS.L`(:372) / `TARGETS.ST`(:383) ⇒ 不匹配任何分支，退化成**原样直通**。**后果不对称**（故长期未被发现）：ST 宿主上恰好等价、用户看不出；**Luker 宿主上选「宿主原生格式」会拿到未经布局转换的结果**。 | **修法**：新增纯函数 `resolveTargetLayout(rawValue, platform, fallback)`（`src/ui/host-bridge.js`，与 `hostLayoutCode` 同处）作为**唯一归一实现**，`index.js` 的 5 处取目标（含原已归一的文件名预览）全部改走它；单测 `test/target-resolve.test.js`（**11 项**，含 `native + luker ⇒ l` 的核心负例，并已**实测证明判别力**：临时去掉归一后 6 项转红、恢复后 11/11）。E2E 侧把原「差异登记」断言改为**一致性断言**（`native` 读数须等于该宿主的显式布局码读数，两实例分别对照 `st` / `l`）。详见 `research/e2e-matrix-findings.md` §4 |
 | **R-19** | **M-8 的 `restoreCapability` 三态不可直接观测；宿主拉取路径的 pause/resume 未实测** | 三态（`unknown\|available\|unsupported`，`host-bridge.js:85`）未挂 `window`，矩阵只能验**非破坏性**的可见性契约（并已用「分卷后 `lastConvertedBlob` 置 null ⇒ 入口重新隐藏」做双向互证）。**未主动点恢复按钮**：`postRestoreWithFallback` 会对实例发真实 POST，一旦某候选端点实际存在即产生真实写入 —— 风险不对等。宿主拉取的 pause/resume 同样未测：触发它会对实例发起**全量拉取**（Dev Luker 1 GB 级），不可接受 |
-| **R-20** | **⚠️ E2E 验证的是「实例里装的插件版本」，不是工作区代码** | 本轮发现：`Instance/Dev/SillyTavern/public/scripts/extensions/third-party/st-zip-converter` 与 `Instance/Dev/Luker/data/default-user/extensions/st-zip-converter` 均停在 **`1640118`**（经 `git merge-base --is-ancestor` 确认是 HEAD 的**祖先**）⇒ **E2E 此前全部读数（53/53、175/175）验证的都是旧代码**。N-1 修复后复跑 E2E，那两条 `native` 一致性断言**如期失败**（失败读数仍是旧的「直通 7 / 无合成 / 产物 7」，expected 是新形态「合成 1 / 产物 8」）—— 这**反过来证明该断言有效**，也说明「实例未更新」这件事是**可被判据捕获**的。⇒ **纪律**：用 E2E 验证新代码前，必须先把实例插件更新到目标版本（走 `git pull` —— L0-1 允许的实例更新通道；其 `origin` 已确认指向本仓、非上游），且**只更新 Dev 实例**（E2E 只连 Dev）。另注：PT 侧同理（其插件也是旧版本），且 matrix spec 尚未把 PT 加为目标 |
+| **R-20** | ~~E2E 验证的是「实例里装的插件版本」，不是工作区代码~~ → **已处置（第六轮）** | **发现**：`Instance/Dev/SillyTavern/.../third-party/st-zip-converter` 与 `Instance/Dev/Luker/data/default-user/extensions/st-zip-converter` 均停在 `1640118`（`git merge-base --is-ancestor` 确认是 HEAD 的祖先）⇒ 此前 E2E 的读数（53/53、175/175）验证的都是**旧代码**；N-1 修复后未更新实例即复跑，那两条 `native` 一致性断言**如期失败**（失败读数正是旧的「直通 7 / 无合成 / 产物 7」）—— **反过来证明该断言有效**。**处置**：按 L0-1 允许的通道（`git pull`，两目录均干净、`origin` 已确认指向本仓、非上游）把**两个 Dev 实例**的插件更新到 `b16b5ba`（**只更新 Dev**，E2E 只连 Dev；Real 实例未动）。**复验**：更新后全量 `npm run e2e` = **断言 175 项 / 通过 175 / 失败 0（exit 0）**⇒ **矩阵首次在「与工作区同版本」的代码上全绿**。**纪律（留档）**：用 E2E 验证新代码前必须先更新实例插件，否则验证的是历史版本 |
 
 ## 已达成项（供收口核对）
 
@@ -203,6 +203,8 @@
       第三轮曾因 R-15 的 settings 事故掉到 **50/53**，修复后**复跑 53/53 全绿**
 - [x] **AC-7** 功能矩阵 M-1…M-9：`e2e/specs/matrix.e2e.cjs` **122 项断言全过、连续两轮全绿**；
       全量 `npm run e2e` = **175 项 / 通过 175 / 失败 0（exit 0）**。
+      **最终复验（第六轮，实例已更新到 `b16b5ba`）**：全量 **175/175 全绿** ——
+      即 **首次在与工作区同版本的代码上验证通过**（此前实例停在 `1640118`，见 R-20）。
       九条路径各自的实际判定面（全部取自插件渲染出的 DOM / IndexedDB）：
       M-1 `#env-badge` 文本 + `native` 选项；M-2 真实路径打开工作台且控件**真实可见**；
       M-3 `#plan-summary-bar`/`#output-estimate-text`/`#action-stats-badges`/`#category-checkboxes`；
