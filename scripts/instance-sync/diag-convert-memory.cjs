@@ -23,13 +23,14 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const MB = (n) => (n / 1048576).toFixed(1);
 
 function parseArgs(argv) {
-  const out = { source: '', target: 'l', interval: 5000, hw: 0, maxSec: 0, out: '' };
+  const out = { source: '', target: 'l', interval: 5000, hw: 0, maxSec: 0, out: '', noWorkers: false };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--source') out.source = argv[++i] || '';
     else if (argv[i] === '--target') out.target = argv[++i] || 'l';
     else if (argv[i] === '--interval') out.interval = Number(argv[++i]) || 5000;
     else if (argv[i] === '--hw') out.hw = Number(argv[++i]) || 0;
     else if (argv[i] === '--max-sec') out.maxSec = Number(argv[++i]) || 0;
+    else if (argv[i] === '--no-workers') out.noWorkers = true;
     else if (argv[i] === '--out') out.out = argv[++i] || '';
   }
   return out;
@@ -73,6 +74,22 @@ function findLatestSource(downloadsDir) {
   const transformMod = await import(pathToFileURL(path.join(REPO_ROOT, 'src', 'core', 'transform.js')).href);
   const { convert, TARGETS } = transformMod;
   const baseIo = await createNodeIo();
+
+  /**
+   * `--no-workers`：关闭 zip.js 的 worker 池做对照。
+   *
+   * 必须放在 `createNodeIo()` **之后** —— 产品 `zip-io.js` 在**模块顶层**就
+   * `zip.configure({ useWebWorkers: true, … })`，先设会被它覆盖；zip.js 的 configure 是
+   * **全局后设置生效**，故此处覆盖对后续所有写入有效。这又是**不改产品代码**做对照的抓手。
+   *
+   * 用途：峰值实测是**纯 JS 堆对象**（`heapUsed` 6.2 GB 时 `external` 仅 76 MB、
+   * `arrayBuffers` 仅 57 MB），需判断是否由 worker 通信（结构化克隆）造成。
+   */
+  if (args.noWorkers) {
+    const zip = await import(pathToFileURL(path.join(REPO_ROOT, 'src', 'vendor', 'zip.js')).href);
+    zip.configure({ useWebWorkers: false });
+    console.log('[配置] useWebWorkers=false（覆盖产品顶层 configure，仅本次诊断）');
+  }
 
   const stats = {
     addCalls: 0, addBytes: 0,
@@ -149,6 +166,7 @@ function findLatestSource(downloadsDir) {
     const stallTag = stalledSince ? ` ⛔停滞${((Date.now() - stalledSince) / 1000).toFixed(0)}s` : '';
     console.log(
       `[T+${el}s] 落点=${MB(bytes)}MB | heap=${MB(mu.heapUsed)}/${MB(mu.heapTotal)}MB rss=${MB(mu.rss)}MB`
+      + ` | external=${MB(mu.external)}MB arrayBuf=${MB(mu.arrayBuffers)}MB`
       + ` | lazy 投递=${stats.lazyCalls} 完成=${stats.lazySettled} 在飞=${stats.lazyInflight}`
       + ` 峰值=${stats.lazyMaxInflight} | add 投递=${stats.addCalls} 完成=${stats.addSettled}`
       + ` | ${rate.toFixed(1)}条/s${stallTag}`,

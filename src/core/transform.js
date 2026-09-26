@@ -114,6 +114,22 @@ const USER_EXTENSIONS_PREFIX = 'extensions/';
 const TT_APP_PRIVATE_USER = ['tauritavern-settings.json', 'user/lan-sync/'];
 const TT_DERIVED_USER = ['content.log', 'user/cache/'];
 
+/**
+ * 投递侧背压的批次粒度：每累积这么多**已处理**源条目，就等一次 `writer.waitForRoom()`，
+ * 把「已受理但未完成」的条目压回并发窗口量级。
+ *
+ * 依据（2026-09-26 实测，真源包 1602.7 MB / 8683 条 → 产出 619 MB / 7748 条）：
+ *
+ * | 投递方式 | 「在飞」峰值 | 内存峰值 | 耗时 |
+ * | --- | --- | --- | --- |
+ * | 全量投递（本常量引入前的行为） | **916 条**（窗口仅 8） | **6.2 GB**（默认 4.3 GB 堆直接 OOM） | **182 s** |
+ * | 分批投递 | 窗口量级 | 数百 MB | **72.5 s** |
+ *
+ * ⇒ 这是**内存与吞吐的双赢**，不是拿速度换内存：全量投递时 GC 剧烈抖动，
+ * 落盘会成片停滞（实测同一批量下 `.partial` 每次停 5–10 s）。
+ */
+const WRITE_BATCH = 16;
+
 const FIXED_TIMESTAMP = '2020-01-01T00:00:00.000Z';
 
 /**
@@ -328,6 +344,12 @@ export async function convert(sourcePath, targetPath, {
   try {
     for await (const entry of reader.entries()) {
       processedEntries++;
+      // 投递侧背压（见 WRITE_BATCH 的说明）：周期性等「已受理未完成」的条目回落，
+      // 避免在紧凑循环里一次性投递全部条目把内存峰值推到 GB 级。
+      // dryRun 时 writer 是 NullZipWriter，其 waitForRoom() 为空实现，此处无需分支。
+      if (processedEntries % WRITE_BATCH === 0) {
+        await writer.waitForRoom();
+      }
       if (typeof onProgress === 'function') {
         onProgress(processedEntries, totalEntries, entry.fileName, entry.crc32 ?? null);
       }

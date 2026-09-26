@@ -18,7 +18,7 @@
 | 控制台只有 `ERR_INVALID_STATE: ReadableStream is locked`，看不到真正的错误 | `openStream` 在已锁流上 `cancel` |
 | 条目数写了几千条后停滞，RSS 稳定不动 | 背压窗口把排队者也算进去了（自锁） |
 | 循环里大批投递后**几乎没有并发上限** | 背压窗口被放在了首条目分支之后 |
-| 进程报 `FATAL ERROR: … near heap limit … out of memory`，落点停在几百 MB（**默认堆上限 4288 MB**） | 内存峰值超默认堆上限（见 §5；给足堆即可跑通） |
+| 进程报 `FATAL ERROR: … near heap limit … out of memory`，落点停在几百 MB | **投递积压**把内存峰值推到 GB 级（见 §5）。**不是「堆不够」** —— 加堆只是掩盖 |
 
 ## 2. 四条硬约束（违反即复现上述症状）
 
@@ -114,52 +114,67 @@ const writer = await zipIo.zipIo.createWriter(new FileWriter(out), { level: 5 })
 | 顺序 `await` 每条 | 82.4 s |
 | 批次 8 条、每批 `await` | 72.5 s |
 
-## 5. 真源规模下的内存峰值：默认堆会 OOM（**成因已定位，产品侧尚未修复**）
+## 5. 真源规模下的内存峰值：投递侧无背压 ⇒ 默认堆 OOM（**已修复**）
 
-修完 2.1–2.4 之后，`convert()` 在真源包上**仍会失败** —— 但形态是**明确的 OOM**，
-不是此前记录的「静默挂死」：
+修完 2.1–2.4 之后，`convert()` 在真源包上**仍会失败**，形态是**明确的 OOM**：
 
 ```
 FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
 ```
 
-- **实测默认堆上限 = 4288 MB**（`v8.getHeapStatistics().heap_size_limit`）；
-  转换的**峰值需求超过它** ⇒ 落点停在 352 MB 后进程自杀。
-- **给足堆即完整跑通**：`--max-old-space-size=8192` →
-  **213.5 s / 619.3 MB / 7748 条 / 零条目丢失**；
-  结束时 `heapUsed` 仅 **142 MB** ⇒ **不是内存泄漏**（泄漏不会在结束前回落）。
+### 5.0 根因与修复（**一行结论**）
 
-⇒ **定性：这是「资源需求」问题，不是「正确性」问题**（产物完整、条目零丢失）。
+> **根因**：`convert()` 在紧凑的 `for await` 循环里**同步、不 await** 地投递全部条目，
+> 而 `addLazy` 是同步登记 —— 于是「已受理未完成」的条目可以积压到**近千条**（窗口本应只有 8）。
+> **修复**：`transform.js` 每处理 `WRITE_BATCH`（16）个源条目就 `await writer.waitForRoom()`，
+> 由 `zip-io.js` 的 `waitForRoom(maxPending = CONCURRENCY)` 把积压压回窗口量级。
 
-### 5.1 排除项：worker 数不是主因
+**修复前后实测对照**（同一源包 1602.7 MB / 8683 条 → 产出 619.3 MB / 7748 条）：
 
-`zip-io.js:19/23` 用 `navigator.hardwareConcurrency` 同时决定并发窗口与 zip.js worker 池
-（`maxWorkers = Math.max(4, HW)`）。Node 24 上该值 = 物理核数（本机 **20**）。
+| 指标 | 修复前（全量投递） | 修复后（分批投递） |
+| --- | --- | --- |
+| 「在飞」峰值 | **916 条** | **24 条** |
+| `heapUsed` 峰值 | **6262 MB** | **123 MB** |
+| RSS 峰值 | 6807 MB | **463 MB** |
+| 耗时 | **182.0 s**（且**必须** 8 GB 堆） | **54.8 s**（**默认堆即可**） |
+| 产出 | 619.3 MB / 7748 条 / 零丢失 | **完全一致** |
 
-| 伪造的 HW | 产品 CONCURRENCY | zip maxWorkers | 结果 |
-| --- | --- | --- | --- |
-| 20（真实） | 8 | 20 | 撑到 T+69s / 落点 310 MB，RSS 峰值 2893 MB |
-| 4 | 4 | 4 | **T+47s OOM** |
-| 2 | 2 | 4 | **T+44s OOM** |
+⇒ **这是内存与吞吐的双赢，不是拿速度换内存**：全量投递时 GC 剧烈抖动，落盘成片停滞
+（实测同一批量下 `.partial` 每次停 5–10 s）；把积压压下去后反而**快 3.3 倍**。
 
-**降 worker 反而更早 OOM**；三档**前 15 s 读数逐字相同**（投递节奏由源包读取决定，
-与并发配置无关）⇒ worker 数**不是**主因。
+> **教训**：「拉大堆」只是**掩盖**问题（`--max-old-space-size=8192` 确实能让它跑完），
+> 真正该问的是**为什么会有近千条在飞**。看到 OOM 先查投递/消费速率比，再考虑加堆。
 
-> **诊断手法（不改产品代码）**：`Object.defineProperty(globalThis.navigator, 'hardwareConcurrency', …)`
-> 必须在 `import` 产品模块**之前**执行 —— 产品在**模块顶层**就把该值算成常量并 `zip.configure(...)`。
-> 诊断脚本见 `scripts/instance-sync/diag-convert-memory.cjs`（`--hw N`）。
+### 5.1 定位过程（可复用的手法，**都是不改产品代码的**）
 
-### 5.2 可执行做法与**明确的残留**
+- **排除 worker 数**：伪造 `globalThis.navigator.hardwareConcurrency` 为 20/4/2 三档 ——
+  低 worker **反而更早 OOM**，且三档**前 15 s 读数逐字相同**（投递节奏由源包读取决定，与并发配置无关）。
+  该属性必须在 `import` 产品模块**之前**设置（产品在**模块顶层**就读它并 `zip.configure(...)`）。
+- **排除 worker 通信**：`--no-workers`（在 `createNodeIo()` **之后**再 `zip.configure({useWebWorkers:false})`
+  覆盖产品的顶层配置，zip.js 是「后设置生效」）—— heap **依旧冲到 6195 MB**，与 worker 无关。
+- **排除数据 buffer**：同一时刻 `external` 仅 76 MB、`arrayBuffers` 仅 57 MB
+  ⇒ 峰值是**纯 JS 堆对象**，不是二进制数据囤积。
+- **排除源包整读**：`openReader` 返回后 `heapUsed` 仅 87 MB、`arrayBuffers` 2.3 MB
+  （`fs.openAsBlob` 给的是磁盘惰性 Blob）。
+- **排除条目处理逻辑**：全量 `dryRun` 只要 0.7 s、内存正常 ⇒ 问题在**数据流管道**而非遍历。
+
+### 5.2 一个未能完成的定位手段（如实登记）
+
+`--heapsnapshot-near-heap-limit=1` 在本机**不可用**：写快照本身的内存压力让进程直接死亡，
+只留下 **0 字节**的 `.heapsnapshot` 文件（实测于 1536 MB 与默认堆两种配置）。
+**不要**依赖它来诊断这条路径 —— 5.1 的对照手法更省事且够用。
+
+### 5.3 守护与浏览器侧的连带收益
 
 | 项 | 说明 |
 | --- | --- |
-| **立即可用** | Node 侧大包转换**必须给足堆**（≥ 8 GB）。`scripts/instance-sync/build-packs.cjs` 已内置**堆自举**：入口检测 `heap_size_limit`，不足即以 `--max-old-space-size=8192` 重新拉起自身（环境变量 `ST_ZIP_HEAP_BOOTSTRAPPED` 防重入）。 |
-| **产品侧修复（待办，需先获批）** | 治本是**投递侧背压** —— `convert()` 周期调用已有的 `writer.waitForRoom()`，把「在飞」压到窗口量级。实测「在飞」峰值 **916 条**（窗口仅 8）。**排队者只持 `openFn` 与 `byteSize`、不持有条目数据**，故排队本身不是内存主因，但它是瞬时峰值能冲到 6.2 GB 的必要条件之一。 |
-| **未解释项（如实登记）** | `heapUsed` 曾在 T+112s 瞬时冲到 **6262 MB**，下一采样点即回落到 190 MB。**具体分配者未定位**（需 heap snapshot / `--trace-gc`），**未当作已解决**。 |
+| **守护** | `npm test`（**45 passed / 1 skipped（46 文件）、429 passed / 2 skipped**，零回退）+ 大包自检 `node scripts/instance-sync/selftest-node-zip-io.cjs --large <真源包.zip>`。⚠️ 本节的缺陷**无法用快速单测守护**：小规模下两种投递方式都正常，唯一触发维度是**总规模**。 |
+| **堆自举（保险，非必需）** | `scripts/instance-sync/build-packs.cjs` 内置堆自举，阈值 **4096 MB** —— 低于默认堆上限（4288 MB），故**正常调用不触发**；只在调用方**显式**给了更小的堆时才介入。 |
+| **浏览器侧** | `worker-client.js` / `converter-worker.js` 走的是**同一个 `convert()`**，故同受此修复保护。此前浏览器侧若在 GB 级包上「卡死、无报错」，很可能就是本节的投递积压（浏览器没有显式的堆上限闸门，表现为标签页卡顿乃至崩溃）。 |
+| **不要再做的事** | 用「给足 8 GB 堆」绕过。它**掩盖**了真正的投递积压，且耗时（182 s）反而是修复后（54.8 s）的 **3.3 倍**。 |
 
-> **浏览器侧的风险提示**：浏览器没有「4 GB 堆上限」这道显式闸门，但单个标签页同样有内存天花板。
-> 用户的 GB 级真实包在浏览器里转换**可能撞同一堵墙** —— 排查时先怀疑本节的资源需求，
-> 再怀疑正确性。
+> **遗留**：无。曾登记为「未解释」的那个 6.2 GB 瞬时峰值，已随根因明确而得到解释
+> —— 它就是**近千条在飞任务及其链条上的临时对象**，压掉积压后峰值降到 123 MB。
 
 ## 6. 可执行守护
 

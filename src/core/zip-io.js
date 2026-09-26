@@ -318,14 +318,28 @@ export const zipIo = {
       },
 
       /**
-       * 背压等待：全部在飞条目落盘（供上层在内存峰值敏感处调用）
+       * 投递侧背压：等到「已受理但未完成」的条目数降到 `maxPending` 以下。
+       *
+       * 等 `pending`（含排队者）而非 `inflight`（只有在跑者）：本方法供上层在
+       * **内存峰值敏感**处调用，若只等在跑者，队列里积压的条目仍会持续占内存。
+       * `pending` 是 `inflight` 的超集 —— 每个被 track 的写入都发生在一个已 enqueue 的任务内。
+       *
+       * 为什么需要它（2026-09-26 实测，真源包 1602.7 MB / 8683 条）：
+       * `convert()` 在紧凑的 `for await` 循环里**同步、不 await** 地投递全部条目，
+       * 实测「在飞」峰值 **916 条**（窗口仅 8）。后果不是数据丢失（排队者不持有条目数据），
+       * 而是**内存峰值被推到 6.2 GB**、GC 剧烈抖动、落盘走走停停
+       * （吞吐反而更低：全量投递 182 s，而**分批投递只要 72.5 s**）。
+       * ⇒ 让上层**周期性**调用本方法，把「在飞」压在窗口量级，是内存与吞吐的双赢。
+       *
+       * @param {number} [maxPending=CONCURRENCY] 允许积压的上限；传 0 即「全部落盘」
+       *   （旧语义，`null-writer` 的 dryRun 路径等价于此）
        */
-      waitForRoom: async () => {
-        // 等 `pending`（含排队者）而非 `inflight`（只有在跑者）：
-        // 本方法供上层在**内存峰值敏感**处调用，若只等在跑者，队列里积压的条目仍会持续占内存。
-        // `pending` 是 `inflight` 的超集 —— 每个被 track 的写入都发生在一个已 enqueue 的任务内。
-        while (pending.size > 0) {
-          await Promise.race(pending);
+      waitForRoom: async (maxPending = CONCURRENCY) => {
+        while (pending.size > maxPending) {
+          // `catch` 是**行为等价**而非掩盖：条目写入失败本就在 `close()` 的
+          // `Promise.allSettled([...pending])` 处汇合，这里若不吞掉，只是把错误
+          // 提前抛到调用方，反而**新增**一个抛出点、改变既有错误传播形态。
+          await Promise.race([...pending].map((p) => p.catch(() => {})));
         }
       },
 
