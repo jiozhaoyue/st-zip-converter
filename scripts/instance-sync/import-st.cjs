@@ -41,6 +41,8 @@ const crypto = require('crypto');
 
 const { getInstance } = require('../../e2e/lib/instances.cjs');
 const { acquireSession } = require('./lib/instance-session.cjs');
+const { deriveStCharacterUpload, isCharacterSubpath } = require('./lib/luker-card-adapter.cjs');
+const { findLinkedRoots, isUnderLink } = require('./lib/link-guard.cjs');
 
 const MB = (n) => (n / 1048576).toFixed(1);
 const BATCH_ORDER = ['characters', 'chats', 'worlds', 'backgrounds', 'User Avatars'];
@@ -53,7 +55,10 @@ const UNREACHABLE_PREFIXES = [
 ];
 
 function parseArgs(argv) {
-  const out = { id: 'dev-st', pack: '', handle: 'default-user', dryRun: false, only: '', rawWrite: false };
+  const out = {
+    id: 'dev-st', pack: '', handle: 'default-user', dryRun: false, only: '', rawWrite: false,
+    allVersions: false, allowLinks: false,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--id') out.id = argv[++i] || '';
     else if (argv[i] === '--pack') out.pack = argv[++i] || '';
@@ -61,6 +66,8 @@ function parseArgs(argv) {
     else if (argv[i] === '--only') out.only = argv[++i] || '';
     else if (argv[i] === '--raw-write') out.rawWrite = true;
     else if (argv[i] === '--dry-run') out.dryRun = true;
+    else if (argv[i] === '--all-versions') out.allVersions = true;
+    else if (argv[i] === '--allow-links') out.allowLinks = true;
   }
   return out;
 }
@@ -240,7 +247,14 @@ async function forEachEntryData(io, packPath, predicate, fn) {
 }
 
 const isUnreachable = (n) => UNREACHABLE_PREFIXES.some((p) => n.startsWith(p))
-  || n.includes('.luker-state.');
+  || n.includes('.luker-state.')
+  /**
+   * Luker 私有**状态文件**（区别于角色卡）：`characters/<名>.state.<编辑器>.json`。
+   * 2026-09-26 实测：它长得像角色卡、其实不是 —— 走 `characters/import` 得到
+   * **HTTP 400**（`importFromJson` 返回空 ⇒ `/import` 走 `sendStatus(400)`），
+   * 且 ST 侧没有任何对应机制可承接。⇒ 登记为不可达，不投递。
+   */
+  || /\.state\.[^/]*\.json$/i.test(n);
 
 (async () => {
   const args = parseArgs(process.argv.slice(2));
@@ -297,68 +311,173 @@ const isUnreachable = (n) => UNREACHABLE_PREFIXES.some((p) => n.startsWith(p))
   const session = await acquireSession(inst);
   console.log(`会话就绪：cookie ${session.cookieCount} 个、CSRF 已取\n`);
 
+  /**
+   * **链接子树扫描**（用户 2026-09-26 裁决：默认跳过）—— 见 `lib/link-guard.cjs`。
+   * 裸落盘类目可**逐条跳过**；端点类目（宿主自己往固定目录写）无法逐条拦，故**发现即拒绝**。
+   */
+  const linkedRoots = [
+    ...(await findLinkedRoots(path.join(inst.dir, inst.userDir))),
+    ...(await findLinkedRoots(path.join(inst.dir, 'public', 'scripts', 'extensions', 'third-party')))
+      .map((l) => ({ ...l, rel: `extensions/${l.rel}` })),
+  ];
+  if (linkedRoots.length) {
+    console.log(`⚠️ 目标目录下有 ${linkedRoots.length} 个**链接子树**（写进去等于改外部工作区）：`);
+    for (const l of linkedRoots) console.log(`   - ${l.rel} → ${l.target || '(断链)'}`);
+    if (args.allowLinks) {
+      console.log('   ⇒ `--allow-links` 已放行：本次写入会穿透到上述外部目录（须如实登记）。\n');
+    } else {
+      const ENDPOINT_DIRS = ['characters', 'chats', 'worlds', 'backgrounds', 'User Avatars'];
+      const blocked = linkedRoots.filter((l) => ENDPOINT_DIRS.some(
+        (d) => l.rel === d || l.rel.startsWith(`${d}/`) || d.startsWith(`${l.rel}/`),
+      ));
+      if (blocked.length) {
+        throw new Error(`端点类目目录落在链接子树内（无法逐条跳过）：${blocked.map((b) => b.rel).join(', ')}\n`
+          + '⇒ 拒绝启动（默认不穿透链接写入外部工作区）。确需写入请显式加 `--allow-links`。');
+      }
+      console.log('   ⇒ 裸落盘类目将**跳过**这些子树（默认档）；端点类目不受影响。\n');
+    }
+  }
+
   const result = { instance: inst.id, pack: path.basename(packPath), categories: {}, failures: [] };
 
   // —— 1. 角色卡（必须在 chats 之前）——
   if (effectivePlan.some((p) => p.key === 'characters')) {
     let ok = 0; let fail = 0;
     const t0 = Date.now();
-    await forEachEntryData(io, packPath, (n) => n.startsWith('characters/') && !isUnreachable(n), async (n, data) => {
+
+    /**
+     * **版本归并先行**（2026-09-26 新增，缺陷 F 的修复）。
+     *
+     * Luker 盘上 `characters/<sha256>` 是**版本化 blob**：同一角色每改一次留一份，
+     * 键尾带 `-<毫秒>.<微秒>`。实测本包 **430 条条目只对应 55 个角色**（平均 7.8 份历史版本，
+     * 最大一组 `孤独摇滚` 有 **250 份**）。而 ST 的存储是「**一个头像名一份文件**」——
+     * ⇒ 逐条投递时同名前赴后继地互相覆盖，最终落盘的是**包内顺序最末**的那份，
+     * 而不是**最新版本**（顺序是 zip 写入序，与新旧无关）。
+     *
+     * 归并规则（确定性，可复核）：
+     *   1. **有版本戳的胜过无版本戳的**（PNG 头像 / 无键条目拿不到版本号）；
+     *   2. 都有版本戳 ⇒ 版本号大者胜；
+     *   3. 仍平手 ⇒ 包内**靠后**者胜（与逐条投递的最终结果一致，便于两种口径对照）。
+     *
+     * 副作用（正面）：投递次数从 430 降到 55，服务端压力与耗时可测地下降。
+     */
+    const winners = new Map(); // avatar → { n, up, versions }
+    const isBetter = (cand, cur) => {
+      if (cand.version === null && cur.version !== null) return false;
+      if (cand.version !== null && cur.version === null) return true;
+      if (cand.version === null && cur.version === null) return true; // 无版本信息：后者覆盖
+      return cand.version >= cur.version;
+    };
+    let scanned = 0;
+    // 只扫**平铺**的角色卡条目：`characters/<子目录>/...` 是精灵图/状态文件，不是卡片（见下方 sprite 段）
+    const isCardEntry = (n) => n.startsWith('characters/') && !isCharacterSubpath(n) && !isUnreachable(n);
+    await forEachEntryData(io, packPath, isCardEntry, async (n, data) => {
       const base = n.split('/').pop();
-      // PNG 与 JSON 要用不同的 `file_type`（`characters.js:1560` 的 formatImportFunctions 按它选解析器）。
-      // 固定传 'json' 会让 PNG 卡片走 `importFromJson` 而失败。
-      const isPng = data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47;
+      // 拆壳 + 宿主可落盘名收敛：**唯一实现**在 `lib/luker-card-adapter.cjs`
+      // （诊断器 `diag-st-char-map.cjs` 复用同一函数，避免两处推导漂移）。
+      // 详见该模块头部的数据形态说明 —— Luker 的 KV 外壳、`preserved_name` 的落盘语义、
+      // 以及「非法文件名 ⇒ `writeCharacterData` 返回 false ⇒ HTTP 400」这条失败路径。
+      const up = deriveStCharacterUpload(data, base);
+      scanned += 1;
+      const cur = winners.get(up.avatar);
+      if (!cur) { winners.set(up.avatar, { n, up, versions: 1 }); return; }
+      cur.versions += 1;
+      if (isBetter(up, cur.up)) winners.set(up.avatar, { n, up, versions: cur.versions });
+    });
 
-      /**
-       * **Luker 角色卡的拆壳适配**（跨宿主格式差异的实质所在）。
-       *
-       * Luker 把角色卡存成 KV 外壳：
-       *   `{ "key": "data\\default-user\\characters\\孤独摇滚.png-1771010065094.1455",
-       *      "value": "{\"name\":\"孤独摇滚\",\"description\":\"…\"}" }`
-       * 而 **`value` 这个字符串本身就是一张标准 TavernAI 卡片** —— 解析出来即可直接喂给 ST。
-       *
-       * ⇒ 这不是"绕过宿主"，而是**跨宿主数据形态的必要转换**：包内是 Luker 的存储形态，
-       *   ST 的端点要的是卡片形态，两者之间的映射必须有人做。原先固定按 'json' 直投，
-       *   结果是 430 张卡片 **0 张成功**（ST 的 `importFromJson` 认不出 KV 外壳）。
-       *
-       * `key` 里还带着**原始文件名**（`孤独摇滚.png-1771010065094.1455`），
-       * 据此还原出人类可读的角色名作为 `preserved_name`，导入后角色卡才有正常名字。
-       */
-      let payload = data;
-      // PNG 卡片必须带 `.png` 扩展名 —— ST 的 `importFromPng` 按扩展名分派，
-      // 而无扩展名的哈希名会让它落空返回 400（实测：53 条 PNG 全因此失败）。
-      let fileName = isPng ? `${base}.png` : base;
-      if (!isPng) {
-        try {
-          const outer = JSON.parse(data.toString('utf8'));
-          if (outer && typeof outer.value === 'string' && outer.key) {
-            const card = JSON.parse(outer.value); // 内层即标准卡片
-            if (card && typeof card === 'object' && card.name) {
-              payload = Buffer.from(JSON.stringify(card), 'utf8');
-              const orig = String(outer.key).split(/[\\/]/).pop() || base;
-              const human = orig.replace(/\.png$/i, '').replace(/-\d+\.\d+$/, '').trim();
-              if (human) fileName = `${human}.json`;
-            }
-          }
-        } catch { /* 不是 KV 外壳：按原样投递，别把正常卡片也弄坏 */ }
-      }
+    console.log(`[characters] 包内条目 ${scanned} 条 → 归并后 ${winners.size} 个角色`
+      + `（跳过历史版本 ${scanned - winners.size} 条）`);
+    if (args.allVersions) {
+      console.log('⚠️ --all-versions：不归并，逐条投递（仅供对照，落盘结果取决于包内顺序）');
+    }
 
+    const toSend = args.allVersions
+      ? null // 由 forEachEntryData 逐条投递
+      : [...winners.values()];
+
+    const post = async (n, up) => {
       const r = await postFile(inst, session, {
         pathName: '/api/characters/import',
-        fields: { file_type: isPng ? 'png' : 'json', preserved_name: fileName },
-        file: payload, fileName, mime: isPng ? 'image/png' : 'application/json',
+        fields: { file_type: up.isPng ? 'png' : 'json', preserved_name: up.fileName },
+        file: up.payload, fileName: up.fileName, mime: up.isPng ? 'image/png' : 'application/json',
       });
       const verdict = judgeImportResult(r.status, r.body);
       if (verdict.ok) ok += 1;
       else {
         fail += 1;
-        if (result.failures.length < 20) {
-          result.failures.push({ n, status: r.status, reason: verdict.reason, parsed: verdict.parsed, body: r.body.slice(0, 160) });
-        }
+        // 记**全量**失败（不截断）—— 截断会让「失败到底是不是同一个原因」变成猜测。
+        // 每条带上推导出的落盘名，诊断时无需重跑即可归因。
+        result.failures.push({
+          n,
+          preservedName: up.preservedName,
+          human: up.human,
+          isPng: up.isPng,
+          status: r.status,
+          reason: verdict.reason,
+          parsed: verdict.parsed,
+          body: r.body.slice(0, 160),
+        });
       }
-    });
-    result.categories.characters = { ok, fail, seconds: Number(((Date.now() - t0) / 1000).toFixed(1)) };
+    };
+
+    if (toSend) {
+      for (const w of toSend) await post(w.n, w.up);
+    } else {
+      await forEachEntryData(io, packPath, isCardEntry, async (n, data) => {
+        await post(n, deriveStCharacterUpload(data, n.split('/').pop()));
+      });
+    }
+
+    result.categories.characters = {
+      ok,
+      fail,
+      scanned,
+      distinct: winners.size,
+      versionsSkipped: args.allVersions ? 0 : scanned - winners.size,
+      seconds: Number(((Date.now() - t0) / 1000).toFixed(1)),
+    };
     console.log(`[characters] 成功 ${ok} / 失败 ${fail}（${result.categories.characters.seconds}s）`);
+
+    /**
+     * **角色卡的子目录内容**（精灵图 / 表情包）：`characters/<角色名>/<图>.png`。
+     *
+     * 它们**不是卡片**，不能走 `characters/import` —— 2026-09-26 实测：28 条 `Seraphina/*.png`
+     * 全部 `{"error":true}`（`importFromPng` 认不出非卡片的 PNG）。而 ST **恰好就按
+     * `characters/<角色名>/` 这个形态存精灵图**（同步前目标侧本就有 28 张 `Seraphina/*.png`，
+     * 见 `research/t2-pre-dev-st.json`）⇒ 这类条目的原生落点就是**同路径裸落盘**。
+     *
+     * 语义守 U-3：`mkdir -p` + 同名覆盖，**从不删除**。
+     */
+    {
+      const spriteRoot = path.join(inst.dir, inst.userDir, 'characters');
+      let ok2 = 0; let fail2 = 0; let skipLinked2 = 0; const units = new Set();
+      const t1 = Date.now();
+      await forEachEntryData(io, packPath, (n) => isCharacterSubpath(n) && !isUnreachable(n), async (n, data) => {
+        if (!args.allowLinks && isUnderLink(n, linkedRoots)) { skipLinked2 += 1; return; }
+        const dest = path.join(spriteRoot, n.slice('characters/'.length));
+        try {
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, data);
+          ok2 += 1;
+          units.add(n.split('/')[1]);
+        } catch (e) {
+          fail2 += 1;
+          result.failures.push({ n, status: 'FS', reason: e.message });
+        }
+      });
+      result.categories['characters/sprites'] = {
+        ok: ok2,
+        fail: fail2,
+        skippedLinked: skipLinked2 || undefined,
+        mode: 'raw-write',
+        targetRoot: spriteRoot,
+        units: units.size || undefined,
+        seconds: Number(((Date.now() - t1) / 1000).toFixed(1)),
+      };
+      console.log(`[characters/精灵图] 裸落盘 成功 ${ok2} / 失败 ${fail2}`
+        + (skipLinked2 ? ` / 跳过链接子树 ${skipLinked2}` : '')
+        + (units.size ? `（${units.size} 个角色目录）` : ''));
+    }
   }
 
   // —— 2. 聊天（依赖角色已导入）——
@@ -482,17 +601,38 @@ const isUnreachable = (n) => UNREACHABLE_PREFIXES.some((p) => n.startsWith(p))
       result.categories.settings = { ok: 0, fail: 1, note: '包内 settings.json 无法解析' };
       console.log('[settings] 跳过：包内 settings.json 无法解析');
     } else {
-      const merged = { ...target, ...packSettings };
+      /**
+       * **按目标键集做交集合并**（2026-09-26 事故后的策略，用户裁定）。
+       *
+       * 原写法 `{...target, ...packSettings}` 是**并集**：它把**源宿主（Luker）特有的顶层键**
+       * 整块带进 ST —— 实测 `settings` 46 MB + `openai_settings` 34.5 MB + `themes`/`instruct`/
+       * `quickReplyPresets` 等 27 个键，把目标 settings.json 从 **44 KB 撑到 113.7 MB**。
+       * 后果不是"文件大一点"：ST 前端每轮都要解析/回存这个对象，**卡在"settings 未就绪"
+       * ⇒ `activateExtensions()` 永不执行 ⇒ 所有第三方扩展都不加载**（冒烟从 53/53 掉到 50/53，
+       * 排查足迹见 `research/repair-settings-merge-*.json` 与 `test-results/settings-repair-backups/`）。
+       *
+       * 新判据：**目标的键集就是"这个宿主认识什么"** —— 只合并目标已有的键（同名覆盖），
+       * 包内的陌生键**一律不写**并计数登记。语义仍是 U-3 的「覆盖同名」，但不再引入陌生 schema。
+       * 清理已污染的那一次：`repair-settings-merge.cjs`（同一判据）。
+       */
+      const packKeys = Object.keys(packSettings);
+      const foreign = packKeys.filter((k) => !Object.prototype.hasOwnProperty.call(target, k));
+      const merged = { ...target };
+      for (const k of packKeys) {
+        if (!foreign.includes(k)) merged[k] = packSettings[k];
+      }
       const r = await postJson(inst, session, '/api/settings/save', merged);
       const ok = r.status === 200 ? 1 : 0;
       result.categories.settings = {
         ok, fail: ok ? 0 : 1,
         targetKeysBefore: targetKeys,
-        packKeys: Object.keys(packSettings).length,
+        packKeys: packKeys.length,
         mergedKeys: Object.keys(merged).length,
-        note: '整份替换语义 ⇒ 已先读回目标并合并，包内键覆盖同名',
+        foreignKeysSkipped: foreign.length,
+        note: '整份替换语义 ⇒ 先读回目标，**只在目标已有的键内**做同名覆盖；陌生键不写',
       };
-      console.log(`[settings] 合并写回：目标原有 ${targetKeys} 键 + 包内 ${Object.keys(packSettings).length} 键`
+      console.log(`[settings] 交集合并写回：目标原有 ${targetKeys} 键，包内 ${packKeys.length} 键`
+        + `（其中**陌生键 ${foreign.length} 个一律不写**：${foreign.slice(0, 5).join(', ')}${foreign.length > 5 ? ' …' : ''}）`
         + ` → ${Object.keys(merged).length} 键，HTTP ${r.status}`);
     }
   }
@@ -511,11 +651,14 @@ const isUnreachable = (n) => UNREACHABLE_PREFIXES.some((p) => n.startsWith(p))
       : path.join(inst.dir, inst.userDir, key);
     let ok = 0;
     let fail = 0;
+    let skippedLinked = 0;
     const units = new Set();
     const t0 = Date.now();
     await forEachEntryData(io, packPath, (n) => n.startsWith(`${key}/`), async (n, data) => {
       const sub = n.slice(key.length + 1);
       if (!sub) return;
+      // 链接子树：默认跳过（写进去等于改别人的工作区，见 lib/link-guard.cjs）
+      if (!args.allowLinks && isUnderLink(n, linkedRoots)) { skippedLinked += 1; return; }
       const dest = path.join(targetRoot, sub);
       try {
         fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -531,12 +674,14 @@ const isUnreachable = (n) => UNREACHABLE_PREFIXES.some((p) => n.startsWith(p))
     result.categories[key] = {
       ok,
       fail,
+      skippedLinked: skippedLinked || undefined,
       mode: 'raw-write',
       targetRoot,
       units: units.size || undefined,
       seconds: Number(((Date.now() - t0) / 1000).toFixed(1)),
     };
     console.log(`[${key}] 裸落盘 成功 ${ok} / 失败 ${fail}`
+      + (skippedLinked ? ` / 跳过链接子树 ${skippedLinked}` : '')
       + (units.size ? `（${units.size} 个扩展）` : '') + ` → ${targetRoot}`);
   }
 

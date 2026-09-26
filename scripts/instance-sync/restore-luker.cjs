@@ -32,6 +32,7 @@ const crypto = require('crypto');
 
 const { getInstance } = require('../../e2e/lib/instances.cjs');
 const { acquireSession } = require('./lib/instance-session.cjs');
+const { assertNoLinksUnder } = require('./lib/link-guard.cjs');
 
 const MB = (n) => (n / 1048576).toFixed(1);
 
@@ -59,7 +60,7 @@ const DEFAULT_SELECTION = Object.freeze({
 function parseArgs(argv) {
   const out = {
     id: 'dev-luker', pack: '', handle: 'default-user', mode: 'merge',
-    probeOnly: false, skipProbe: false, selection: '',
+    probeOnly: false, skipProbe: false, selection: '', allowLinks: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--id') out.id = argv[++i] || '';
@@ -69,6 +70,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--selection') out.selection = argv[++i] || '';
     else if (argv[i] === '--probe-only') out.probeOnly = true;
     else if (argv[i] === '--skip-probe') out.skipProbe = true;
+    else if (argv[i] === '--allow-links') out.allowLinks = true;
   }
   return out;
 }
@@ -196,6 +198,21 @@ function makeProgress(label) {
 
   const session = await acquireSession(inst);
   console.log(`会话就绪：cookie ${session.cookieCount} 个、CSRF 已取（playwright ${session.playwright}）\n`);
+
+  /**
+   * **链接子树前置门禁**（用户 2026-09-26 裁决「默认跳过链接子树」）。
+   *
+   * restore 是**服务端一把写完**的，客户端没法逐条跳过 ⇒ 只能"发现即拒绝"，
+   * 除非显式 `--allow-links`。2026-09-26 实测教训：Dev Luker 的
+   * `extensions/ST-BgLoader` 是指向 `My-repo/ST-BgLoader` 的 junction，
+   * 上一次 restore 的 1090 条数据因此**穿透写进了那个仓的工作区**。
+   */
+  const links = await assertNoLinksUnder({
+    rootDir: path.join(inst.dir, inst.userDir),
+    allowLinks: args.allowLinks,
+    label: `${inst.id} restore`,
+  });
+  if (links.length) console.log(`[链接子树] ${links.length} 个（已登记，见上）\n`);
 
   // —— 预检：probe 也要上传整个包，但它会报告引擎模式是否兼容 ——
   if (!args.skipProbe) {
