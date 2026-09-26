@@ -35,11 +35,12 @@ function normalize(p) {
 }
 
 function parseArgs(argv) {
-  const out = { pack: '', target: '', unique: '', out: '' };
+  const out = { pack: '', target: '', unique: '', preManifest: '', out: '' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--pack') out.pack = argv[++i] || '';
     else if (argv[i] === '--target') out.target = argv[++i] || '';
     else if (argv[i] === '--unique-manifest') out.unique = argv[++i] || '';
+    else if (argv[i] === '--pre-manifest') out.preManifest = argv[++i] || '';
     else if (argv[i] === '--out') out.out = argv[++i] || '';
   }
   return out;
@@ -130,6 +131,24 @@ function categorize(names) {
     uniqueCheck = { declared: list.length, stillPresent: list.length - gone.length, deleted: gone.slice(0, 50) };
   }
 
+  // T2b：同步前的**全量**只读清单（`snapshot-manifest.cjs` 的 `{files: {path: [size, mtime]}}` 形态），
+  // 同步后必须**一条不少**。merge 语义下任何删除都是违规，故这条比「只看目标独有」更强、
+  // 也更省事 —— 无需先算出「独有」子集，直接断言「同步前的文件路径集合 ⊆ 同步后的」。
+  let preManifestCheck = null;
+  if (args.preManifest && fs.existsSync(args.preManifest)) {
+    const pre = JSON.parse(fs.readFileSync(args.preManifest, 'utf8'));
+    const keys = pre.files ? Object.keys(pre.files) : [];
+    const gone = keys.filter((n) => !target.files.has(normalize(n)));
+    preManifestCheck = {
+      manifest: args.preManifest,
+      takenAt: pre.takenAt || null,
+      declared: keys.length,
+      stillPresent: keys.length - gone.length,
+      deletedCount: gone.length,
+      deletedSample: gone.slice(0, 50),
+    };
+  }
+
   // 同步前目标就有的、包里没有的（这些就是「独有」，必须活下来）
   const targetUnique = [...target.files].filter((n) => !packSet.has(n));
 
@@ -151,6 +170,7 @@ function categorize(names) {
       count: targetUnique.length,
       sample: targetUnique.slice(0, 50),
       deletionCheck: uniqueCheck,
+      preManifestCheck,
     },
     T3_content: {
       pack: categorize(entries),
@@ -171,6 +191,14 @@ function categorize(names) {
   console.log(`[${args.target}] T2 目标独有 ${targetUnique.length} 条`
     + (uniqueCheck ? `，其中声明独有 ${uniqueCheck.declared} 条 / 被删 ${uniqueCheck.deleted.length} 条`
       + ` ${uniqueCheck.deleted.length === 0 ? '✅' : '❌'}` : '（未提供独有清单）'));
+  if (preManifestCheck) {
+    console.log(`[${args.target}] T2b 同步前全量清单 ${preManifestCheck.declared} 条`
+      + ` → 现存 ${preManifestCheck.stillPresent} 条 / 被删 ${preManifestCheck.deletedCount} 条`
+      + ` ${preManifestCheck.deletedCount === 0 ? '✅ 零删除' : '❌'}`);
+    if (preManifestCheck.deletedCount) {
+      console.log(`       被删样本：${preManifestCheck.deletedSample.slice(0, 5).join(' | ')}`);
+    }
+  }
   console.log(`[${args.target}] T3 包内 角色卡 ${report.T3_content.pack.characters}`
     + ` / 聊天 ${report.T3_content.pack.chats} / 世界书 ${report.T3_content.pack.worlds}`
     + `　目标 角色卡 ${report.T3_content.target.characters}`
@@ -178,6 +206,7 @@ function categorize(names) {
   console.log(`报告 → ${outPath}`);
 
   if (missing.length) process.exitCode = 1;
+  if (preManifestCheck && preManifestCheck.deletedCount) process.exitCode = 1;
 })().catch((e) => {
   console.error('核对失败：', e);
   process.exit(1);

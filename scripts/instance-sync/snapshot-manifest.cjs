@@ -31,9 +31,10 @@ const OUT_DIR = path.join(TASK_DIR, 'research');
 const SKIP_DIRS = new Set(['_cache', '_webpack', '_errors', 'node_modules', '.git']);
 
 function parseArgs(argv) {
-  const out = { ids: [] };
+  const out = { ids: [], out: '' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--id') out.ids.push(argv[++i] || '');
+    else if (argv[i] === '--out') out.out = argv[++i] || '';
   }
   return out;
 }
@@ -74,7 +75,7 @@ async function walk(rootDir) {
 }
 
 (async () => {
-  const { ids } = parseArgs(process.argv.slice(2));
+  const { ids, out: outFile } = parseArgs(process.argv.slice(2));
   const targets = ids.length ? ids : Object.keys(INSTANCES);
 
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -103,7 +104,10 @@ async function walk(rootDir) {
       totalBytes,
       files,
     };
-    const outPath = path.join(OUT_DIR, `pre-sync-manifest-${id}.json`);
+    // `--out` 仅对单个 id 有意义：用于**临拍一次**（如同步前/同步后各拍一份）而不覆盖既有基线。
+    const outPath = (outFile && targets.length === 1)
+      ? path.resolve(outFile)
+      : path.join(OUT_DIR, `pre-sync-manifest-${id}.json`);
     fs.writeFileSync(outPath, JSON.stringify(payload), 'utf8');
     console.log(`[${id}] ${fileCount} 个文件 / ${(totalBytes / 1048576).toFixed(1)} MB`
       + ` / ${((Date.now() - t0) / 1000).toFixed(1)}s → ${path.basename(outPath)}`);

@@ -22,8 +22,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 
-const { loadPlaywright, warnOnVersionDrift } = require('../../e2e/lib/resolve-playwright.cjs');
 const { getInstance } = require('../../e2e/lib/instances.cjs');
+const { acquireSession } = require('./lib/instance-session.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
@@ -38,35 +38,6 @@ function parseArgs(argv) {
 }
 
 const mb = (n) => (n / 1048576).toFixed(1);
-
-/** 用已登录的会话取 cookie 串与 CSRF 令牌（浏览器只做这一件事） */
-async function acquireSession(inst) {
-  const pw = loadPlaywright();
-  const version = warnOnVersionDrift(pw);
-  const ctx = await pw.chromium.launchPersistentContext(inst.profile, {
-    ignoreHTTPSErrors: true,
-    viewport: { width: 1280, height: 800 },
-  });
-  try {
-    const page = ctx.pages()[0] || await ctx.newPage();
-    await page.goto(inst.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    const csrf = await page.evaluate(async () => {
-      const r = await fetch('/csrf-token', { credentials: 'include' });
-      return r.ok ? (await r.json()).token : '';
-    });
-    const cookies = await ctx.cookies(inst.url);
-    if (!cookies.length) throw new Error('未取到任何 cookie —— 会话档案可能未登录');
-    if (!csrf) throw new Error('未取到 CSRF 令牌 —— /csrf-token 不可用');
-    return {
-      cookieHeader: cookies.map((c) => `${c.name}=${c.value}`).join('; '),
-      csrf,
-      playwright: version,
-      cookieCount: cookies.length,
-    };
-  } finally {
-    await ctx.close();
-  }
-}
 
 /** 流式 POST 到 /api/users/backup，边收边写盘；返回落点与读数 */
 function streamBackup(inst, session, destPath) {
