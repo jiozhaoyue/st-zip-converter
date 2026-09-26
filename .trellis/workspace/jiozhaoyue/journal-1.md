@@ -1450,3 +1450,152 @@ PT 全自动 + TT 人工、授权启动实例），**阶段 1 备份**干净完�
 - R-3：PT 需先经其扩展管理器装上本插件，才能纳入 E2E
 - R-10 / 后台任务 `task_09a4cb06`：修 `real-samples` 的 560 MB 读取超时抖动
 - 上轮遗留仍在：L0-16 端口段位表登记（`tavern-harness` 真源）需用户确认后走真源同步
+
+## Session 31: 六实例数据同源 —— 阶段 3 打通（四个目标 T1 100% / 零删除）+ 一起自己造成的事故与修复
+
+> 承接 Session 30（阶段 1 完成、阶段 2/3 挂起）。本轮把**阶段 3 真正跑完**，
+> 途中修掉 4 类缺陷、1 起事故，收尾按用户指令「停止，将状态全写 Trellis 文档交接」。
+
+### Main Changes
+
+- **阶段 3 全部执行完毕（四个 ST/Luker 目标）**：
+  - Dev ST / Real ST 走「逐类目端点 + `--raw-write` 裸落盘」（预设/主题 11 类在 ST 上本就是磁盘目录形态），
+    各 **6801 成功 / 0 失败**，不可达仅 4 条（`_convert/**` 3 + `secrets.json`）。
+  - 四个目标差异核对**全绿**：T1 `7177/7177` × 4、T2b **零删除**（198/195/6679/7985 条一条不少）。
+- **缺陷 F（ST 角色卡「拆壳 + 命名 + 版本归并」六小项，已修）**：
+  Luker 盘上 `characters/<sha256>` 是**版本化 blob** —— 430 条条目其实只有 **26 个角色**
+  （平均 15.4 份历史版本，最大一组 `孤独摇滚` **250 份**，逐份**内容指纹不同**已实证）。
+  原实现把版本当独立卡片逐条投递 ⇒ 同名前赴后继互相覆盖，落盘的是**包内顺序最末**那份；
+  且落盘名推导**先剥扩展名后剥版本戳** ⇒ 目标侧实测到 28 个 `x.png.png`。
+  另修：V3 卡名在 `card.data.name`（曾把 38 张卡打回 sha256）、`data/_uploads/` 键尾是上传号不可用、
+  精灵图不是卡片（走同路径裸落盘）、Luker 私有 `.state.*.json` 不投递。
+  唯一实现抽到 `lib/luker-card-adapter.cjs`（导入器与诊断器共用，防两处推导漂移）。
+- **缺陷 G（T1 判定口径，已修）**：ST 角色卡一律落成 `characters/<角色名>.png`，
+  与包内内容寻址名**不可能**逐路径相等 ⇒ 原口径在 ST 上**恒假**（报 94.75%）。
+  改为「先路径、后**宿主落盘名**」两步判定，并把判定核心抽成 `lib/t1-coverage.cjs` + **15 项单测（含负例）**。
+  修后两个 ST 目标 **T1 100%**（其中按落盘名命中 380 条）。
+- **缺陷 H（宿主自管缓存混进零删除判定，已修）**：ST 导入成功即 `invalidateThumbnail`
+  （`characters.js:1591` / `avatars.js:52` → `thumbnails.js:83-92` 的 `unlinkSync`），
+  相关性与包内 `default_Seraphina` / `User Avatars/user-default.png` **一一对应**；
+  连同 Luker 的 `backups/` 轮换一并单列（T2c，登记不判），白名单同样带负例单测。
+- **缺陷 I（写入穿透 junction，已修）**：`Instance/Dev/Luker/.../extensions/ST-BgLoader` 是指向
+  `My-repo/ST-BgLoader` 的 **junction** ⇒ 本次 restore 的 **1090 条穿透写进了那个仓的工作区**
+  （该仓现 git 干净）。新增 `lib/link-guard.cjs`：裸落盘默认**跳过**链接子树、restore **前置拒绝**
+  （实测 Dev Luker 拒绝且 `exit=1`，放行须显式 `--allow-links`）。用户裁决「默认跳过链接子树」。
+- **清理本任务自身产物（PARDON，用户批准）**：Dev ST 66 个 / Real ST 65 个错名卡片，
+  按三条判据（平铺层 ∧ 不在同步前快照 ∧ 不等于应有落盘名）删除，删除前落 `路径+字节+sha256` 台账。
+- **事故 J（本轮最重要）：跨宿主 `settings.json` 合并把两个 ST 实例搞停，已修**
+  - 原写法是**并集** `{...目标, ...包内}` ⇒ 把 Luker 专有顶层键（`settings` **46 MB**、
+    `openai_settings` **34.5 MB**、`themes`/`instruct`/`quickReplyPresets` 等 **27 个**）写进 ST，
+    settings.json 由 **44 KB / 27 KB 膨到 113.7 MB**。
+  - 后果**不是"文件大"**：ST 前端每轮解析/回存该对象，卡在「settings 未就绪」
+    ⇒ `activateExtensions()` 永不执行 ⇒ **所有第三方扩展都不加载**（E2E 冒烟 53 → 50）。
+  - 定位手法：把「ST 真激活的扩展」与「`/api/extensions/discover` 发现的扩展」对差 ⇒
+    差距是**全部 32 个**（不是只有我们）⇒ 立刻排除"插件自身问题"，转向宿主设定。
+  - 修：`repair-settings-merge.cjs` 只删「目标键集里没有」的顶层键（键集取目标自己的合并前备份并集），
+    写前整份留底；**113.7 MB → 22.5 MB，冒烟恢复 53/53**。同步器改为**按目标键集的交集合并**。
+
+### Git Commits
+
+（见本条目下方的提交；本轮改动集 = `scripts/instance-sync/**` 6 改 6 增、`test/**` 2 增、
+`.trellis/spec/guides/*` 2 改、任务文档 2 改。）
+
+### Testing
+
+- [OK] `npm run e2e` **53/53 全绿**（settings 修复后复跑；事故期间为 50/53）
+- [OK] `npm test` **47 passed / 1 skipped（48 文件）、449 passed / 2 skipped、exit 0**（基线 46/429 ⇒ 新增 2 文件 20 项）
+- [注意] 交接时最后那次全量跑（18:34）出现 **1 条红**：`test/real-samples.test.js` 的
+  `Test timed out in 5000ms` —— 即**既有抖动 R-10**（读 `out/` 下 560 MB 本地产物、满载时 5 s 不够），
+  与本次改动无关（该文件只用 `openReader`+`skip`）
+- [OK] 五条静态守卫 `exit=0`；`npm run build` ✓ 1.44s
+
+### Status
+
+[OK] **阶段 1–3 完成、阶段 4/5.2 早已完成**；`AC-1/1b/2/3/4/5/6/8/9/10` 达成；
+[待办] **AC-7（功能矩阵 M-1…M-9）未做**、**PT 同步未做**（web 模式无该后端，需另起 remote-server:3030）、
+**AC-11 收尾未执行**（交接需要实例在跑，`:8001/:8002/:8899` 保留运行）。
+
+### Next Steps
+
+1. PT：起 `remote-server`（3030）后跑 `pt-automation.cjs --import-pack <pack-tt.zip>`，用 `countPtData()` 核对
+2. 写 `e2e/specs/matrix.spec.cjs`（M-1…M-9）
+3. 收尾：`task.py archive`（任务未完成，暂不归档）；可选把「跨宿主配置文件合并纪律」补进 spec
+
+## Session 32: 功能矩阵 M-1…M-9 落地（122 项断言 · 连续两轮全绿）+ 6 处断言侧纠错 + 1 处疑似缺陷登记
+
+### 目标
+
+接 Session 31 的交接（用户指令「继续上个 session 的 jsonl，直接继续干，不是写交接」）。
+续做清单里的第 2 项：写功能矩阵（AC-7）。第 1 项（PT 同步）需方向性裁决，本轮未动。
+
+### 做了什么
+
+1. 新增 `e2e/specs/matrix.e2e.cjs`（788 行），覆盖 M-1…M-9 九条路径，
+   判定面**全部取自插件渲染出来的 DOM / IndexedDB**，不臆造内部符号。
+2. 扩 `e2e/lib/harness.cjs` 一处：夹具暴露 `instanceId` / `instance`
+   （此前 spec 拿不到自己跑在哪个实例上，无法写实例差异化断言）。
+3. 新增 `research/e2e-matrix-findings.md`：九条路径的判定面、6 处断言侧错误、
+   1 处疑似缺陷、M-7 可达性真相、可重跑性的真敌人 —— 逐条带 `file:line` 证据。
+4. `.trellis/spec/guides/instance-e2e-and-data-sync.md` 追加 **§11**（E2E 功能矩阵的实现纪律，自包含），
+   并更新 `guides/index.md` 的索引行。
+5. 任务文档收口：AC-7 勾选、AC-7 入「已达成项」、R-5 解除、新增 **R-16…R-19**。
+
+### 六处红灯：**全是断言自己错了**（回源码/实地取证后逐条确认）
+
+| # | 断言 | 错在哪 |
+| --- | --- | --- |
+| 1 | 徽标必含宿主版本号 | **臆造契约**：版本段按宿主可得性拼（`index.js:703`），Luker 有、ST 没有 |
+| 2 | `#count-chars` > 0 | **选错元素**：`count-*` 属宿主拉取路径；外部包计划走 `renderCategoryStats`（`category-filter.js:113`） |
+| 3 | tt/pt 应报「直通 7」 | **把语义差异当 bug**：跨布局必须**路由**（TT 树根要套 `data/default-user/`） |
+| 4 | `.drawer-open` 选择器 | **截断的 dump 制造假事实**：真实 class 是 `.drawer-opener`，先前 `slice(0,40)` 恰好截掉了 `-er` |
+| 5 | `offsetParent !== null` 判可见 | fixed 元素的 `offsetParent` **恒为 null**（宿主菜单是 fixed） |
+| 6 | 恢复入口仅 Luker 显示 | **照过时注释写断言**：当前契约是 `restore.visible = isHost && hasArtifact`（`index.js:140`），与平台无关 |
+
+> 通用教训：**注释里的历史陈述不是契约**；断言要从当前实现取，且要跑负例证明它会报红。
+
+### 三处真发现
+
+1. **【疑似产品缺陷 N-1】外部包路径上 `native` 未走布局码归一**（登记 R-18，按 Out of Scope 当轮不修）：
+   同一小包同一宿主，`native` → 「直通 7 / 无合成 / 产物 7」，显式 `st` → 「合成 1 / 产物 8」。
+   归一只在宿主拉取路径做了（`index.js:193`），而 `refreshPlan`（:631）/ `btnConvert`（:1519）
+   直接取 `targetSelect.value` ⇒ `'native'` 直达计划器，而合成分支只认 `TARGETS.L`(:372)/`TARGETS.ST`(:383)。
+   **ST 宿主上恰好等价、用户看不出；Luker 宿主上选「宿主原生格式」会拿到未经布局转换的直通结果。**
+   矩阵已钉住该差异（断言两者读数不等；将来补齐归一则该断言报红提示更新）。
+2. **【可达性真相】转换任务根本不注册 TaskManager**（登记 R-16）：
+   `taskControls.showRunning` 全仓只出现一次（`index.js:942`，宿主拉取路径），
+   `btnConvert` 路径不碰它；且 `onResume`（:491）只在 `id.startsWith('fetch-')` 时续传
+   ⇒ 设计文档 M-7 说的「转换 pause→resume 后 `resumedCount>0`」在产品里**不可达**。
+3. **【可重跑性的真敌人】持久化 workspace 状态**：插件把工作区写进 IndexedDB 并在下次加载恢复
+   ⇒ 同一 spec 在两轮之间/两实例之间从不同初态起跑（喂新包计划纹丝不动、`#stash-list` 空、
+   `targetSelect` 一会儿 native 一会儿 l）。**两个修法**：`resetWorkspace()` 清 `active_session` 后重载；
+   断言一律用**增量**（绝对值判定第一轮绿、第二轮必红）。
+
+### Git Commits
+
+- `b7f3fda` fix(sync): ST 目标通道缺陷修复（拆壳/口径/缓存/链接守卫）+ settings 交集合并
+  —— 把 Session 31 留在工作区未提交的成果提交（13 个文件）
+- 本轮：`test(e2e): 功能矩阵 M-1…M-9 落地（122 项断言 · 连续两轮全绿）`
+
+### Testing
+
+- [OK] `node e2e/run.cjs --only matrix` = **断言 122 项 / 通过 122 / 失败 0**，**连续两轮全绿**
+- [OK] `npm run e2e`（全量）= **断言 175 项 / 通过 175 / 失败 0，退出码 0**（guard 17 + smoke 36 + matrix 122）
+- [OK] `npm test` = **47 passed / 1 skipped（48 文件）、449 passed / 2 skipped、exit 0** ——
+  与 AC-9 基线逐项一致，**零回退**（本轮未改 `src/**`；R-10 的既有抖动本轮未复现）
+- [OK] 五条静态守卫全 `exit=0`；`npm run build` ✓ 911ms
+- [注意] 一条**我自己的命令错**：首轮用 `node scripts/dom-injection.js` 跑守卫得 exit=1，
+  实际文件名是 `dom-injection-guard.js` —— 改用 `npm run check:*` 后五条全 0
+
+### Status
+
+[OK] **AC-7 达成**（功能矩阵九条路径全绿、可重跑）。至此 AC-1…AC-11 中仅 **AC-11（收尾关实例）**未执行。
+[待办] **PT 同步（3.9）**：web 模式无该后端，需另起 PT `remote-server`（3030）—— 方向性决策，待用户裁定
+[待办] AC-11 收尾：本次**未关闭任何实例**（`:8001`/`:8002`/`:8899` 本轮为上次启动、`：8003`/`:8004` 为用户既有）；
+      收尾时只关本次启动的，用户的 `:8003`/`:8004` 保持原样
+[待办] `task.py archive` 未执行（PT 未做，任务未完成）
+
+### Next Steps（建议顺序）
+
+1. **请用户裁定 PT 同步方向**：是否另起 `remote-server`（3030，L0-16 登记段位）走 M21 导入
+2. 若要动 N-1（`native` 归一）：属改产品代码，需单独请批；矩阵的登记断言会提示更新期望值
+3. AC-11 收尾 + journal 收口

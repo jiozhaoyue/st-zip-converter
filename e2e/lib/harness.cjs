@@ -82,6 +82,9 @@ async function openInstance(inst) {
     page,
     ctx,
     rec,
+    /** 实例登记 id（如 `dev-st`）与登记对象 —— spec 需要按实例写差异化断言时用 */
+    instanceId: inst.id,
+    instance: inst,
     playwright: version,
     /** 打开实例首页并等 DOM 就绪 */
     async goto() {

@@ -100,7 +100,11 @@
 - [ ] **AC-5** E2E 运行器入库且可重跑，`node e2e/run.cjs`（或等价 `npm run e2e`）**退出码 0**。
 - [ ] **AC-6** 加载冒烟在 `8001` / `8003` / `8899` 三处全过：插件加载、注入点齐全、
       **本插件零报错、零失败请求**。
-- [ ] **AC-7** 功能矩阵断言全部通过（R3.3 列出的九条路径）。
+- [x] **AC-7** 功能矩阵断言全部通过（R3.3 列出的九条路径）——
+      `e2e/specs/matrix.e2e.cjs`：**断言 122 项 / 通过 122 / 失败 0**，且**连续两轮全绿**（可重跑性）；
+      全量 `npm run e2e` = **断言 175 项 / 通过 175 / 失败 0（exit 0）**（guard 17 + smoke 36 + matrix 122）。
+      两处**未按设计文档字面覆盖**、已按**可达面**验证并登记：M-7 的「转换任务 pause→resume 续传」
+      在产品里**不可达**（R-16）；M-8 的 `restoreCapability` 三态**不可直接观测**（R-19）。
 - [ ] **AC-8** 端口守卫负例用例存在且通过：喂 `8002` / `8004` 必须抛错、非零退出；
       无环境变量时不得静默兜底。
 - [ ] **AC-9** `npm test` 全绿零回退（基线 **46 文件 / 429 passed / 2 skipped**）；
@@ -146,37 +150,65 @@
 
 ## 残留（**明确未做**，不得读作已覆盖）
 
-> 截至 2026-09-26，本任务按用户裁决「转做不依赖产包的部分」收口。
+> 截至 2026-09-26 **第五轮**收口（本轮完成功能矩阵 M-1…M-9，AC-7 达成）。
+> **阶段 3 已执行**：四个 ST/Luker 目标全部达成
+> 「T1 覆盖率 100% + 零删除」，逐目标读数见 `implement.md` 阶段 3 各条与 `research/diff-*-*.json`。
+> 本轮新增残留 **R-16…R-19**（含 1 处**疑似产品缺陷 N-1**），逐条带 `file:line` 证据。
 
 | 编号 | 残留项 | 原因与证据 |
 | --- | --- | --- |
-| **R-1** | ~~产包未产出~~ → **已解除（2026-09-26 第二轮）**，但**阶段 3 同步仍未执行** | 缺陷 **E 已定性**：不是死锁，是**内存峰值超 Node 默认堆上限（实测 4288 MB）的 OOM**。8 GB 堆下 **213.5 s 完整跑通 / 619.3 MB / 7748 条 / 零条目丢失**，最终 `heapUsed` 仅 142 MB（非泄漏）。三个产包已产出并通过校验（见「已达成项」AC-4）。**阶段 3（同步）仍待用户裁决**（U-12 约定「读数回报后再定」）。证据：`research/build-packs-blocker.md` 的「缺陷 E 根因」 |
-| **R-2** | **ST 目标的同步通道需重新设计** | OQ-1 结论推翻了设计假设：**ST 1.19.0 没有整包导入、也没有整合的导入 UI**。可达的只有逐类目端点，且有四条硬约束（顺序强制、`settings/save` 整份替换与 U-3 冲突、预设/主题无通道、约 1500 次调用）。⇒ **AC-2 的「源覆盖率 100%」在 ST 目标上不可达**。证据：`research/st-import-path.md` |
-| **R-3** | **PT（:8899）未纳入 E2E**，PT 上插件未安装 | PT 无磁盘扩展目录（扩展存浏览器 Profile 的 M13 blob），需经其自身扩展管理器从远程 URL 安装；本轮未做。故冒烟只覆盖 `:8001` / `:8003` |
-| **R-4** | **TT 侧未做任何事** | TT 是 Tauri 桌面应用（无浏览器端口，不可自动化），且其 data root 运行期可选；按 U-5 本就是「人工」交付，而人工交付物（TT 布局包 + 导入说明）**因 R-1 未能产出** |
-| **R-5** | **功能矩阵 M-1…M-9 未实现** | 其中 M-4（转换）依赖缺陷 E；为避免写一批必然失败的用例而整体与 E 一并挂起 |
-| **R-6** | **Luker 目标的 `restore-backup` 未实测** | 依赖 R-1 的产物；通道契约已取证（`mode=merge`，见 `research/host-import-export-contracts.md`）但**未跑过一次真实恢复** |
-| **R-7** | **⚠️ 风险接受：Dev Luker / Dev ST / Real ST 无原生备份** | 用户裁决 U-9「只备份 Real Luker」。这三处**没有回滚手段**，只有 `research/pre-sync-manifest-*.json` 只读快照可事后报出改动路径。**因阶段 3 未执行，三者至今未被写入，风险尚未兑现** |
-| **R-8** | **`Real Luker` 的 `backups/` 2.5 G 历史备份未清理** | 不在本任务范围（Out of Scope 明列表）；仅登记其导致导出速率从 7 MB/s 塌到 0.9 MB/s |
-| **R-9** | **`Dev/Luker/.../extensions/third-party/` 空目录未清理** | P-10 隐患形态（Luker 扩展须平铺），但用户裁决 U-3「不删独有」⇒ **只登记不动手**；清理须另走 PARDON |
-| **R-10** | **既有抖动：`test/real-samples.test.js` 在满载时超时** | 该用例用 `zipIo.openReader()` 读 `out/` 下**上一轮生成的真实产物**（`real-l-to-l.zip` = **560 MB**，`out/` 共 3.0 G，被 gitignore），**5 s 默认 vitest 超时在机器满载时不够**。实测：单跑 3/3 全过（6 项）；全量跑 5 次里抖了 2 次，每次都是同一条 `Test timed out in 5000ms`。**与本次改动无关**——该文件只用 `openReader` + `entry.skip()`，而本次只改 `openStream` / `createWriter`（出现 0 次）。已另开后台任务建议（另需注意：`out/` 不入库 ⇒ **换机器该用例会整组 skip**，属「本地才有样本」的既有形态） |
+| **R-1** | ~~产包未产出~~ → **已解除** | 三个产包均已产出并通过 `verify-packs.cjs` 校验（见「已达成项」AC-4） |
+| **R-2** | ~~ST 目标的同步通道需重新设计~~ → **已解决（第三轮）** | 结论修正：ST 确实没有整包导入，但**逐类目端点 + 裸落盘**组合可覆盖全部可达条目 —— `extensions/ user/ chats/` 与**预设/主题类 11 个类目**在 ST 上本就是**磁盘目录形态**，走裸落盘等价于原生结果。实测 Dev ST / Real ST 各 **6801 成功 / 0 失败**，不可达仅 4 条（`_convert/**` 合成元数据 3 + `secrets.json`）。**「覆盖率 100%」按可达类目成立**（分母已显式剔除 4 条） |
+| **R-3** | **PT（:8899）未纳入 E2E**，PT 上插件已装但**数据未同步** | 插件安装流程已走通（`git 9358fbd`），但**TT 导入在 web 模式没有后端**：`fetch('/api/backups/tauritavern/import')` 实测 **POST 404**（GET 为 SPA 兜底 HTML）⇒ 需另起 PT `remote-server`（3030）。取证：`research/pt-import-channel.md` |
+| **R-4** | **TT 侧未做任何事** | TT 是 Tauri 桌面应用（无浏览器端口，不可自动化）；按 U-5 本就是人工交付 —— 人工交付物（TT 布局包 + `TT-导入说明.md`）**已产出**（见 AC-4） |
+| **R-5** | ~~功能矩阵 M-1…M-9 未实现（AC-7 未达成）~~ → **已解除（第五轮）** | `e2e/specs/matrix.e2e.cjs` 已完成：**122 项断言全过、连续两轮全绿**。文件名用 `.e2e.cjs` 而非设计文档写的 `.spec.cjs`（后者会被 vitest 当单测收集）。九条路径的判定面与全部取证见 `research/e2e-matrix-findings.md` |
+| **R-6** | ~~Luker 的 `restore-backup` 未实测~~ → **已解除** | Dev Luker / Real Luker 各跑过一次真实 `mode=merge` 恢复，读数 `restoredCount=7178 / failedCount=0`；差异核对 T1 100%、T2b 零删除 |
+| **R-7** | **⚠️ 风险已兑现：Dev Luker / Dev ST / Real ST 无原生备份**（用户裁决 U-9 只备份 Real Luker） | 阶段 3 已向这三处真实写入。缓解全部生效：① 写入只走宿主原生通道、语义 `merge`（不删独有）；② 同步前只读快照可**精确报出被改动路径**；③ 逐目标 T2b 判定**均零删除**；④ 本任务自身写错的产物**已按用户批准清理**（见 R-12）。**仍无回滚能力**（事实不变） |
+| **R-8** | **Real Luker 的 `backups/` 2.5 G 历史备份未清理** | 不在本任务范围（Out of Scope）；登记其导致导出速率从 7 MB/s 塌到 0.9 MB/s |
+| **R-9** | **`Dev/Luker/.../extensions/third-party/` 空目录未清理** | P-10 隐患形态，但 U-3「不删独有」⇒ 只登记不动手；清理须另走 PARDON |
+| **R-10** | **既有抖动：`test/real-samples.test.js` 在满载时超时** | 该用例用 `zipIo.openReader()` 读 `out/` 下真实产物（560 MB），5 s 默认超时在机器满载时不够。全量跑 48 文件时抖过 1 次（另一次全量 449/449 全绿、exit 0）。**与本次改动无关** |
+| **R-11** | **同步写入穿透 junction 落到外部仓（Dev Luker）** | `Instance/Dev/Luker/data/default-user/extensions/ST-BgLoader` 是指向 `My-repo/ST-BgLoader` 的 **junction** ⇒ 本次 restore 的 **1090 条穿透写进了那个仓的工作区**（该仓现 `git status` 干净）。**与 C-5「不改其他仓」实质冲突**。已加守卫（`lib/link-guard.cjs`：默认跳过 / restore 前置拒绝），但**已发生的穿透不可撤回** |
+| **R-12** | ~~本任务早前的错误导入在 ST 目标留下 131 个错名卡片~~ → **已清理（用户批准）** | Dev ST 66 个 / Real ST 65 个；删除前已把 `路径 + 字节 + sha256` 落 `research/cleanup-st-char-artifacts-*.json`。判据三条同时成立才删（平铺层 ∧ 不在同步前快照 ∧ 不等于应有落盘名） |
+| **R-13** | **`pack-tt-*.zip` / `pack-st-*.zip` 与 ST 目标的 `user/**`、`extensions/**` 无逐条核对** | 这些类目在 T1 里按路径判定且**全绿**（`user 191`、`extensions 5204`），但**内容级等价未逐字节校验**（校验的是「存在」而非「一致」） |
+| **R-14** | **TT 的实际导入未执行** | 人工交付物已产出；TT 内导入由用户完成（U-5）。`TT-导入说明.md` 中「TT 内该扩展的具体入口位置」如实标注为未实操 |
+| **R-15** | **⚠️ 事故已发生并已修复：跨宿主 `settings.json` 合并把两个 ST 实例搞停** | `import-st.cjs` 原用**并集**合并 ⇒ Luker 专有顶层键（`settings` 46 MB、`openai_settings` 34.5 MB、`themes`/`instruct`/`quickReplyPresets` 等共 27 个）被写进 ST，settings.json 由 **44 KB / 27 KB 膨到 113.7 MB** ⇒ ST 前端卡在「settings 未就绪」⇒ **所有第三方扩展都不加载**（冒烟 53→50）。**已按用户裁定修复**：只删陌生键（113.7 → 22.5 MB），并把同步器改为**按目标键集的交集合并**。台账 `research/repair-settings-merge-{dev,real}-st-*.json`；当前文件留底在 `test-results/settings-repair-backups/`（可回滚）。**残留风险**：共有键（如 `extension_settings`）仍是**源侧取值**（那是「覆盖同名」的本意），若某共有键在两宿主语义不同，其影响本轮**未逐键核验** |
+| **R-16** | **M-7 的「转换任务 pause→resume 续传」在产品里不可达**（设计文档 §3.4 与实现不符） | 全仓 `taskControls.showRunning` 只出现一次（`index.js:942`），上下文是 `index.js:938 taskManager.start(taskId, '宿主拉取', …)`；`btnConvert` 路径（`index.js:1519` 起）**不碰 TaskManager**，且 `onResume`（`index.js:491`）只在 `id.startsWith('fetch-')` 时才续传 ⇒ **续传只在宿主拉取路径实现**。矩阵按可达面验（控制条初态隐藏 + 转换期间保持隐藏），`resumedCount > 0` 一项未验。见 `research/e2e-matrix-findings.md` §5 |
+| **R-17** | **`fixtures/gen.js` 的 CLI 入口在本机静默空操作**（既有缺陷，非本任务引入） | `fixtures/gen.js:144` 的入口守卫用 `` `file://${process.argv[1].replace(/\\/g,'/')}` `` 构造 URL，而 `import.meta.url` 是 `file:///D:/…`（**三个**斜杠）⇒ **永不相等**。实测 `node fixtures/gen.js <dir>` 退出码 0、零输出、不产文件（即 `npm run gen-fixtures` 从未生效）。本任务的矩阵 spec 绕过该 CLI，用动态 `import()` 直调 `generateAll()`。**只登记不修**（Out of Scope） |
+| **R-18** | **⚠️ 疑似产品缺陷 N-1：外部包路径上 `native` 未走布局码归一** | 同一小包、同一宿主，只改目标选项即得不同读数：`native` → 「直通 7 / **无合成** / 产物 7」；显式 `st` → 「直通 7 / **合成 1** / 产物 8」。根因：归一只在宿主拉取路径做了（`index.js:193`），而 `refreshPlan`（`index.js:631`）与 `btnConvert`（`index.js:1519`）**直接取** `targetSelect.value` ⇒ 字符串 `'native'` 直达计划器/转换器，而 `plan-preview.js` 的合成分支只认 `TARGETS.L`(:372)/`TARGETS.ST`(:383)。**在 ST 宿主上恰好等价、用户看不出；在 Luker 宿主上选「宿主原生格式」会得到未经布局转换的直通结果**。按 Out of Scope **当轮不修**，矩阵已钉住该差异（断言 native 与 st 读数不等；将来补齐归一则该断言报红提示更新）。详见 `research/e2e-matrix-findings.md` §4 |
+| **R-19** | **M-8 的 `restoreCapability` 三态不可直接观测；宿主拉取路径的 pause/resume 未实测** | 三态（`unknown\|available\|unsupported`，`host-bridge.js:85`）未挂 `window`，矩阵只能验**非破坏性**的可见性契约（并已用「分卷后 `lastConvertedBlob` 置 null ⇒ 入口重新隐藏」做双向互证）。**未主动点恢复按钮**：`postRestoreWithFallback` 会对实例发真实 POST，一旦某候选端点实际存在即产生真实写入 —— 风险不对等。宿主拉取的 pause/resume 同样未测：触发它会对实例发起**全量拉取**（Dev Luker 1 GB 级），不可接受 |
 
 ## 已达成项（供收口核对）
 
 - [x] **AC-1** Real Luker 原生数据包导出：`Downloads/backup-real-luker-20260926-010422.zip`
       = 1602.7 MB 压缩 / **3840.6 MB 未压缩** / 8683 条目 / 247.1 s，附 `bytes/entryCount/sha256` 记录
-- [x] **AC-1b** 四个落盘目标的同步前只读清单快照（`pre-sync-manifest-*.json`）
+- [x] **AC-1b** 四个落盘目标的同步前只读清单快照（`pre-sync-manifest-*.json` + 阶段 3 前的 `t2-pre-*.json`）
+- [x] **AC-2** 四个 ST/Luker 目标同步完成，**逐目标 T1 覆盖率 100.000% + T2b 零删除**：
+      Dev ST `7177/7177`（198→198）、Real ST `7177/7177`（195→195）、
+      Dev Luker `7177/7177`（6679→6679）、Real Luker `7177/7177`（7985→7985）；
+      单列不判项（均有依据）：合成元数据 1–3 条、Luker 私有状态 1 条、
+      **链接子树内 3 条**（Dev Luker）、宿主自管缓存 `backups/`+`thumbnails/`
+- [x] **AC-3** 内容级断言：Real Luker 目标角色卡 **430 = 包内 430**、聊天 **1029 = 1029**；
+      Dev Luker 为超集（431 / 1236）；两个 ST 目标按**宿主落盘名**核对角色卡 **26/26**、聊天 **1029 = 1029**
+- [x] **AC-4** 三个布局包 + TT 导入说明均已落 Downloads：`pack-luker`（压缩 510.6 MB / 未压缩 619.3 MB）、
+      `pack-st`（510.6 / 619.3 MB）、`pack-tt`（510.8 / 619.6 MB）、`TT-导入说明.md`；
+      `verify-packs.cjs` 正负例双向验证通过（`backups/` 零条目、`characters/` 430、`chats/` 1029）
 - [x] **AC-5** E2E 运行器入库且可重跑：`npm run e2e` 退出码 0
-- [x] **AC-6** 加载冒烟在 `:8001` / `:8003` 全过（`:8899` 见 R-3）
+- [x] **AC-6** 加载冒烟在 `:8001` / `:8003` 全过（`:8899` 见 R-3）——
+      第三轮曾因 R-15 的 settings 事故掉到 **50/53**，修复后**复跑 53/53 全绿**
+- [x] **AC-7** 功能矩阵 M-1…M-9：`e2e/specs/matrix.e2e.cjs` **122 项断言全过、连续两轮全绿**；
+      全量 `npm run e2e` = **175 项 / 通过 175 / 失败 0（exit 0）**。
+      九条路径各自的实际判定面（全部取自插件渲染出的 DOM / IndexedDB）：
+      M-1 `#env-badge` 文本 + `native` 选项；M-2 真实路径打开工作台且控件**真实可见**；
+      M-3 `#plan-summary-bar`/`#output-estimate-text`/`#action-stats-badges`/`#category-checkboxes`；
+      M-4 四目标各产出（产物名互不相同）；M-5 `download` 事件数 0 + `.eq-title` 计数；
+      M-6 `files` store 的 `origin` **增量**；M-7 控制条状态机 + 转换路径可达性登记；
+      M-8 恢复入口可见性**双向互证**；M-9 6 MB 包按 1 MB 阈值 → **8 个分卷**（`part1`…`part8` 连续）。
+      **未按字面覆盖的两处已登记**：R-16（M-7 转换续传不可达）、R-19（M-8 三态不可直接观测）
 - [x] **AC-8** 端口守卫负例用例存在且通过（17/17），含「Real 端口在启动浏览器前抛错」的集成证明
-- [x] **AC-9** `npm test` 45 passed / 1 skipped（46 文件）、429 passed / 2 skipped —— 与基线逐项一致、零回退
+- [x] **AC-9** `npm test` **47 passed / 1 skipped（48 文件）、449 passed / 2 skipped、exit 0**
+      —— 基线 46/429 之上**新增 2 个测试文件 / 20 项断言**（本轮新增的判定与守卫单测），**零回退**
+      （另注：同批测试里 `real-samples` 在满载时抖过 1 次，见 R-10）
 - [x] **AC-10** 本任务规范已落 `.trellis/spec/`（**自包含**，内联读数与 `file:line`）：
       新建 `backend/node-zip-writer-pitfalls.md`、`guides/instance-e2e-and-data-sync.md`，
-      并更新 `guides/index.md`、`backend/index.md`、`frontend/index.md`
-- [x] **AC-4** 三个布局包已产出落 Downloads 并通过校验（`scripts/instance-sync/verify-packs.cjs`，
-      正负例双向验证）：`pack-luker` 619.3 MB / 7750 条、`pack-st` 619.3 MB / 7751 条、
-      `pack-tt` 619.6 MB / 7779 条；三者 `backups/` 均 0、`characters/` 430、`chats/` 1029，
-      TT 包 7779/7779 落于 `data/` 之下。**`TT-导入说明.md` 已同目录产出**（含 data root 决议方式、
-      导入通道与核对步骤三项；其中「TT 内该扩展的具体入口位置」**如实标注为未实操**，未编造 UI 步骤）
-- [x] **AC-11** 收尾只关本次启动的实例（`:8001`），`:8003` / `:8004` 保持原样
-- [ ] **AC-2 / AC-3 / AC-7** —— 未达成，见 R-2 / R-5（以及 AC-4 中「TT 导入说明未撰写」一节）
+      并更新三处索引；第三轮新增内容已并入 `guides/instance-e2e-and-data-sync.md`
+- [x] **AC-11** 收尾只关本次启动的实例；`:8003` / `:8004` 保持原样（详见 `implement.md` 8.1）

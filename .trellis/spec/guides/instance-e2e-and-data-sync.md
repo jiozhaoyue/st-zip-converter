@@ -159,3 +159,202 @@ node scripts/instance-sync/verify-packs.cjs --kind tt    --file <源包>.zip   #
 
 **负例是这套装置可信的前提**：2026-09-26 实测，正例全过**且两条负例都正确报错并退出码 1**，
 才确认 A2/A4 真有判别力（也正因跑负例，才暴露出 6.1 那处断言写错）。
+
+---
+
+## 7. 覆盖率判定的三条口径（2026-09-26 第三轮实证；**照抄会误报**）
+
+「同步成功」的不变量是「**包 → 目标**每条都到」。但**同一句不变量在三类目标上要用三种口径**，
+口径错了会得到**看起来像失败的成功**（或反之）。判定核心 `scripts/instance-sync/lib/t1-coverage.cjs`
+（纯函数，单测 `test/instance-sync-t1-coverage.test.js` 15 项，**含负例**）。
+
+### 7.1 口径一：路径比对（Luker 目标、以及一切非角色卡类目）
+
+Luker 的原生存储**就是**包内那套内容寻址 blob ⇒ 逐路径比对正确。
+**实测**：Real Luker `7177/7177`、Dev Luker `7177/7177`。
+
+### 7.2 口径二：宿主命名规则（**ST 目标的角色卡**）
+
+包内角色卡是 `characters/<sha256>`（内容寻址），而 ST 一律写成 `characters/<角色名>.png`
+（`characters.js:257` `path.join(directories.characters, `${outputFile}.png`)`，
+`outputFile` = `preserved_name` 经 `path.parse().name`）。
+⇒ **逐路径比对在 ST 上恒假**：实测同一份数据，只用路径口径报 **94.75%**，改用「先路径、后落盘名」报 **100%**。
+
+```bash
+# 规则实现在 lib/luker-card-adapter.cjs；先看「包内条目 → 宿主落盘名」的映射与版本归并读数
+node scripts/instance-sync/diag-st-char-map.cjs --pack <pack-st.zip> --target dev-st --list 20
+# 需要「应有的角色名清单」时（清理/核对用）
+node scripts/instance-sync/diag-st-char-map.cjs --pack <pack-st.zip> --target dev-st --dump-names /tmp/names.json
+```
+
+**判定要报出「按规则命中」的条数**（本次 380 条），否则规则与路径无法区分，等于偷偷放水。
+
+### 7.3 口径三：单列不判的三类（**登记 ≠ 放过**）
+
+| 类别 | 例子 | 为什么不算同步的账 |
+| --- | --- | --- |
+| 合成元数据 | `_convert/**`、`manifest.json` | 宿主按设计跳过（Luker 回执 `path_not_in_selected_categories`） |
+| Luker 私有状态 | `characters/<名>.state.<编辑器>.json` | ST 无对应机制（走 `characters/import` 得 400） |
+| **宿主自管缓存** | `backups/**`（Luker restore 前轮换）、`thumbnails/**`（ST 导入成功即失效，`characters.js:1591`/`avatars.js:52` → `thumbnails.js:83-92` 的 `unlinkSync`） | 执行者是**宿主**、对象是**可重建的派生缓存** |
+| **链接子树内** | junction / symlink 指向的目录（Dev Luker 的 `extensions/ST-BgLoader`） | 那是**别人的活工作区**，随对方仓漂移 |
+
+判据写在 `HOST_MANAGED_CACHE` 与 `compareCoverage({ linkedRoots })` 里，**都有负例单测**：
+「缓存目录之外的必须仍算真删除」「链接根之外的缺失仍必须判缺失」。
+⇒ 加白名单时**必须同时加负例**，否则白名单会一路长大到把判定吃光。
+
+## 8. ST 角色卡的落地形态（拆壳 · 归并 · 精灵图）
+
+`lib/luker-card-adapter.cjs` 是**唯一实现**（导入器 `import-st.cjs` 与诊断器
+`diag-st-char-map.cjs` 共用，避免两处推导漂移）。
+
+1. **拆壳**：Luker 把角色卡存成 KV 外壳 `{"key": "…/孤独摇滚.png-1771010065094.1455", "value": "<卡片 JSON 字符串>"}`
+   ⇒ 取 `value` 解析成标准卡片再投递。**V2 卡名在 `card.name`、V3 卡名在 `card.data.name`，两处都要认**。
+2. **键尾名字的两个陷阱**：① **先剥版本戳再剥扩展名**（反了会落成 `x.png.png`）；
+   ② 键**只有落在 `characters/` 下才可信** —— `data/_uploads/` 的键尾是上传号，取它只会得到 `<sha>.png` 无名卡片。
+3. **版本归并**：同一 `avatar` 的多条是**历史版本**（实测 430 条 → 26 个角色，平均 15.4 版，最大 250 版；
+   逐份**内容指纹不同**已实证）。ST 一个名字一份文件 ⇒ **只投最新版**，否则落盘的是包内顺序最末那份。
+4. **精灵图**：`characters/<角色名>/<图>.png` **不是卡片**，走 `characters/import` 得 `{"error":true}`
+   ⇒ 改**同路径裸落盘**（ST 本来就按这个形态存精灵图）。
+5. **落盘名必须收敛成宿主可落盘**：非法字符 / Windows 保留设备名 / 超长（带短哈希避免截断撞名），
+   见 `sanitizeHostName()` 与其单测。
+
+## 9. 写入前的链接子树守卫（**默认不穿透**）
+
+`lib/link-guard.cjs`（单测 `test/instance-sync-link-guard.test.js`，含真实 junction 的建/拒/放行）：
+
+- 裸落盘类目：**逐条跳过**落在链接子树下的目标路径并登记条数；
+- 宿主原生 restore（一把写完、无法逐条跳）：**前置门禁**，发现链接即拒绝启动，除非显式 `--allow-links`。
+
+**为什么必须默认拦**：2026-09-26 实测，`Instance/Dev/Luker/data/default-user/extensions/ST-BgLoader`
+是指向 `My-repo/ST-BgLoader`（另一个仓、且当时**正被另一会话改动**）的 junction，
+本次 restore 的 **1090 条穿透写进了那个仓的工作区** —— 这是「写入型」的 `P-18`：
+不报错、读得到，但**改的是别人的东西**。
+
+```bash
+# 判定目标里有哪些链接子树（只读）
+cmd //c "dir /AL \"<实例用户数据目录>\""
+```
+
+## 10. 清理「自己写错的东西」也走 PARDON（且有判据）
+
+`scripts/instance-sync/cleanup-st-char-artifacts.cjs`（默认空转、`--apply` 才删）：
+**三条判据同时成立**才删 —— 在 `characters/` **平铺**层 ∧ **不在同步前快照**内 ∧ **不等于应有落盘名**；
+删除前先把 `路径 + 字节 + sha256` 落 `research/`。
+意图很明确：**宁可漏删（残留看得见），不可误删**（目标侧常常没有原生备份）。
+
+## 11. 功能矩阵 E2E 的实现纪律（2026-09-26 第五轮实证）
+
+> 本节全部判据都来自 `e2e/specs/matrix.e2e.cjs`（**122 项断言**）与 `e2e/lib/harness.cjs` 的实测。
+> 该 spec 覆盖 M-1…M-9 九条路径；全量 `npm run e2e` = **断言 175 项 / 通过 175 / 失败 0（exit 0）**，
+> 且**连续两轮全绿**。
+
+### 11.1 打开插件工作台：必须走真实路径，且「可见」要单独断言
+
+冒烟 spec 只用 `querySelector` 查**存在性**，所以一路绿灯；矩阵要**真实点击**，立刻暴露两层：
+
+1. **宿主的扩展抽屉默认是关着的**。插件设置面板整体挂在
+   `#rm_extensions_block.drawer-content.closedDrawer`（`display:none`）之下 ⇒
+   即便展开插件自己的 `#st_zip_converter_settings`，抽屉内控件
+   `getBoundingClientRect()` 仍是 **0×0**，Playwright 的 `click` / `selectOption`
+   会以 `element is not visible` **超时 30 s** 才失败。
+2. **打开路径的文案跨宿主不同**：ST 是「扩展程序」、Luker 是「扩展」
+   ⇒ **只能按 class 定位**。
+
+固化为 `openWorkbench()`（`e2e/specs/matrix.e2e.cjs`）：
+
+```
+点 #extensionsMenuButton
+ → 点 .drawer-opener（优先取文字含「扩展」者；**判可见用 getBoundingClientRect，不用 offsetParent**）
+ → 有界等待 #rm_extensions_block 的 display 不为 none
+ → 展开 #st_zip_converter_settings 的直接子 .inline-drawer-content
+ → **有界等待 #target-select 有非零尺寸**（这一步才是「控件真实可用」的判据）
+```
+
+**三个具体的坑**（都实际踩过）：
+
+| 坑 | 症状 | 正确做法 |
+| --- | --- | --- |
+| `offsetParent` 判可见 | Luker 上确定可见的宿主菜单按钮被判「不可见」（候选数 0） | 菜单是 `position:fixed`，而 **fixed 元素的 `offsetParent` 恒为 `null`** ⇒ 改用 `getBoundingClientRect()` 宽高 |
+| class 名靠 dump 得到 | 选择器 `.drawer-open` 在**两实例**上都匹配 0 个元素 | 真实 class 是 **`.drawer-opener`**；先前 dump 用 `slice(0, 40)` **恰好把它截成 `drawer-open`** ⇒ **dump 必须打印完整 class**，截断的输出会制造假事实 |
+| 按文案定位 | Luker 上匹配数 `0`，静默失效 | 文案跨宿主不同 ⇒ 按 class 定位，文案只作**优先级**而非判据 |
+
+### 11.2 可重跑性：持久化 profile 会恢复上一轮的工作区
+
+E2E 用持久化 context（`.pw-profile-dev`），而插件把当前工作区写进 IndexedDB 的
+`workspace` store（`active_session`）并在下次加载时恢复（`restoreWorkspaceState`）。
+后果是**同一个 spec 在两轮之间、两实例之间从不同初态起跑**，实测症状三条：
+
+- 喂进新源包后**计划读数纹丝不动**（仍显示上一轮的包）——
+  因为 `index.js:1473` 的 `if (!currentFile) { currentFile = item.file; … }`
+  **只在尚无源包时采纳新文件**，否则只把文件存进 IndexedDB；
+- `#stash-list` **一张卡都没有**；
+- `#target-select` 一会儿 `native`、一会儿 `l`（自动推断分支 `index.js:1475` 只在 `!currentFile` 时执行）
+  ⇒ 同一个 spec 在两实例上跑出**不同读数**，一红一绿。
+
+**两条纪律**：
+
+1. **要换源包，先清初态**：删 `workspace` store 的 `active_session` 后**重载页面**。
+   **只动 `workspace` store，不删 `files` store** —— 后者是用户在该 profile 里的既有数据，
+   删除的风险不对等。
+2. **持久化环境里的断言一律用增量，不用绝对值**。
+   反例：断言「`origin=converted` 的记录数 == 0」——第一轮绿、第二轮必红（上一轮的记录还在）。
+   正例：记下**基线**，断言「本轮点击后增量 == 本轮产出数」。
+
+```js
+// 增量判定的形态（e2e/specs/matrix.e2e.cjs）
+const baselineConverted = (await storedIds()).filter(r => r.origin === 'converted').length;
+// … 触发动作 …
+t.eq('converted 记录增量 == 本轮产物数',
+  after.filter(r => r.origin === 'converted').length - baselineConverted, allNames.length);
+```
+
+### 11.3 断言的判别力：三种「红灯其实来自断言自己」
+
+本仓纪律是「**先证明判定能抓到违规，再相信它报 0**」。反过来同样要守：
+**判错方向的红灯一样要查实** —— 本轮 6 次红灯，回源码/实地取证后**全部**是断言侧问题：
+
+| 断言 | 错在哪 |
+| --- | --- |
+| 「`#env-badge` 必含宿主版本号」 | **臆造契约**：版本段是按宿主可得性拼的（`index.js:703` `applyHostBadge(host.platform)` 只传 platform）⇒ Luker 有、ST 没有。应断言「已脱离模板初始值 `检测中...`」 |
+| 「`#count-chars` > 0」 | **选错元素**：`count-*` 属 `#module-grid`（**宿主拉取**路径），外部包的计划走 `renderCategoryStats`（`src/ui/category-filter.js:113`），更新的是 `#plan-summary-bar` / `#action-stats-badges` / `#output-estimate-text` / `#category-checkboxes` |
+| 「目标 tt/pt 应报『直通 7』」 | **把语义差异当 bug**：ST/Luker 目录形态相同 ⇒ 直通；TT 树根要套 `data/default-user/` 前缀 ⇒ 必须**路由**。正确读数是「**路由** 7」 |
+| 「`.drawer-open` 选择器」 | 见 §11.1 —— **截断的 dump** 制造了不存在的 class |
+| 「`offsetParent !== null` 判可见」 | 见 §11.1 —— fixed 元素恒 `null` |
+| 「恢复入口仅 Luker 显示」 | **照过时注释写断言**：`computeActionAvailability`（`index.js:140`）的当前契约是 **`restore.visible = isHost && hasArtifact`**，与平台无关；`index.js:712` 那句注释描述的是**已被替换掉的旧实现** |
+
+**通用纪律**：断言必须以**当前代码路径**为准 ——
+**注释里的历史陈述不是契约**，凭据要从实现取，且要**跑一次负例**证明该断言真的会报红。
+
+### 11.4 放大夹具必须**不可压缩**
+
+需要暂停窗口（M-7）或切多分卷（M-9）时，迷你夹具（2.5 KB）做不到。生成放大包时：
+
+- **反例**：用 LCG（`seed & 0xff`）造「随机」字节 ⇒ 6 MB 被 deflate 压到 **13 KB**
+  （实测：3 MB 输入 → 落盘 **13582 字节**）。
+  **根因**：LCG 的**低位周期极短**（低位比特周期 2^k，取最低 8 位周期仅 ~256），序列高度可压缩。
+- **正例**：**SHA-256 计数器模式**（`sha256("<seed>:<ctr>")` 逐块拼接）——
+  不可压缩，且**完全确定性**（可重跑）。实测落盘 **6.0 MB**，按 1 MB 阈值切出 **8 个分卷**。
+
+```js
+const crypto = require('crypto');
+const bytes = (len, seed) => {           // 确定性高熵字节
+  const buf = Buffer.alloc(len);
+  let off = 0, ctr = 0;
+  while (off < len) {
+    const h = crypto.createHash('sha256').update(`${seed}:${ctr}`).digest();
+    const n = Math.min(h.length, len - off);
+    h.copy(buf, off, 0, n); off += n; ctr += 1;
+  }
+  return buf;
+};
+```
+
+### 11.5 复现命令
+
+```bash
+npm run e2e                      # 全量：guard + smoke + matrix（**175 项全过、exit 0**）
+node e2e/run.cjs --only matrix   # 只跑功能矩阵（**122 项**；需 :8001 与 :8003 在跑）
+```
+
+前置：`:8001`（Dev ST）与 `:8003`（Dev Luker）在监听；夹具由 spec **现场生成**到
+`test-results/fixtures/`（`.gitignore` 覆盖，**不入库**）。

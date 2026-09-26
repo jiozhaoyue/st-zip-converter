@@ -179,9 +179,15 @@ node scripts/instance-sync/start-instance.cjs --id real-luker
 
 > 顺序：**先 Dev，后 Real**；每完成一处就跑一次核对，**不通过就不进入下一处**。
 
-- [ ] **3.1** 写 `scripts/instance-sync/diff-report.cjs`（三张表：源覆盖率 / 目标独有存活 / 内容量）。
-- [ ] **3.2** **空转对照**：不写入，只算差异，确认三张表能正确报出「目标缺什么」
-      —— **先证明判定会报差异，再相信它报 100%**。读数落 `research/diff-selfcheck.md`。
+- [x] **3.1** 写 `scripts/instance-sync/diff-report.cjs`（三张表：源覆盖率 / 目标独有存活 / 内容量）。
+      **判定核心已抽出并单测**：`scripts/instance-sync/lib/t1-coverage.cjs` +
+      `test/instance-sync-t1-coverage.test.js`（15 项，含**负例**）。三条判定口径的演进见文末「本轮修复记录 F–I」。
+- [x] **3.2** **空转对照**：不写入，只算差异，确认三张表能正确报出「目标缺什么」
+      —— **先证明判定会报差异，再相信它报 100%**。
+      证据两条：① 迭代期实测到过**非 100%** 的读数（`research/diff-dev-luker-1790408246343.json`
+      15:37 的 `84.805%` 口径 bug、`diff-dev-st-1790409956992.json` 的 `94.75%` 命名口径）；
+      ② 本轮把判定抽成纯函数后补齐**负例用例**（`test/instance-sync-t1-coverage.test.js`：
+      「落盘名不在目标 ⇒ 必须判缺失」「链接根之外的缺失仍判缺失」等）。
 - [x] **3.3** `restore-luker.cjs` 同步 **Dev Luker :8003** —— **2026-09-26 已完成**。
       ⚠️ **实际未走 probe**：`/restore-backup/probe` 对不含 `_engine_meta.json` 的包会**挂住**
       （`readEngineMetaFromZip` 未处理 yauzl 的 `end` 事件），故用 `--skip-probe` 直走
@@ -192,19 +198,38 @@ node scripts/instance-sync/start-instance.cjs --id real-luker
       无信息的 HTTP 500；② 包内 `.git` 对象文件在目标侧带 `ReadOnly`（165 个只读项）导致
       `EPERM` 中断 ⇒ 产包改用 **`gitMode: 'minimal'`**（剔除 `objects/**`，保留 config/HEAD/index/refs）。
 - [x] **3.4** 对 Dev Luker 跑 `diff-report.cjs` → **AC-2 达成**：
-      **T1 覆盖率 100.000%（7180/7180）**、**T2b 6492→6492 被删 0（零删除）**、退出码 0；
-      T3 目标角色卡 **431**（包 430）/ 聊天 **1220**（包 1029）⇒ **超集**，符合 U-3。
-      单列项（不计入判定，均有依据）：T1b 合成元数据 1 条（宿主按设计跳过）、
-      T2c 宿主自行轮换的 `backups/` 1 条（U-4 本就不在同步范围）。
-- [ ] **3.5** `import-st.cjs` 同步 **Dev ST :8001**（按 2.3 的路径）。
-- [ ] **3.6** 对 Dev ST 跑 `diff-report.cjs` → AC-2 过。
-- [ ] **3.7** 同步 **Real Luker :8004**（同 3.3）→ `diff-report` → AC-2 过。
-- [ ] **3.8** 同步 **Real ST :8002**（同 3.5）→ `diff-report` → AC-2 过。
-- [ ] **3.9** `import-pt.cjs` 同步 **PT web :8899**：先 dry-run 预览核对计数，再 `merge` 执行；
-      对 PT 跑 `diff-report` → AC-2 过。
-- [ ] **3.10** **AC-3 内容断言**：四处 + PT 上核对角色卡 430 / 聊天 1029（ST 侧按 ST 类目折算）。
-- [ ] **3.11** **AC-4 交付物**：确认 `P-st.zip` / `P-tt.zip` / `P-luker.zip` 在 Downloads；
-      写 `TT-导入说明.md`（含 data root 决议方式与核对步骤）同放 Downloads。
+      **T1 覆盖率 100.000%（7177/7177）**、**T2b 6679→6679 被删 0（零删除）**、退出码 0；
+      T3 目标角色卡 **431**（包 430）/ 聊天 **1236**（包 1029）⇒ **超集**，符合 U-3。
+      单列项（不计入判定，均有依据）：T1b 合成元数据 1 条、T1d **链接目录内缺失 3 条**
+      （`extensions/ST-BgLoader` 是 junction，外部工作区漂移，见修复记录 I）、
+      T2c 宿主自管缓存 `backups/` 54 条（宿主 restore 前轮换）。
+- [x] **3.5** `import-st.cjs` 同步 **Dev ST :8001**（按 2.3 的路径 + `--raw-write` 覆盖无端点的类目）。
+      **实测读数**：`characters 26/0` + `characters/sprites 28/0` + `chats 1029/0` + `worlds 21/0` +
+      `User Avatars 9/0` + `settings 合并` + `extensions 5204/0` + `user 191/0` + 预设/主题类 11 类合计 278/0
+      ⇒ **总 6801 成功 / 0 失败**；不可达仅 4 条（`_convert/**` 3 条合成元数据 + `secrets.json`）。
+- [x] **3.6** 对 Dev ST 跑 `diff-report.cjs` → **AC-2 达成**：
+      **T1 100.000%（7177/7177，其中 380 条按 ST 落盘名命中）**、**T2b 198→198 被删 0**、退出码 0。
+      T3 目标角色卡 54（= 26 张卡 + 28 张精灵图）/ 聊天 1029。
+- [x] **3.7** 同步 **Real Luker :8004**（同 3.3）→ **T1 100.000%（7177/7177）**、
+      **T2b 7985→7985 被删 0**；T3 角色卡 430 / 聊天 1029 —— 与包**逐项相等**。
+- [x] **3.8** 同步 **Real ST :8002**（同 3.5）→ **T1 100.000%**、**T2b 195→195 被删 0**；
+      T3 角色卡 54 / 聊天 1029。
+- [ ] **3.9** `import-pt.cjs` 同步 **PT web :8899** —— **未执行：web 模式没有该后端**。
+      取证结论（`research/pt-import-channel.md`）：控件齐全（`#ptdm-tt-import-file` + `#ptdm-tt-strategy`，
+      默认 `merge`），但执行段依赖 `fetch('/api/backups/tauritavern/import')`，
+      而该路径在 web dev 下 **POST 返回 404**（GET 是 SPA 兜底 HTML）⇒ 无后端可用。
+      打通需另起 PT `remote-server`（端口 3030）⇒ **方向性决策，待用户裁定**。
+- [x] **3.10** **AC-3 内容断言**：
+      ① **Luker 目标**按路径逐项核对 —— Real Luker 角色卡 **430 = 包内 430**、聊天 **1029 = 1029**；
+      Dev Luker 为超集（431 / 1236）。
+      ② **ST 目标**按宿主形态核对 —— 角色卡 26/26 全部按**落盘名**命中
+      （`diag-st-char-map.cjs` 判定 ✅，包内 401 条版本化条目 → 26 个落盘名），聊天 **1029 = 1029**。
+      ③ 真源口径：源目录 `characters/` 403 个 sha 文件 → 归并出 26 个角色（平均 15.4 份历史版本，
+      最大一组 250 份；**逐份内容指纹不同**，已实证是版本历史而非重复）。
+- [x] **3.11** **AC-4 交付物**：`pack-luker-20260926-010422.zip`（510.6 MB）、
+      `pack-st-20260926-010422.zip`（510.6 MB）、`pack-tt-20260926-010422.zip`（510.8 MB）
+      与 `TT-导入说明.md` 均在 `C:\Users\caocaobi\Downloads\`；`backup-real-luker-20260926-010422.zip`
+      （1602.7 MB）与同名 `.json` 读数记录同目录。
 
 **回滚点**：任一处 AC-2 失败 → 立即**停止后续目标**，按 `design.md` §6 处置已完成目标。
 ⚠️ **回滚能力不对称**（U-9）：只有 **Real Luker** 有真回滚（S0 + `mode=overwrite`）；
@@ -264,10 +289,19 @@ node e2e/run.cjs --only guard
       另修正一处**测量时机**问题：宿主菜单先渲染成空壳（`#extensionsMenu` 子节点 `0 → 16`），
       插件的菜单项要到 **t≈7 s** 才出现 ⇒ 改为**有界等待**（15 s，L1-MR-7），
       不再用瞬时值判定（首版因此同一个实例时红时绿）。
-- [ ] **5.3** 写 `e2e/specs/matrix.spec.cjs`：覆盖 M-1…M-9 九条路径（`design.md` §3.4）。
-      ⛔ 未开始 —— 其中 **M-4（转换）依赖产品缺陷 E 的修复**，故整条矩阵与 E 一并挂起。
-- [ ] **5.4** 全量跑 `node e2e/run.cjs`：**当前（guard + smoke）已退出码 0**；
-      完整矩阵待 5.3。trace/截图落 `test-results/`（**严禁**写 `Instance/**`，I-5）。
+- [x] **5.3** 写 `e2e/specs/matrix.e2e.cjs`：覆盖 M-1…M-9 九条路径（`design.md` §3.4）。
+      **2026-09-26 第五轮已完成**（挂起原因「M-4 依赖缺陷 E」在 E 解除后即失效）。
+      文件名是 **`.e2e.cjs`** 而非设计文档写的 `.spec.cjs` —— `.spec.cjs` 会被 vitest
+      当单测收集（`e2e/run.cjs` 头注已记该坑）。
+      **读数：断言 122 项 / 通过 122 / 失败 0，且连续两轮全绿**（可重跑性坐实）。
+      覆盖与判定面、实现中逐一查实的 **6 处断言侧错误**、**1 处疑似产品缺陷（N-1：`native` 未走布局码归一）**、
+      **M-7 的可达性真相**（转换任务根本不注册 TaskManager）、
+      以及**可重跑性的真敌人**（持久化 workspace 状态），逐条留证于
+      `research/e2e-matrix-findings.md`。
+      顺带扩了 `e2e/lib/harness.cjs` 一处：夹具暴露 `instanceId` / `instance`，
+      供 spec 写实例差异化的断言（此前 spec 拿不到自己跑在哪个实例上）。
+- [x] **5.4** 全量跑 `node e2e/run.cjs`：**实测断言 175 项 / 通过 175 / 失败 0，退出码 0**
+      （guard 17 + smoke 36 + matrix 122）。trace/截图落 `test-results/`（**严禁**写 `Instance/**`，I-5）。
 - [x] **5.5** 脱敏核对：`test-results/` 已被 `.gitignore` 覆盖；本轮入库内容已核对
       **无 token、无聊天内容、无本机绝对路径**（工具脚本一律相对解析）。
 
@@ -342,3 +376,145 @@ node e2e/run.cjs --only guard
 | **A-4** | ST 导入不可自动化时的降级预案 | ✅ 预先认可 | 降级为「产包 + 手工说明」+ 残留登记，**不拿裸文件拷贝凑数**（I-3） |
 | **A-5** | 把 Playwright 写入 `devDependencies` | ⏸ **默认不做** | 复用全局 1.62.1；确有必要时单独走 PARDON |
 | **U-12** | 推进节奏 | **先跑阶段 1-2** | 只读实例 + 只在 Downloads 产包；读数回报后再定阶段 3 |
+
+---
+
+## 本轮修复记录（2026-09-26 第三轮：打通阶段 3 的 ST 通道 + 判定口径）
+
+> 编号承接前轮（A–E 见 `research/build-packs-blocker.md` 与 `research/luker-restore-blocker.md`）。
+> 每条都带**症状 → 根因 → 修法 → 证据**，避免"修了但不知道修的是什么"。
+
+- **F · ST 角色卡「拆壳 + 命名」四处缺陷**（症状：430 张卡只进去 26 张、且名字错成 `x.png.png`）
+  - F-1 **落盘名推导顺序写反**：`人类名 = 键尾.replace(/\.png$/i,'').replace(/-\d+\.\d+$/,'')`
+    —— 先剥扩展名时该串以数字结尾、正则不命中 ⇒ 名字留下 `.png`，ST 落成 `孤独摇滚.png.png`。
+    **修**：`parseLukerKey()` **先剥版本戳、后剥扩展名**；证据：目标侧实测到 28 个双扩展名文件。
+  - F-2 **V3 卡取不到名字**：只认 `card.name`，而 V3 卡名在 `card.data.name`
+    ⇒ 38 张卡被打回 sha256 兜底名。**修**：两处都认。
+  - F-3 **`data/_uploads/` 的键尾是上传号不是角色名** ⇒ 落成 `<sha>.png` 无名卡片（11 条）。
+    **修**：仅当键尾**在 `characters/` 下且不像 id** 时才用它，否则退回卡片自带名。
+  - F-4 **把 Luker 的版本历史当成 430 张不同的卡**：`characters/<sha256>` 是**版本化 blob**
+    （键尾 `-<毫秒>.<微秒>`），430 条条目只对应 **26 个角色**（平均 15.4 版，最大 250 版）。
+    逐条投递 ⇒ 同名前赴后继互相覆盖，最终留下的是**包内顺序最末**那份而非**最新版**。
+    **修**：`import-st.cjs` 先按 `avatar` **归并取最新版**再投递（430 → 26 次调用）。
+    **证据**：`diag-st-char-map.cjs --versions 孤独摇滚` 打出 250 条的**内容指纹互不相同**（是版本历史，不是重复）。
+    实现抽为 `lib/luker-card-adapter.cjs`（导入器与诊断器**共用同一实现**，防两处推导漂移）。
+  - F-5 **精灵图被当成角色卡投递**：`characters/Seraphina/*.png` 走 `characters/import` 得
+    `{"error":true}`（28 条）。**修**：子目录条目改走**同路径裸落盘**（ST 本来就按这个形态存精灵图）。
+  - F-6 **Luker 私有状态文件被当成卡**：`characters/<名>.state.<编辑器>.json` ⇒ HTTP 400。
+    **修**：登记为不可达、不投递（判据**故意取窄**：`.state.` 与 `.json` 之间必须有编辑器名）。
+  - **修后读数**：Dev ST / Real ST 均 `characters 26 成功 / 0 失败` + `精灵图 28/0`。
+
+- **G · T1 覆盖率口径在 ST 上恒假**（症状：内容都在，却报 94.75%）
+  - **根因**：包内角色卡是内容寻址名（`characters/<sha256>`），而 ST 一律落成 `characters/<角色名>.png`
+    —— **逐路径比对不可能相等**。
+  - **修**：T1 改为**先路径、后宿主落盘名**两步判定（`lib/t1-coverage.cjs` 的 `compareCoverage`），
+    并把「按落盘名命中」单独计数（本次 380 条）。判定核心**抽成纯函数并单测**，
+    含**负例**（落盘名不在目标 ⇒ 必须判缺失），避免"规则写成恒真"。
+  - **修后读数**：Dev ST / Real ST 均 **T1 100.000%（7177/7177）**。
+
+- **H · 「零删除」判定里混入了宿主自管缓存**（症状：Dev ST 报 2 条被删）
+  - **根因**：ST 在**导入成功时**会失效该文件对应的缩略图（`characters.js:1591` /
+    `avatars.js:52` → `thumbnails.js:83-92` 的 `unlinkSync`），而 `thumbnails/` 是可重建的派生缓存。
+    相关性已实证：快照里恰好只有两条 `thumbnails/`，而包内恰好有角色 `default_Seraphina`
+    与 `User Avatars/user-default.png` —— 一一对应。
+  - **修**：`HOST_MANAGED_CACHE` 把 `backups/`（Luker restore 前轮换）与 `thumbnails/` 单列，
+    **登记但不判**（`T2c`），并写单测钉住「缓存目录之外的必须仍算真删除」。
+
+- **I · 同步写入穿透 junction 落到外部仓**（症状：Dev Luker 的 3 条「缺失」其实是别人仓的漂移）
+  - **根因**：`Instance/Dev/Luker/data/default-user/extensions/ST-BgLoader` 是指向
+    `My-repo/ST-BgLoader` 的 **junction** ⇒ 该子树是**别人的活工作区**，随对方仓随时改动；
+    本次 restore 的 1090 条也因此**穿透写进了那个仓的工作区**（该仓现 git 干净）。
+  - **修**：新增 `lib/link-guard.cjs` —— 裸落盘类目**默认跳过**链接子树（计数登记）；
+    宿主原生 restore **一把写完、无法逐条跳**，故改为**前置门禁**：发现链接即拒绝启动，
+    除非显式 `--allow-links`（用户 2026-09-26 裁决「默认跳过链接子树」）。
+    判定同样抽出单测（含真实 junction 的建/拒/放行三种情形）。
+  - **修后读数**：Dev Luker T1 100%（其中 3 条落在链接子树内，单列为 `T1d`，只报不判）。
+
+- **清理 · 两个 ST 目标上本任务自身的错误产物**（PARDON 项，用户 2026-09-26 批准）
+  - Dev ST 66 个 / Real ST 65 个（双扩展名 + 无名字 + 带时间戳错名），
+    由 `scripts/instance-sync/cleanup-st-char-artifacts.cjs` 按**三条判据同时成立**才删
+    （在 `characters/` 平铺层 ∧ 不在同步前快照内 ∧ 不等于应有落盘名），
+    删除前先把 `路径 + 字节 + sha256` 落 `research/cleanup-st-char-artifacts-*.json`。
+  - 清理后两个 ST 目标 `characters/` 各剩 **26 张卡 + 1 个精灵图目录**，与源侧 26 个角色一一对应。
+
+---
+
+## 🔴 交接状态（2026-09-26 第四轮 · 用户指令「停止，将状态全写 Trellis 文档交接」）
+
+> 本轮从「阶段 3 未执行」推进到「**四个 ST/Luker 目标全部达成 T1 100% + 零删除**」，
+> 途中**发现并修复了 4 类缺陷（F/G/H/I）与 1 起自己造成的事故（J）**，最后 `npm run e2e` 53/53 全绿。
+> 下面按「已做完 / 未做完 / 环境现状 / 续做命令」四段交接。
+
+### 一、已完成（可直接复核）
+
+| # | 事项 | 读数 / 证据 |
+| --- | --- | --- |
+| 1 | **Dev ST / Real ST 全类目同步**（`--raw-write`） | 各 **6801 成功 / 0 失败**；不可达仅 4 条（`_convert/**` 3 + `secrets.json`）；读数 `research/import-st-{dev,real}-st-1790416*.json` |
+| 2 | **四个目标差异核对** | Dev ST `7177/7177`（198→198）、Real ST `7177/7177`（195→195）、Dev Luker `7177/7177`（6679→6679）、Real Luker `7177/7177`（7985→7985）：**全部 T1 100% + T2b 零删除** |
+| 3 | **T1 判定口径纠正（缺陷 G）** | ST 角色卡改「先路径、后**宿主落盘名**」两步判定（本次按落盘名命中 380 条）；核心抽成 `lib/t1-coverage.cjs` + 15 项单测（含负例） |
+| 4 | **ST 角色卡拆壳/命名/版本归并（缺陷 F）** | 430 条版本化条目 → **26 个角色**（实测逐份内容指纹不同）；`characters 26/0` + 精灵图 `28/0`；唯一实现在 `lib/luker-card-adapter.cjs` |
+| 5 | **宿主自管缓存单列（缺陷 H）** | `backups/`（Luker 轮换）+ `thumbnails/`（ST 导入成功即失效，`characters.js:1591`/`avatars.js:52`）→ 登记不判（T2c） |
+| 6 | **链接子树守卫（缺陷 I）** | `lib/link-guard.cjs`：裸落盘默认跳过、restore 前置拒绝（实测 Dev Luker 拒绝且 `exit=1`）；判定含真实 junction 单测 |
+| 7 | **清理本任务自身产物**（用户批准） | Dev ST 66 个 / Real ST 65 个；删除前落 `research/cleanup-st-char-artifacts-*.json`（含 sha256） |
+| 8 | **settings 事故修复（缺陷 J，见下）** | 两个 ST 目标 113.7 MB → 22.5 MB；`import-st.cjs` 改为**按目标键集的交集合并** |
+| 9 | **质量门** | `npm run e2e` **53/53 全绿**（settings 修复后复跑）；`npm test` **47 passed / 1 skipped（48 文件）、449 passed / 2 skipped、exit 0**；五条静态守卫 `exit=0`；`npm run build` ✓ 1.44s。**交接时最后那次全量跑**（18:34）出现 1 条红：`test/real-samples.test.js` 的 `Test timed out in 5000ms` —— 即**既有抖动 R-10**（读 `out/` 下 560 MB 本地产物、机器满载时 5 s 不够），**与本次改动无关**（该文件只用 `openReader`+`skip`）；同日另一次全量 449/449、exit 0 |
+| 10 | **规范落库** | `.trellis/spec/guides/instance-e2e-and-data-sync.md` 新增 §7–§10（三口径 / 拆壳 / 链接守卫 / 清理纪律），索引已更新 |
+
+### 二、缺陷 J · 跨宿主 `settings.json` 合并把 ST 实例搞停（本轮最重要的事故）
+
+- **症状**：`npm run e2e` 的 Dev ST 冒烟从 53/53 掉到 **50/53**（`宿主已挂上插件`/`扩展设置面板存在`/`面板内抽屉存在` 三条红）；
+  浏览器控制台显示 `Settings not ready, scheduling another save` ×N，**所有第三方扩展都不加载**。
+- **取证**：`settings.json` 由 **44,564 B / 27,373 B 膨到 113,680,214 B / 113,654,958 B**；
+  膨胀来自 Luker 专有顶层键 —— `settings` **46 MB**、`openai_settings` **34.5 MB**、`themes`、`instruct`、
+  `context`、`sysprompt`、`reasoning`、`quickReplyPresets`、`kobaldai_*`、`novelai_*` 等共 **27 个键**
+  （ST 用 `oai_settings`，不认 `openai_settings`）。
+- **根因**：`import-st.cjs` 的 settings 分支写的是 **`{...目标, ...包内}`（并集）** —— 把**源宿主的 schema**
+  整块搬进目标；ST 前端每轮解析/回存这个对象，卡在 settings 未就绪 ⇒ `activateExtensions()` 永不执行。
+- **修法（用户 2026-09-26 裁定「只删陌生键」+「改为交集合并」）**：
+  1. `repair-settings-merge.cjs`：删「目标自己的键集里没有」的顶层键（键集取目标自己的合并前备份，
+     两个 ST 实例取**并集**以更保守）；写前把当前文件整份留底到 `test-results/settings-repair-backups/`；
+     台账 `research/repair-settings-merge-{dev,real}-st-*.json`。**实测 113.7 MB → 22.5 MB，冒烟恢复 53/53。**
+  2. `import-st.cjs` settings 分支 → **交集合并**（只在目标已有键内同名覆盖；陌生键不写并计数）。
+- **教训（已入 spec §7.3 / 待补 §11）**：**「覆盖同名」不等于「并集」** —— 跨宿主的配置文件必须
+  按**目标 schema 的键集**收口；否则一个 46 MB 的陌生键就能让宿主前端整体瘫痪，而**逐条错误读数一个都不报**。
+
+### 三、未完成（续做清单，按建议顺序）
+
+1. **PT 同步（3.9）**：web 模式**没有该后端**（`POST /api/backups/tauritavern/import` → 404，
+   GET 是 SPA 兜底），需另起 PT `remote-server`（端口 **3030**，L0-16）—— 属方向性决策，
+   取证见 `research/pt-import-channel.md`；读数装置已备好（`pt-automation.cjs` 的 `countPtData()`）。
+2. **功能矩阵 M-1…M-9（AC-7 / 5.3）**：`e2e/specs/matrix.spec.cjs` **未写**。
+3. **收尾**：`prd.md` 残留表已更新到 R-15（本轮新增 J）；`task.py archive` **未执行**（任务未完成）。
+4. **可选**：把 §7–§10 的口径再抽一条「跨宿主配置文件合并纪律」进 spec（现在只在 §7.3 有一行提示）。
+
+### 四、环境现状（**未按 AC-11 关闭**：交接需要实例在跑）
+
+| 端口 | 实例 | 归属 |
+| --- | --- | --- |
+| 8001 | Dev ST | **本次启动**（pid 31128） |
+| 8002 | Real ST | **本次启动**（pid 1388） |
+| 8899 | PT web | **本次启动**（pid 48804） |
+| 8003 | Dev Luker | 用户既有（pid 53104）—— **未动** |
+| 8004 | Real Luker | 用户既有（pid 24384）—— **未动** |
+
+- 两个 ST 目标的 `settings.json` 已修复并留底（`test-results/settings-repair-backups/`，可回滚）。
+- 两个 ST 目标 `characters/` = **26 张卡 + 1 个精灵图目录**，与本任务范围一一对应。
+- **Dev Luker 起已默认拒绝写入**（junction 守卫），重跑 restore 需显式 `--allow-links`。
+
+### 五、续做命令（照抄即可）
+
+```bash
+# 差异核对（四个目标；ST 需带 --extra-root 指向 third-party 扩展目录）
+node scripts/instance-sync/diff-report.cjs --pack "$HOME/Downloads/pack-st-20260926-010422.zip" \
+  --target dev-st --pre-manifest .trellis/tasks/09-26-all-instance-data-sync-e2e/research/t2-pre-dev-st.json \
+  --extra-root "D:/Repo/Tavern-repo/Instance/Dev/SillyTavern/public/scripts/extensions/third-party:extensions"
+
+# ST 全类目同步（幂等；需要实例在跑）
+node scripts/instance-sync/import-st.cjs --id dev-st --raw-write
+
+# 角色卡命名的版本归并读数 / 必要名单
+node scripts/instance-sync/diag-st-char-map.cjs --pack "$HOME/Downloads/pack-st-20260926-010422.zip" --target dev-st --list 20
+
+# 质量门
+npm test && npm run e2e
+```
