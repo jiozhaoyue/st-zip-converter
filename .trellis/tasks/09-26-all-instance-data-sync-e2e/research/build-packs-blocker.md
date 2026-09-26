@@ -184,3 +184,98 @@ async function waitForSlot() { while (inflight.size >= CONCURRENCY) await Promis
 > 自建 `zip.ZipWriter(fw, {bufferedWrite:false})` 组合，在同一源包上 **82.4 s 稳定产出 614 MB**（RSS 330 MB）。
 > 方案 A 若获批，可直接用它作为「修复后」的对照基线。
 
+---
+
+# 缺陷 E 根因（2026-09-26 定稿 · 第二次取证）—— **内存峰值超堆上限，非死锁**
+
+> 前文把 E 记作「静默挂死、成因未定位」。本节推翻该定性：
+> **E 是 OOM（`FATAL ERROR: Ineffective mark-compacts near heap limit`），而且 8 GB 堆可完整跑通。**
+
+## 复现（本次实测）
+
+`node scripts/instance-sync/build-packs.cjs`（默认堆）：
+
+```
+[T+75s]  partial=352MB  rss=4400MB
+[T+105s] partial=352MB ← 停滞
+...
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+```
+
+`.partial` 写到 **352 MB 后停滞**，RSS 涨到 **4400 MB**，随后 V8 判 OOM 自杀。
+**不是"无报错静默退出"** —— 是一条明确的 V8 致命错误。
+
+## 对照实验 A：worker 数**不是**主因
+
+`navigator.hardwareConcurrency` 在 Node 24 上 = 物理核数（本机 **20**），
+而产品 `zip-io.js:19/23` 用它同时决定并发窗口与 zip.js worker 池：
+
+| HW（伪造） | 产品 CONCURRENCY | zip maxWorkers | 结果 |
+| --- | --- | --- | --- |
+| 20（真实） | 8 | 20 | 撑到 T+69s / 落点 310 MB，RSS 峰值 2893 MB（被截断） |
+| 4 | 4 | 4 | **T+47s OOM 崩溃** |
+| 2 | 2 | 4 | **T+44s OOM 崩溃** |
+
+**降 worker 反而更早 OOM** ⇒ worker 数不是主因。
+更强的证据：三个配置**前 15 秒读数逐字相同**（`投递=525/1259`、`落点=8.6/80.8MB`）
+⇒ **投递节奏由源包读取决定，与并发配置无关**。
+
+实验手法（**不改产品代码**）：`Object.defineProperty(globalThis.navigator, 'hardwareConcurrency', …)`
+必须在 `import` 产品模块**之前**设置 —— 产品在模块顶层就把该值算成模块级常量并 `zip.configure(...)`。
+
+## 对照实验 B：8 GB 堆 → **完整跑通**
+
+`node --max-old-space-size=8192 scripts/instance-sync/diag-convert-memory.cjs --target l`：
+
+```
+✅ 转换完成：213.5s / 落点 619.3 MB / copied=7748
+投递：add 35 条 / 0.1 MB ；addLazy 7715 条 / 1299.7 MB（声明量）
+完成：add 35 ；addLazy 7715  ⇒ 未完成 0
+在飞峰值：add 1 ；addLazy 916
+最终 rss=6810.5MB heapUsed=142.0MB
+```
+
+- **产物 619.3 MB**，与隔离对照（614 MB）同量级 ✓
+- **零条目丢失**（投递=完成=7748）⇒ 产品**逻辑正确**，只是吃内存
+- **最终 `heapUsed` 仅 142 MB**（RSS 6.8 GB 是含 worker 线程的进程级读数）
+  ⇒ **不是内存泄漏**（泄漏不会在结束前回落）
+
+## 已排除：源包被整读进内存
+
+`scripts/instance-sync/diag-memory-stages.cjs`（惰性 Blob 路径）：
+
+| 阶段 | heapUsed | arrayBuffers |
+| --- | --- | --- |
+| 启动 | 4.6 MB | 0.0 MB |
+| `createNodeIo`（载入 vendor zip.js） | 5.9 MB | 0.1 MB |
+| `openReader` 返回（中央目录已解析） | **87.2 MB** | **2.3 MB** |
+| 遍历 8683 条 entries（不开数据流） | 95.1 MB | 2.3 MB |
+
+⇒ 源侧 `fs.openAsBlob` 惰性 Blob 生效，**1.6 GB 源包没有进内存**（arrayBuffers 仅 2.3 MB）。
+
+## 残留未解释项（**如实登记**）
+
+1. **`heapUsed` 在 T+112s 瞬时冲到 6262 MB**，下一采样点即回落到 190 MB。
+   瞬时峰值的**具体分配者未定位**（需 heap snapshot / `--trace-gc` 才能钉死）。
+   可确证的是：它**不是稳定占用**（结束时 142 MB），且**不是 worker 造成**（`heapUsed` 是主线程堆指标）。
+2. **投递侧无背压**：`addLazy` 同步返回 promise，`enqueue` 立即登记，
+   故 `convert()` 紧凑循环可一次性投递上千条 —— 实测**在飞峰值 916 条**（窗口仅 8）。
+   但**排队者只持有 `openFn`（函数）与 `byteSize`（数字），不持有条目数据**，
+   且数据条目 100% 走 `addLazy`（`add()` 仅 35 条 / 0.1 MB 的 JSON 与占位符）
+   ⇒ **排队本身不是内存主因**，但它是「瞬时峰值能冲到 6 GB」的必要条件之一。
+
+## 结论与解锁
+
+- **E 的定性**：真源规模（1602.7 MB / 8683 条 → 产出 619 MB / 7748 条）下，
+  转换的**内存峰值需求超过 Node 默认堆上限（≈4 GB）**，故 OOM。
+  产品**输出正确、零丢条目**，属「资源需求」问题而非「正确性」问题。
+- **立即可用的解锁**：`node --max-old-space-size=8192 scripts/instance-sync/build-packs.cjs`
+  ⇒ **R-1（产包）与 AC-4 不再被阻塞**。
+- **对产品的真实风险（待裁决）**：浏览器侧没有「4 GB 堆上限」这道显式闸门，
+  但 Chrome 单标签页同样有内存天花板 —— 用户的 1.6 GB 真实包在浏览器里转换**可能撞同一堵墙**。
+  修复方向（**需用户批准后才动产品代码**）：
+  ① 投递侧背压（`convert()` 周期调用已有的 `writer.waitForRoom()`，把「在飞」压到窗口量级）；
+  ② 按落点类型/规模收敛 `maxWorkers` 与 `CONCURRENCY`；
+  ③ 定位那 6.2 GB 瞬时峰值的分配者再对症下药（需 heap snapshot）。
+
+

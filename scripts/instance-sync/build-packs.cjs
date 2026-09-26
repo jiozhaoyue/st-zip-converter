@@ -27,6 +27,35 @@ const { pathToFileURL } = require('url');
 
 const { createNodeIo } = require('./lib/node-zip-io.cjs');
 
+/**
+ * 堆自举 —— 真源规模下**默认堆不够**。
+ *
+ * 实测（2026-09-26）：1.6 GB 源包 / 8683 条 → 产出 619 MB / 7748 条时，
+ * 转换的内存峰值需求超过 Node 默认堆上限（≈4 GB），默认堆直接
+ *   `FATAL ERROR: Ineffective mark-compacts near heap limit ... out of memory`
+ * （落点停在 352 MB）。改用 `--max-old-space-size=8192` 后同一源包
+ * **213.5 s 完整跑通、零条目丢失**。
+ * 证据见任务 `09-26-all-instance-data-sync-e2e` 的 `research/build-packs-blocker.md`
+ * 的「缺陷 E 根因」一节（含 HW=20/4/2 的对照实验：worker 数不是主因）。
+ *
+ * 因此入口处检测堆上限，不足则**用更大的堆重新拉起自己**（一次性，靠环境变量防重入），
+ * 免得使用者直接 `node build-packs.cjs` 时撞上一堵没有解释的 OOM 墙。
+ */
+const v8 = require('v8');
+const { spawnSync } = require('child_process');
+const MIN_HEAP_MB = 8192;
+if (!process.env.ST_ZIP_HEAP_BOOTSTRAPPED
+    && v8.getHeapStatistics().heap_size_limit < MIN_HEAP_MB * 1048576) {
+  const current = Math.round(v8.getHeapStatistics().heap_size_limit / 1048576);
+  console.log(`[堆自举] 当前堆上限 ${current} MB < 需要 ${MIN_HEAP_MB} MB —— 以更大的堆重新拉起本脚本`);
+  const r = spawnSync(
+    process.execPath,
+    [`--max-old-space-size=${MIN_HEAP_MB}`, __filename, ...process.argv.slice(2)],
+    { stdio: 'inherit', env: { ...process.env, ST_ZIP_HEAP_BOOTSTRAPPED: '1' } },
+  );
+  process.exit(r.status === null ? 1 : r.status);
+}
+
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const TASK_DIR = path.join(REPO_ROOT, '.trellis', 'tasks', '09-26-all-instance-data-sync-e2e');
 const RESEARCH_DIR = path.join(TASK_DIR, 'research');

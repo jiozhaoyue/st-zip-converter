@@ -111,3 +111,51 @@ function assertDevTarget(rawUrl) {
   设计内丢弃类目，如 L 目标丢 `image-metadata.json`、派生缓存 `thumbnails/`/`backups/`/`vectors/`；
   而 PT 目标会把用户级 `extensions/<name>/` 迁移为 third-party 布局）。
   **拿原始源目录当分母算覆盖率是错的**，永远到不了 100%。
+
+## 6. 交付包校验：断言必须有判别力
+
+产包/交付物验收**不要**写「体积看着差不多」这类断言 —— 它永远通过。
+断言要么取自**实测基线**，要么由**负例**证明它真的会失败。
+
+### 6.1 各目标的布局判据（**从源码取，别凭印象**）
+
+| 目标 | 条目名应当 | 源码依据 |
+| --- | --- | --- |
+| `l` / `st` | **摊平** —— 无一以 `data/` 开头（源是 Luker 备份的 `hubPath` 形态，本身没有 `data/` 这一层） | `transform.js:718` `targetEntryPath` |
+| `tt` / `pt` | **全部**落在 `data/` 之下 | `transform.js:111` `DATA_PREFIX`、`:762` |
+
+> ⚠️ **踩过的坑**：TT 目标的条目**并非全部**带 `data/default-user/` 前缀。
+> `data/extensions/third-party/`（全局第三方扩展，`transform.js:104`/`:760`）与
+> `data/_tauritavern/extension-sources/`（扩展来源记录，`:105`/`:939`）**同样合规**。
+> 第一版断言写成「100% 带 `data/default-user/`」，结果对**完全正确的包**报错。
+> ⇒ 正确判据是「**全部落在 `data/` 数据根之下**」，`data/default-user/` 的占比只作**读数报告**。
+
+### 6.2 计数基线（取自源包实测，别猜）
+
+Real Luker 真源包（1602.7 MB / 8683 条）实测的一级构成：
+
+| 一级条目 | 源包 | 产包 | 说明 |
+| --- | --- | --- | --- |
+| `chats/` | **1029** | **1029** | 同步后应原样出现在各目标包里 |
+| `characters/` | **430** | **430** | 同上 |
+| `extensions/` | 6597 | **5774** | 差的 823 条是 `.git` 内部冗余，被产品安全清洗剔除 |
+| `backups/` | 111（2479.5 MB） | **0** | `includeBackups` 默认 `false` ⇒ 同步时排除 |
+| `user/` | 191 | 191 | — |
+| `worlds/` / `backgrounds/` | 21 / 23 | 21 / 23 | — |
+
+`backups/` **零条目**值得作硬断言：它占源包 **64% 体积**，混进来的第一信号就是包体积暴涨 ——
+而**体积暴涨恰恰是「看着差不多」派最容易放过的东西**。
+
+### 6.3 可执行校验（**正例 + 负例都要跑**）
+
+```bash
+# 正例：三个包一起校验（A1 存在且 >100 MB / A2 backups 零 / A3 类目计数 / A4 布局）
+node scripts/instance-sync/verify-packs.cjs --stamp <yyyymmdd-hhmmss>
+
+# 负例：拿**源包**当输入（它含 111 条 backups/、且是摊平布局）
+node scripts/instance-sync/verify-packs.cjs --kind luker --file <源包>.zip   # A2 必失败、退出码 1
+node scripts/instance-sync/verify-packs.cjs --kind tt    --file <源包>.zip   # A4 必失败、退出码 1
+```
+
+**负例是这套装置可信的前提**：2026-09-26 实测，正例全过**且两条负例都正确报错并退出码 1**，
+才确认 A2/A4 真有判别力（也正因跑负例，才暴露出 6.1 那处断言写错）。
