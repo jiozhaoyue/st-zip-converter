@@ -18,6 +18,19 @@
  *
  * 关键约定：**`includeBackups: false`** —— 用户裁决 U-4「同步时排除 `backups/`」。
  * 该值本就是 `convert()` 的默认值（`transform.js:240`），此处**显式写出**以免将来默认值变动时静默改变语义。
+ *
+ * 关键约定 ②：**`gitMode: 'minimal'`**（本脚本默认）—— 注意 `convert()` 自身的默认是 `keep`
+ * （原样保留全部 `.git` 条目），但**同步场景下 `keep` 走不通**：
+ * git 对象文件在 Windows 上带 `ReadOnly` 属性（2026-09-26 实测：目标实例的 `.git/objects` 下
+ * 有 **165 个只读项**），Luker 的原生整包恢复要覆盖它们时直接
+ * `EPERM: operation not permitted`，恢复**在中途中断**（实测覆盖率停在 85.161%）。
+ *
+ * `minimal`（`transform.js:66`）剔除 `objects/**` 全部对象存储 —— 那正是只读文件所在 ——
+ * 只保留识别与更新扩展所需的最小集：`config`（remote URL）/ `HEAD`（分支）/ `index` / `refs/heads/**`，
+ * 并合成 `.git/objects/.keep` 占位。既避开只读冲突，又**不丢用户数据**
+ * （对象存储可由 `git clone` 重建，不是用户内容）。
+ *
+ * 要旧行为时传 `--git-mode keep`（但那会在含 `.git` 的扩展上撞只读冲突而中断）。
  */
 
 const fs = require('fs');
@@ -62,10 +75,11 @@ const TASK_DIR = path.join(REPO_ROOT, '.trellis', 'tasks', '09-26-all-instance-d
 const RESEARCH_DIR = path.join(TASK_DIR, 'research');
 
 function parseArgs(argv) {
-  const out = { source: '', out: '', dryOnly: false };
+  const out = { source: '', out: '', dryOnly: false, gitMode: 'minimal' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--source') out.source = argv[++i] || '';
     else if (argv[i] === '--out') out.out = argv[++i] || '';
+    else if (argv[i] === '--git-mode') out.gitMode = argv[++i] || 'minimal';
     else if (argv[i] === '--dry-only') out.dryOnly = true;
   }
   return out;
@@ -113,6 +127,7 @@ const MB = (n) => (n / 1048576).toFixed(1);
       target: item.target,
       dryRun: true,
       includeBackups: false,
+      gitMode: args.gitMode,
       io,
     });
     const dryJson = dry.toJSON();
@@ -145,6 +160,7 @@ const MB = (n) => (n / 1048576).toFixed(1);
     const rep = await convert(source, partialPath, {
       target: item.target,
       includeBackups: false,
+      gitMode: args.gitMode,
       io,
     });
     const secs = (Date.now() - t1) / 1000;

@@ -99,7 +99,16 @@ function postMultipart(inst, session, { pathName, fields, filePath, onProgress }
     const head = Buffer.concat([
       ...headParts,
       Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="file";`
+        // ⚠️ 文件字段名必须是 **`avatar`**，不能想当然写 `file`。
+        //
+        // 依据：Luker 的全局 multer 中间件（`src/server-main.js:600-608`）是
+        //   `app.use(multer({storage, limits}).single('avatar'))`
+        // —— 它**只认 `avatar` 这一个文件字段**。用别的名字会得到
+        //   `MulterError: Unexpected field`，且它冒到 Express 错误处理器变成
+        //   **HTTP 500 + 默认错误页**（不是带 JSON 体的业务错误），极难从响应上看出来。
+        //   2026-09-26 实测踩过：用 `file` 时 probe 与 restore 双双 500，
+        //   直到重启实例捕获服务端日志才看到真实原因。
+        `--${boundary}\r\nContent-Disposition: form-data; name="avatar";`
         + ` filename="${fileName}"\r\nContent-Type: application/zip\r\n\r\n`,
       ),
     ]);

@@ -45,7 +45,13 @@ async function walk(rootDir) {
   let fileCount = 0;
   let totalBytes = 0;
 
+  const visited = new Set();
   async function rec(dir, rel) {
+    let real;
+    try { real = await fs.promises.realpath(dir); } catch { return; }
+    if (visited.has(real)) return; // 防 junction 环（链接指回上层会造成无限递归）
+    visited.add(real);
+
     let entries;
     try {
       entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -56,16 +62,21 @@ async function walk(rootDir) {
     for (const ent of entries) {
       const abs = path.join(dir, ent.name);
       const relPath = rel ? `${rel}/${ent.name}` : ent.name;
-      if (ent.isDirectory()) {
+      // 用 **stat**（而非 lstat）以**跟随 junction / 符号链接**。踩坑记录：
+      // `readdir(withFileTypes)` 的 `dirent.isDirectory()` 对 Windows junction 返回 **false**
+      // （它只设 `isSymbolicLink()`），于是链接目录被当文件、其子树整片漏掉。
+      // 2026-09-26 实测：目标实例 `extensions/ST-BgLoader` 是指向源码仓的 Junction，
+      // 其下 **1090 条**因此漏进快照 —— 会让「零删除」判定出现看不见的盲区。
+      // 详见 `diff-report.cjs` 的 `walkTarget` 注释。
+      let st;
+      try { st = await fs.promises.stat(abs); } catch { continue; }
+      if (st.isDirectory()) {
         if (SKIP_DIRS.has(ent.name)) continue;
         await rec(abs, relPath);
-      } else if (ent.isFile()) {
-        try {
-          const st = await fs.promises.stat(abs);
-          files[relPath] = [st.size, Math.round(st.mtimeMs)];
-          fileCount += 1;
-          totalBytes += st.size;
-        } catch { /* 竞态消失的文件：跳过 */ }
+      } else if (st.isFile()) {
+        files[relPath] = [st.size, Math.round(st.mtimeMs)];
+        fileCount += 1;
+        totalBytes += st.size;
       }
     }
   }

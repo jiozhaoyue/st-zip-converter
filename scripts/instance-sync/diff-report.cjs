@@ -46,11 +46,30 @@ function parseArgs(argv) {
   return out;
 }
 
-/** 目标当前的文件清单（只 stat，不读内容） */
+/**
+ * 目标当前的文件清单（只 stat，不读内容）。
+ *
+ * ⚠️ **必须跟随 junction/符号链接**：`readdir(withFileTypes)` 的 `dirent.isDirectory()`
+ * 对 Windows junction **返回 false**（它是 reparse point，`isSymbolicLink()` 才为 true），
+ * 于是链接目录会被当成**文件**、其子树被整片漏掉。
+ *
+ * 2026-09-26 实测踩过：目标实例的 `extensions/ST-BgLoader` 是指向
+ * `D:\Repo\Tavern-repo\My-repo\ST-BgLoader` 的 **Junction**（开发者把扩展链到源码仓），
+ * 该目录下 **1090 条**全部漏统计 ⇒ 覆盖率被误报成 **84.805%**，
+ * 而服务端回执是 `failedCount=0`、文件实际都在。**这是测量口径的 bug，不是同步失败。**
+ *
+ * 用 `realpath` 去重防循环（junction 指回上层会造成无限递归）。
+ */
 async function walkTarget(rootDir) {
   const files = new Set();
   const sizes = new Map();
+  const visited = new Set();
   async function rec(dir, rel) {
+    let real;
+    try { real = await fs.promises.realpath(dir); } catch { return; }
+    if (visited.has(real)) return; // 防 junction 环
+    visited.add(real);
+
     let entries;
     try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch (e) {
       if (e.code === 'ENOENT') return;
@@ -59,10 +78,13 @@ async function walkTarget(rootDir) {
     for (const ent of entries) {
       const relPath = rel ? `${rel}/${ent.name}` : ent.name;
       const abs = path.join(dir, ent.name);
-      if (ent.isDirectory()) await rec(abs, relPath);
-      else if (ent.isFile()) {
+      let st;
+      // stat（而非 lstat）⇒ 跟随链接；断链/无权限项跳过而非中断整次遍历
+      try { st = await fs.promises.stat(abs); } catch { continue; }
+      if (st.isDirectory()) await rec(abs, relPath);
+      else if (st.isFile()) {
         files.add(normalize(relPath));
-        try { sizes.set(normalize(relPath), (await fs.promises.stat(abs)).size); } catch { /* 竞态 */ }
+        sizes.set(normalize(relPath), st.size);
       }
     }
   }
@@ -119,7 +141,20 @@ function categorize(names) {
   ]);
 
   const packSet = new Set(entries);
-  const missing = [...packSet].filter((n) => !target.files.has(n));
+  const missingAll = [...packSet].filter((n) => !target.files.has(n));
+
+  /**
+   * **合成元数据**：`convert()` 为目标合成、但**宿主按设计不消费**的条目。
+   * Luker 的 restore 会以 `path_not_in_selected_categories` 显式跳过它们
+   * （2026-09-26 实测回执：`skippedCount=2`，正是 `manifest.json` 与
+   * `_convert/extensions-manifest.json`）。
+   *
+   * 单列出来、**不计入覆盖率判定** —— 否则 T1 永远到不了 100%，
+   * 一个恒假的判定等于没有判定。
+   */
+  const isHostMetadata = (n) => n.startsWith('_convert/') || n === 'manifest.json';
+  const missingHostMetadata = missingAll.filter(isHostMetadata);
+  const missing = missingAll.filter((n) => !isHostMetadata(n));
   const coverage = packSet.size ? (packSet.size - missing.length) / packSet.size : 1;
 
   // T2：同步前的目标独有清单，同步后是否仍在
@@ -137,8 +172,17 @@ function categorize(names) {
   let preManifestCheck = null;
   if (args.preManifest && fs.existsSync(args.preManifest)) {
     const pre = JSON.parse(fs.readFileSync(args.preManifest, 'utf8'));
-    const keys = pre.files ? Object.keys(pre.files) : [];
-    const gone = keys.filter((n) => !target.files.has(normalize(n)));
+    const keysAll = pre.files ? Object.keys(pre.files) : [];
+    /**
+     * `backups/` **单列**：用户裁决 U-4 明确「同步时排除 `backups/`」，而宿主 Luker
+     * 每次恢复前都会自动备份 settings 并**轮换**（2026-09-26 实测两次 restore 各删掉
+     * 一条最旧的 `backups/settings_<user>_<时间>.json`）。把它算进「零删除」判定会让判定恒假，
+     * 而它根本不在同步范围内 —— 这是宿主自身的行为，不是同步删的。
+     */
+    const isBackups = (n) => normalize(n).startsWith('backups/');
+    const keys = keysAll.filter((n) => !isBackups(n));
+    const goneAll = keysAll.filter((n) => !target.files.has(normalize(n)));
+    const gone = goneAll.filter((n) => !isBackups(n));
     preManifestCheck = {
       manifest: args.preManifest,
       takenAt: pre.takenAt || null,
@@ -146,6 +190,8 @@ function categorize(names) {
       stillPresent: keys.length - gone.length,
       deletedCount: gone.length,
       deletedSample: gone.slice(0, 50),
+      /** 宿主自行轮换掉的 `backups/` 项（不参与判定，仅登记） */
+      hostRotatedBackups: goneAll.filter(isBackups),
     };
   }
 
@@ -165,6 +211,11 @@ function categorize(names) {
       pass: missing.length === 0,
       /** 只列前 50 条，避免报告无限膨胀 */
       missingSample: missing.slice(0, 50),
+      /** 合成元数据（宿主按设计跳过）：单列，不参与 pass 判定 */
+      hostMetadataSkipped: {
+        count: missingHostMetadata.length,
+        entries: missingHostMetadata,
+      },
     },
     T2_targetUnique: {
       count: targetUnique.length,
@@ -188,6 +239,10 @@ function categorize(names) {
   console.log(`[${args.target}] T1 包→目标覆盖率 ${(coverage * 100).toFixed(3)}%`
     + `（${packSet.size - missing.length}/${packSet.size}，缺 ${missing.length}）`
     + ` ${missing.length === 0 ? '✅' : '❌'}`);
+  if (missingHostMetadata.length) {
+    console.log(`[${args.target}] T1b 合成元数据 ${missingHostMetadata.length} 条`
+      + `（宿主按设计跳过，不计入判定）：${missingHostMetadata.join(', ')}`);
+  }
   console.log(`[${args.target}] T2 目标独有 ${targetUnique.length} 条`
     + (uniqueCheck ? `，其中声明独有 ${uniqueCheck.declared} 条 / 被删 ${uniqueCheck.deleted.length} 条`
       + ` ${uniqueCheck.deleted.length === 0 ? '✅' : '❌'}` : '（未提供独有清单）'));
@@ -197,6 +252,10 @@ function categorize(names) {
       + ` ${preManifestCheck.deletedCount === 0 ? '✅ 零删除' : '❌'}`);
     if (preManifestCheck.deletedCount) {
       console.log(`       被删样本：${preManifestCheck.deletedSample.slice(0, 5).join(' | ')}`);
+    }
+    if (preManifestCheck.hostRotatedBackups.length) {
+      console.log(`[${args.target}] T2c 宿主自行轮换的 backups/ ${preManifestCheck.hostRotatedBackups.length} 条`
+        + `（不在同步范围，不计入判定）：${preManifestCheck.hostRotatedBackups.slice(0, 3).join(', ')}`);
     }
   }
   console.log(`[${args.target}] T3 包内 角色卡 ${report.T3_content.pack.characters}`
