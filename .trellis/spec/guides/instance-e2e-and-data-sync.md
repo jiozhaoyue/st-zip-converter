@@ -358,3 +358,106 @@ node e2e/run.cjs --only matrix   # 只跑功能矩阵（**122 项**；需 :8001 
 
 前置：`:8001`（Dev ST）与 `:8003`（Dev Luker）在监听；夹具由 spec **现场生成**到
 `test-results/fixtures/`（`.gitignore` 覆盖，**不入库**）。
+
+## 12. PT（PureTavern）导入通道 —— **页面内 fetch 补丁**与四个坑（2026-09-26 实证）
+
+> 本节全部读数来自 `scripts/instance-sync/import-pt.cjs` 的实跑与
+> `research/pt-sync-readings.md`。PT 侧路径相对 `Instance/Dev/PureTavern`。
+
+### 12.1 第一纪律：**PT 的 `/api/*` 不是服务端后端，必须走页面内 `fetch`**
+
+PT 把 ST 的客户端 API 在**浏览器里**重新实现了一遍：
+
+- 路由注册在 `apps/web/src/features/import-export/legacy/register-routes.ts`，
+  挂到 `CompatibilityRouter`；
+- `apps/web/src/legacy-hook/bootstrap.ts` 用
+  `installCompatibilityFetch(router)` **补丁页面内的 `window.fetch`** 使其生效。
+
+**推论（很重要）**：用 Node 侧 / Playwright 的 `request` 去探这些路径会拿到 **404**，
+**但那是探查方法的伪影，不代表能力缺失**。实测对照：
+
+| 探测方式 | `POST /api/backups/archive/inspect` | `POST /api/backups/tauritavern/import/preview` |
+| --- | --- | --- |
+| **页面内 `page.evaluate(fetch)`** | **200**（返回真实的 659 records / 329 blobs） | **400** `{"code":"missing-file","pureTavern":true}` |
+| 页面外（Node / request） | 404 | 404 |
+
+**400 而不是 404** 就是「路由存在、只是缺参数」的证明。
+⇒ 判定 PT 有什么能力，**只能**在页面内发请求。
+
+**顺带更正**：`apps/remote-server` 是 **LLM 请求代理**（其 README 明写只有
+`GET /v1/health` 与 `POST /v1/proxy`），**与备份/导入无关** ——
+「起 remote-server 就能导入」是错的，起它对同步零帮助。
+
+### 12.2 实际通道：宿主数据管理面板
+
+面板是**独立 `<dialog id="pure-tavern-data-management-dialog">`**，
+由设置里的「**打开数据管理**」按钮打开。
+⚠️ **它不是「点设置项抽屉展开」就能看到的** —— 按后者写自动化会得到
+「文件设进去了但流程没起来」（截图里面板根本没打开）。
+
+面板内两组导入控件（`apps/web/src/features/import-export/runtime/index.js`）：
+
+| 控件 | 用途 |
+| --- | --- |
+| `#ptdm-import-file` + `#ptdm-import-method` | PT 自家归档（`fast` / `slow`） |
+| `#ptdm-tt-import-file` + `#ptdm-tt-strategy` | **TT 归档**（本项目产出 TT 布局树 ⇒ 走这组） |
+
+`#ptdm-tt-strategy` 默认 **`merge`**（「合并并覆盖冲突」）—— 与 U-3「覆盖同名、不删独有」一致。
+**`#ptdm-import-method` 是两组共用的全局选择框**（`selectedImportMethod()` 读它）：
+`fast` = 整包解压进内存，`slow` = 逐文件低内存 ⇒ **大包必须 `slow`**。
+
+### 12.3 四个必须踩过的坑
+
+| # | 坑 | 症状 | 正确做法 |
+| --- | --- | --- | --- |
+| 1 | 只投文件不开始 | `setInputFiles` 后**毫无反应**（计数不动、无任何提示） | 必须点「执行 TauriTavern 导入」（`#ptdm-tt-import-confirm`） |
+| 2 | 按钮**预览前 disabled** | 投完就点 ⇒ 拿到「被禁用」，流程**静默不走** | 投文件只触发**异步预览**（`previewTauriTavernImport`：`:629 disabled=true` → `:684 disabled=false`）⇒ **等按钮启用**再点 |
+| 3 | **两层确认、同一选择器** | 日志停在第一层之后再无进展 | ①模块选择（`chooseImportModules`，`:187`）点「继续」→ ②「请确认」（`confirmAction`，`:150`）点「确定」，**两层都用 `[data-action="confirm"]`**，用「层内有无 `[data-action="all"]`」区分。且**中间隔着逐文件 CRC/SHA-256 校验**（7209 文件 / 1.16 GB 实测数分钟）⇒ 必须**按时长预算**持续等待，不能固定轮数 |
+| 4 | 完成信号是**页面 reload** | 计数明明已增长，却判「超时未检出完成信号」 | 源码 `notify('success', …)` 之后**立刻** `setTimeout(location.reload, 500)` ⇒ 浮层只存在约 500 ms，秒级文本轮询**必然错过** ⇒ 用 `framenavigated` 事件作判据 |
+
+### 12.4 存储风险：**「尽力而为」不是提示音**
+
+PT 数据落 **IndexedDB**（无磁盘目录，`e2e/lib/instances.cjs` 的 `pt-web.userDir` 为 `null`）。
+实测面板读数：存储模式 **「尽力而为」**、用量 **660.5 MB** / 配额 **10.6 GB**、**本地恢复点 3 个**。
+面板自己的警告原文：
+
+> 浏览器未授予持久化存储：磁盘空间不足时，**它可能在不通知的情况下清除本站的全部数据**。
+> 建议定期导出 ZIP 备份到本地磁盘。
+
+⇒ **PT 自带的「本地恢复点」也在同一个 IndexedDB 里，不构成异地冗余**。
+`import-pt.cjs` 对 >100 MB 的包**默认拒绝执行**（需显式 `--allow-large`），
+把风险摆到明面上，而不是替用户默默决定。
+
+### 12.5 核对：路径比对**不可用**，只能用模块读数
+
+PT 无磁盘目录 ⇒ `diff-report.cjs` 那套**按路径比对在 PT 上根本不可用**。
+唯一可程序化读到的真源是：
+
+- **IndexedDB 逐库逐 store `count()`**（键形如 `模块␟类型␟标识`，
+  如 `chats␟messages␟<uuid>`、`characters␟cards␟<uuid>`）；
+- **面板逐模块读数**（`#ptdm-modules .ptdm-module-row` 的 `N records · M blobs · X MB`）——
+  界面上的模块条目会被虚拟滚动截断，**不能**当判据。
+
+`import-pt.cjs --report` 就是这两者的只读出口。
+
+**已实测可用的三条判据**（按可信度排序）：
+
+1. **体积吻合**：PT 侧各模块体积合计 ≈ **1161.6 MB** = 源包未压缩 **1.16 GB**（精确吻合）；
+2. **角色目录数**：源 `chats/<角色>/` 目录数 **23** = PT `chats|owner-aliases` **23**；
+3. **归一后的系列计数**：源侧 `孤独摇滚1/2/2_1/3/3_1` 在 PT 侧归一到 `孤独摇滚`
+   ⇒ 131+9+1+1+22+1 = **165** = PT 侧 **165**。
+
+⚠️ **计数口径陷阱（第二次遇到）**：源包 `chats/` 的 **1029 条**不是聊天数 ——
+实测构成 **223** 真聊天 `.jsonl` + **786** `.luker-state.*` 附属 + **20** `runs/**` 编排记录。
+PT 的模型是「**每个聊天 = 1 条 `messages` + 1 条 `sessions`**」⇒ 222 个聊天 = 467 条记录 ✓ 自洽。
+**这与缺陷 F-4 同形**（当时把 Luker 的版本历史当成 430 张不同的卡）。
+
+### 12.6 复现命令
+
+```bash
+# 只读核对：打印 PT 侧模块读数与配额（不导入任何数据）
+node scripts/instance-sync/import-pt.cjs --report
+
+# 真导入（策略默认 merge、方式默认 slow；>100 MB 需 --allow-large）
+node scripts/instance-sync/import-pt.cjs --pack <pack-tt-*.zip> --allow-large --timeout 3600000
+```

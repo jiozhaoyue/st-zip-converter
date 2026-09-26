@@ -214,11 +214,27 @@ node scripts/instance-sync/start-instance.cjs --id real-luker
       **T2b 7985→7985 被删 0**；T3 角色卡 430 / 聊天 1029 —— 与包**逐项相等**。
 - [x] **3.8** 同步 **Real ST :8002**（同 3.5）→ **T1 100.000%**、**T2b 195→195 被删 0**；
       T3 角色卡 54 / 聊天 1029。
-- [ ] **3.9** `import-pt.cjs` 同步 **PT web :8899** —— **未执行：web 模式没有该后端**。
-      取证结论（`research/pt-import-channel.md`）：控件齐全（`#ptdm-tt-import-file` + `#ptdm-tt-strategy`，
-      默认 `merge`），但执行段依赖 `fetch('/api/backups/tauritavern/import')`，
-      而该路径在 web dev 下 **POST 返回 404**（GET 是 SPA 兜底 HTML）⇒ 无后端可用。
-      打通需另起 PT `remote-server`（端口 3030）⇒ **方向性决策，待用户裁定**。
+- [x] **3.9** `import-pt.cjs` 同步 **PT web :8899** —— **2026-09-26/27 第六轮已完成**。
+      ⚠️ **先更正两条先前结论（均已被实地证伪）**：
+      ① 「web 模式没有该后端」**错** —— PT 的 `/api/*` 是 PT **纯前端**自己注册的 legacy 兼容路由
+      （`apps/web/src/features/import-export/legacy/register-routes.ts`，由 `legacy-hook/bootstrap.ts` 的
+      `installCompatibilityFetch(router)` **补丁页面内的 `window.fetch`** 生效）。页面内实测
+      `POST /api/backups/archive/inspect` → **200**、`import/preview` → **400**（参数缺失，**不是 404**）。
+      早先的 404 是**探查方法的伪影**（绕过了页面内被补丁的 fetch）。
+      ② 「需另起 `remote-server`（3030）」**错且方向相反** —— `apps/remote-server` 是 **LLM 请求代理**
+      （README 明写只有 `GET /v1/health` 与 `POST /v1/proxy`），与备份/导入毫无关系。
+      **实际通道**：宿主数据管理面板（独立 `<dialog>`，由「打开数据管理」按钮打开；
+      **不是**点设置项抽屉展开 —— 先前 `pt-automation.cjs --import-pack` 正是栽在这里）。
+      **新增 `scripts/instance-sync/import-pt.cjs`**，走通完整链路并排掉 4 个坑
+      （只投文件不开始 / 按钮预览前 disabled / **两层确认**且用同一选择器、中间隔着逐文件校验 /
+      完成信号是**页面 reload** 而非浮层文本）。**读数**：pack-tt（510.8 MB）导入耗时 **337.3s**、
+      两层确认全过、`done=true`；计数 records **976 → 11740（+10764）**、blobs **334 → 5326（+4992）**、
+      **只增不减**；**体积判据精确吻合**（PT 侧各模块合计 ≈1161.6 MB = 源包未压缩 1.16 GB）；
+      聊天角色目录 **23 = 23**、「孤独摇滚」系列 **165 = 165**。
+      配套 `lib/pt-count.cjs`（计数装置唯一实现）+ `--report` 只读核对装置。
+      **残留**（见 `research/pt-sync-readings.md` §5）：卡片级未逐张核对、PT 存储为
+      **「尽力而为」**（浏览器可能静默清空）、`runs/**` 20 条去向未裁决、
+      `pt-automation.cjs --import-pack` 分支仍是坏路径（已被取代）。
 - [x] **3.10** **AC-3 内容断言**：
       ① **Luker 目标**按路径逐项核对 —— Real Luker 角色卡 **430 = 包内 430**、聊天 **1029 = 1029**；
       Dev Luker 为超集（431 / 1236）。

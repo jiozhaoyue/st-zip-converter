@@ -159,7 +159,7 @@
 | --- | --- | --- |
 | **R-1** | ~~产包未产出~~ → **已解除** | 三个产包均已产出并通过 `verify-packs.cjs` 校验（见「已达成项」AC-4） |
 | **R-2** | ~~ST 目标的同步通道需重新设计~~ → **已解决（第三轮）** | 结论修正：ST 确实没有整包导入，但**逐类目端点 + 裸落盘**组合可覆盖全部可达条目 —— `extensions/ user/ chats/` 与**预设/主题类 11 个类目**在 ST 上本就是**磁盘目录形态**，走裸落盘等价于原生结果。实测 Dev ST / Real ST 各 **6801 成功 / 0 失败**，不可达仅 4 条（`_convert/**` 合成元数据 3 + `secrets.json`）。**「覆盖率 100%」按可达类目成立**（分母已显式剔除 4 条） |
-| **R-3** | **PT（:8899）未纳入 E2E**，PT 上插件已装但**数据未同步** | 插件安装流程已走通（`git 9358fbd`），但**TT 导入在 web 模式没有后端**：`fetch('/api/backups/tauritavern/import')` 实测 **POST 404**（GET 为 SPA 兜底 HTML）⇒ 需另起 PT `remote-server`（3030）。取证：`research/pt-import-channel.md` |
+| **R-3** | ~~PT（:8899）数据未同步~~ → **已同步（第六轮）**；但 **PT 仍未纳入 E2E** | **同步已完成**：`scripts/instance-sync/import-pt.cjs` 走宿主数据管理面板，pack-tt 导入耗时 337.3s、records +10764 / blobs +4992、**只增不减**、体积与源包未压缩量精确吻合（≈1.16 GB）。⚠️ **两条先前结论已被实地证伪**：「web 模式没有该后端」错（PT 的 `/api/*` 是**纯前端** legacy 兼容路由，页面内实测 200/400；早先的 404 是**探查方法的伪影**——绕过了被补丁的 `window.fetch`）；「需另起 remote-server」错（那是 **LLM 请求代理**）。**仍未纳入 E2E 的原因**：PT 上装的是本插件的**旧版本**（与 dev-st/dev-luker 同一问题，见 R-20），且 PT 的 `:8899` 属 Dev 白名单但 matrix spec 未加 PT 目标。取证：`research/pt-sync-readings.md`；残留 PT-R1…PT-R4 见该文 §5 |
 | **R-4** | **TT 侧未做任何事** | TT 是 Tauri 桌面应用（无浏览器端口，不可自动化）；按 U-5 本就是人工交付 —— 人工交付物（TT 布局包 + `TT-导入说明.md`）**已产出**（见 AC-4） |
 | **R-5** | ~~功能矩阵 M-1…M-9 未实现（AC-7 未达成）~~ → **已解除（第五轮）** | `e2e/specs/matrix.e2e.cjs` 已完成：**122 项断言全过、连续两轮全绿**。文件名用 `.e2e.cjs` 而非设计文档写的 `.spec.cjs`（后者会被 vitest 当单测收集）。九条路径的判定面与全部取证见 `research/e2e-matrix-findings.md` |
 | **R-6** | ~~Luker 的 `restore-backup` 未实测~~ → **已解除** | Dev Luker / Real Luker 各跑过一次真实 `mode=merge` 恢复，读数 `restoredCount=7178 / failedCount=0`；差异核对 T1 100%、T2b 零删除 |
@@ -174,8 +174,9 @@
 | **R-15** | **⚠️ 事故已发生并已修复：跨宿主 `settings.json` 合并把两个 ST 实例搞停** | `import-st.cjs` 原用**并集**合并 ⇒ Luker 专有顶层键（`settings` 46 MB、`openai_settings` 34.5 MB、`themes`/`instruct`/`quickReplyPresets` 等共 27 个）被写进 ST，settings.json 由 **44 KB / 27 KB 膨到 113.7 MB** ⇒ ST 前端卡在「settings 未就绪」⇒ **所有第三方扩展都不加载**（冒烟 53→50）。**已按用户裁定修复**：只删陌生键（113.7 → 22.5 MB），并把同步器改为**按目标键集的交集合并**。台账 `research/repair-settings-merge-{dev,real}-st-*.json`；当前文件留底在 `test-results/settings-repair-backups/`（可回滚）。**残留风险**：共有键（如 `extension_settings`）仍是**源侧取值**（那是「覆盖同名」的本意），若某共有键在两宿主语义不同，其影响本轮**未逐键核验** |
 | **R-16** | **M-7 的「转换任务 pause→resume 续传」在产品里不可达**（设计文档 §3.4 与实现不符） | 全仓 `taskControls.showRunning` 只出现一次（`index.js:942`），上下文是 `index.js:938 taskManager.start(taskId, '宿主拉取', …)`；`btnConvert` 路径（`index.js:1519` 起）**不碰 TaskManager**，且 `onResume`（`index.js:491`）只在 `id.startsWith('fetch-')` 时才续传 ⇒ **续传只在宿主拉取路径实现**。矩阵按可达面验（控制条初态隐藏 + 转换期间保持隐藏），`resumedCount > 0` 一项未验。见 `research/e2e-matrix-findings.md` §5 |
 | **R-17** | **`fixtures/gen.js` 的 CLI 入口在本机静默空操作**（既有缺陷，非本任务引入） | `fixtures/gen.js:144` 的入口守卫用 `` `file://${process.argv[1].replace(/\\/g,'/')}` `` 构造 URL，而 `import.meta.url` 是 `file:///D:/…`（**三个**斜杠）⇒ **永不相等**。实测 `node fixtures/gen.js <dir>` 退出码 0、零输出、不产文件（即 `npm run gen-fixtures` 从未生效）。本任务的矩阵 spec 绕过该 CLI，用动态 `import()` 直调 `generateAll()`。**只登记不修**（Out of Scope） |
-| **R-18** | **⚠️ 疑似产品缺陷 N-1：外部包路径上 `native` 未走布局码归一** | 同一小包、同一宿主，只改目标选项即得不同读数：`native` → 「直通 7 / **无合成** / 产物 7」；显式 `st` → 「直通 7 / **合成 1** / 产物 8」。根因：归一只在宿主拉取路径做了（`index.js:193`），而 `refreshPlan`（`index.js:631`）与 `btnConvert`（`index.js:1519`）**直接取** `targetSelect.value` ⇒ 字符串 `'native'` 直达计划器/转换器，而 `plan-preview.js` 的合成分支只认 `TARGETS.L`(:372)/`TARGETS.ST`(:383)。**在 ST 宿主上恰好等价、用户看不出；在 Luker 宿主上选「宿主原生格式」会得到未经布局转换的直通结果**。按 Out of Scope **当轮不修**，矩阵已钉住该差异（断言 native 与 st 读数不等；将来补齐归一则该断言报红提示更新）。详见 `research/e2e-matrix-findings.md` §4 |
+| **R-18** | ~~疑似产品缺陷 N-1：外部包路径上 `native` 未走布局码归一~~ → **已修复（用户 2026-09-26 裁定「本轮修 + 补单测」）** | **症状**（本任务 E2E 矩阵 M-3 查出）：同一小包、同一宿主，只改目标选项即得不同读数 —— `native` → 「直通 7 / **无合成** / 产物 7」；显式 `st` → 「直通 7 / **合成 1** / 产物 8」。**根因**：归一只在宿主拉取路径做了（原 `index.js:193`），而 `refreshPlan` / `btnConvert` / `runBatchConversion` / 扩展清单的 `targetLayout` **直接取 `targetSelect.value`** ⇒ 字符串 `'native'` 直达计划器/转换器，而 `plan-preview.js` 的合成分支只认 `TARGETS.L`(:372) / `TARGETS.ST`(:383) ⇒ 不匹配任何分支，退化成**原样直通**。**后果不对称**（故长期未被发现）：ST 宿主上恰好等价、用户看不出；**Luker 宿主上选「宿主原生格式」会拿到未经布局转换的结果**。 | **修法**：新增纯函数 `resolveTargetLayout(rawValue, platform, fallback)`（`src/ui/host-bridge.js`，与 `hostLayoutCode` 同处）作为**唯一归一实现**，`index.js` 的 5 处取目标（含原已归一的文件名预览）全部改走它；单测 `test/target-resolve.test.js`（**11 项**，含 `native + luker ⇒ l` 的核心负例，并已**实测证明判别力**：临时去掉归一后 6 项转红、恢复后 11/11）。E2E 侧把原「差异登记」断言改为**一致性断言**（`native` 读数须等于该宿主的显式布局码读数，两实例分别对照 `st` / `l`）。详见 `research/e2e-matrix-findings.md` §4 |
 | **R-19** | **M-8 的 `restoreCapability` 三态不可直接观测；宿主拉取路径的 pause/resume 未实测** | 三态（`unknown\|available\|unsupported`，`host-bridge.js:85`）未挂 `window`，矩阵只能验**非破坏性**的可见性契约（并已用「分卷后 `lastConvertedBlob` 置 null ⇒ 入口重新隐藏」做双向互证）。**未主动点恢复按钮**：`postRestoreWithFallback` 会对实例发真实 POST，一旦某候选端点实际存在即产生真实写入 —— 风险不对等。宿主拉取的 pause/resume 同样未测：触发它会对实例发起**全量拉取**（Dev Luker 1 GB 级），不可接受 |
+| **R-20** | **⚠️ E2E 验证的是「实例里装的插件版本」，不是工作区代码** | 本轮发现：`Instance/Dev/SillyTavern/public/scripts/extensions/third-party/st-zip-converter` 与 `Instance/Dev/Luker/data/default-user/extensions/st-zip-converter` 均停在 **`1640118`**（经 `git merge-base --is-ancestor` 确认是 HEAD 的**祖先**）⇒ **E2E 此前全部读数（53/53、175/175）验证的都是旧代码**。N-1 修复后复跑 E2E，那两条 `native` 一致性断言**如期失败**（失败读数仍是旧的「直通 7 / 无合成 / 产物 7」，expected 是新形态「合成 1 / 产物 8」）—— 这**反过来证明该断言有效**，也说明「实例未更新」这件事是**可被判据捕获**的。⇒ **纪律**：用 E2E 验证新代码前，必须先把实例插件更新到目标版本（走 `git pull` —— L0-1 允许的实例更新通道；其 `origin` 已确认指向本仓、非上游），且**只更新 Dev 实例**（E2E 只连 Dev）。另注：PT 侧同理（其插件也是旧版本），且 matrix spec 尚未把 PT 加为目标 |
 
 ## 已达成项（供收口核对）
 
@@ -187,6 +188,11 @@
       Dev Luker `7177/7177`（6679→6679）、Real Luker `7177/7177`（7985→7985）；
       单列不判项（均有依据）：合成元数据 1–3 条、Luker 私有状态 1 条、
       **链接子树内 3 条**（Dev Luker）、宿主自管缓存 `backups/`+`thumbnails/`
+- [x] **AC-2/AC-3 在 PT 上的形态（第六轮）**：PT 数据落 **IndexedDB**、无磁盘目录 ⇒
+      `diff-report.cjs` 的**路径比对在 PT 上不可用**；改以「面板逐模块读数 + 库计数」为判据
+      （`import-pt.cjs --report`）。**体积判据精确吻合**：PT 侧各模块合计 ≈1161.6 MB = 源包未压缩 1.16 GB；
+      聊天角色目录 **23 = 23**、「孤独摇滚」系列 **165 = 165**；导入前后计数**只增不减**。
+      **卡片级未逐张核对**，登记为 PT-R1（详见 `research/pt-sync-readings.md`）
 - [x] **AC-3** 内容级断言：Real Luker 目标角色卡 **430 = 包内 430**、聊天 **1029 = 1029**；
       Dev Luker 为超集（431 / 1236）；两个 ST 目标按**宿主落盘名**核对角色卡 **26/26**、聊天 **1029 = 1029**
 - [x] **AC-4** 三个布局包 + TT 导入说明均已落 Downloads：`pack-luker`（压缩 510.6 MB / 未压缩 619.3 MB）、

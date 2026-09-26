@@ -24,7 +24,7 @@ These guides help you **ask the right questions before coding**.
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
 | [Tavern Datapack Formats](./tavern-datapack-formats.md) | 四平台包布局/导入语义/互转约定与环境教训 | 任何涉及 ST/L/TT/PT 数据搬移的任务 |
-| [Instance E2E And Data Sync](./instance-e2e-and-data-sync.md) | 实例端口/协议纪律、Dev-only 端口守卫契约、四宿主导出导入通道（含 ST 无整包导入）、搬数据的语义纪律、**覆盖率判定三口径（路径 / 宿主落盘名 / 单列不判）**、**ST 角色卡拆壳与版本归并**、**写入前链接子树守卫**、**功能矩阵 E2E 的实现纪律（真实打开工作台路径 · 持久化状态的增量判定 · 三种「红灯来自断言自己」· 放大夹具必须不可压缩）** | 要打开实例页面做自动化、要把数据搬进实例、要判「同步到底成没成」、或要写/改 E2E 断言时 |
+| [Instance E2E And Data Sync](./instance-e2e-and-data-sync.md) | 实例端口/协议纪律、Dev-only 端口守卫契约、四宿主导出导入通道（含 ST 无整包导入）、搬数据的语义纪律、**覆盖率判定三口径（路径 / 宿主落盘名 / 单列不判）**、**ST 角色卡拆壳与版本归并**、**写入前链接子树守卫**、**功能矩阵 E2E 的实现纪律（真实打开工作台路径 · 持久化状态的增量判定 · 三种「红灯来自断言自己」· 放大夹具必须不可压缩）**、**PT 导入通道（页面内 fetch 补丁 · 四个坑 · best-effort 存储风险 · 路径比对不可用时的核对判据）** | 要打开实例页面做自动化、要把数据搬进实例、要判「同步到底成没成」、要写/改 E2E 断言、或要把数据导进 PT 时 |
 | [Subagent Collaboration](./subagent-collaboration.md) | 子代理来源唯一性 + 并行不阻塞 + 写权限边界 | **派发任何子代理之前**（含多链路并行审计/研究） |
 
 ---
