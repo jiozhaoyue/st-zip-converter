@@ -182,9 +182,20 @@ node scripts/instance-sync/start-instance.cjs --id real-luker
 - [ ] **3.1** 写 `scripts/instance-sync/diff-report.cjs`（三张表：源覆盖率 / 目标独有存活 / 内容量）。
 - [ ] **3.2** **空转对照**：不写入，只算差异，确认三张表能正确报出「目标缺什么」
       —— **先证明判定会报差异，再相信它报 100%**。读数落 `research/diff-selfcheck.md`。
-- [ ] **3.3** `restore-luker.cjs` 同步 **Dev Luker :8003**：先 `/restore-backup/probe` 预检，
-      再 `mode=merge` + 全类目 `selection`，开流式进度。
-- [ ] **3.4** 对 Dev Luker 跑 `diff-report.cjs` → **AC-2 断言必须过**（覆盖率 100% / 独有零删除）。
+- [x] **3.3** `restore-luker.cjs` 同步 **Dev Luker :8003** —— **2026-09-26 已完成**。
+      ⚠️ **实际未走 probe**：`/restore-backup/probe` 对不含 `_engine_meta.json` 的包会**挂住**
+      （`readEngineMetaFromZip` 未处理 yauzl 的 `end` 事件），故用 `--skip-probe` 直走
+      `mode=merge` + 全 10 类目 selection。服务端回执：
+      `restoredCount=7178 / failedCount=0 / rejectedCount=0 / skippedCount=2`。
+      **两个障碍与解法**（详见 `research/luker-restore-blocker.md`）：
+      ① 文件字段名必须是 **`avatar`**（Luker 全局 multer 是 `.single('avatar')`），用 `file` 会得到
+      无信息的 HTTP 500；② 包内 `.git` 对象文件在目标侧带 `ReadOnly`（165 个只读项）导致
+      `EPERM` 中断 ⇒ 产包改用 **`gitMode: 'minimal'`**（剔除 `objects/**`，保留 config/HEAD/index/refs）。
+- [x] **3.4** 对 Dev Luker 跑 `diff-report.cjs` → **AC-2 达成**：
+      **T1 覆盖率 100.000%（7180/7180）**、**T2b 6492→6492 被删 0（零删除）**、退出码 0；
+      T3 目标角色卡 **431**（包 430）/ 聊天 **1220**（包 1029）⇒ **超集**，符合 U-3。
+      单列项（不计入判定，均有依据）：T1b 合成元数据 1 条（宿主按设计跳过）、
+      T2c 宿主自行轮换的 `backups/` 1 条（U-4 本就不在同步范围）。
 - [ ] **3.5** `import-st.cjs` 同步 **Dev ST :8001**（按 2.3 的路径）。
 - [ ] **3.6** 对 Dev ST 跑 `diff-report.cjs` → AC-2 过。
 - [ ] **3.7** 同步 **Real Luker :8004**（同 3.3）→ `diff-report` → AC-2 过。
