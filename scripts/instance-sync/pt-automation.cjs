@@ -26,6 +26,8 @@ const path = require('path');
 
 const { loadPlaywright, warnOnVersionDrift } = require('../../e2e/lib/resolve-playwright.cjs');
 const { getInstance } = require('../../e2e/lib/instances.cjs');
+// PT 数据计数装置抽到 lib（**唯一实现**，import-pt.cjs 共用；防两处口径漂移）
+const { countPtData } = require('./lib/pt-count.cjs');
 
 const PLUGIN_GIT_URL = 'https://github.com/jiozhaoyue/st-zip-converter';
 const SHOT_DIR = path.resolve(__dirname, '..', '..', 'test-results');
@@ -53,37 +55,8 @@ function parseArgs(argv) {
  * 注意：`indexedDB.databases()` 在部分实现里可能不返回**尚未打开**的库，
  * 故这里同时兜住 `open()` 失败的情形（返回 -1 而不是抛错），保证导入流程不被计数拖垮。
  */
-async function countPtData(page) {
-  return page.evaluate(async () => {
-    const names = (await indexedDB.databases()).map((d) => d.name).filter(Boolean);
-    const out = {};
-    for (const name of names) {
-      try {
-        const db = await new Promise((resolve, reject) => {
-          const req = indexedDB.open(name);
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
-        const counts = {};
-        for (const store of db.objectStoreNames) {
-          counts[store] = await new Promise((resolve) => {
-            try {
-              const tx = db.transaction(store, 'readonly');
-              const cr = tx.objectStore(store).count();
-              cr.onsuccess = () => resolve(cr.result);
-              cr.onerror = () => resolve(-1);
-            } catch { resolve(-1); }
-          });
-        }
-        out[name] = counts;
-        db.close();
-      } catch { out[name] = '（打不开）'; }
-    }
-    return out;
-  });
-}
-
-/** 打开 PT 并**有界等待**初始化完成（首屏「正在初始化…」时 DOM 是空壳） */async function openPt(pw, inst) {
+/** 打开 PT 并**有界等待**初始化完成（首屏「正在初始化…」时 DOM 是空壳） */
+async function openPt(pw, inst) {
   const ctx = await pw.chromium.launchPersistentContext(inst.profile, {
     ignoreHTTPSErrors: true,
     viewport: { width: 1440, height: 900 },
