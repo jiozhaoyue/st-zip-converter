@@ -35,15 +35,32 @@ function normalize(p) {
 }
 
 function parseArgs(argv) {
-  const out = { pack: '', target: '', unique: '', preManifest: '', out: '' };
+  const out = { pack: '', target: '', unique: '', preManifest: '', out: '', extraRoot: '' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--pack') out.pack = argv[++i] || '';
     else if (argv[i] === '--target') out.target = argv[++i] || '';
     else if (argv[i] === '--unique-manifest') out.unique = argv[++i] || '';
     else if (argv[i] === '--pre-manifest') out.preManifest = argv[++i] || '';
+    else if (argv[i] === '--extra-root') out.extraRoot = argv[++i] || '';
     else if (argv[i] === '--out') out.out = argv[++i] || '';
   }
   return out;
+}
+
+/**
+ * 解析 `--extra-root`：`<绝对路径>:<条目前缀>`（Windows 盘符里的 `:` 需用最后一个 `:` 切分）。
+ *
+ * 用途：ST 的 `extensions/` **不落在用户数据目录下** —— 它的原生位置是
+ * `<inst>/public/scripts/extensions/third-party/`。若只扫 `userDir`，那 5204 条会被判「缺失」，
+ * 覆盖率被误报成 22%（2026-09-26 实测）。加上额外根后按 `extensions/<rel>` 归一，才与实际一致。
+ *
+ * @returns {{root:string, prefix:string}|null}
+ */
+function parseExtraRoot(spec) {
+  if (!spec) return null;
+  const idx = spec.lastIndexOf(':');
+  if (idx <= 1) return null; // 无前缀或盘符解析失败
+  return { root: spec.slice(0, idx), prefix: spec.slice(idx + 1).replace(/\/+$/, '') };
 }
 
 /**
@@ -139,6 +156,20 @@ function categorize(names) {
     packEntries(path.resolve(args.pack)),
     walkTarget(targetRoot),
   ]);
+
+  // 额外扫描根：把落在**用户数据目录之外**的类目并入目标文件集。
+  // ST 的 `extensions/` 就是一例 —— 它的原生位置是
+  // `<inst>/public/scripts/extensions/third-party/`，不属于 `userDir`。
+  const extra = parseExtraRoot(args.extraRoot);
+  if (extra) {
+    if (fs.existsSync(extra.root)) {
+      const ex = await walkTarget(extra.root);
+      for (const f of ex.files) target.files.add(`${extra.prefix}/${f}`);
+      console.log(`[额外根] ${extra.root} → 以 ${extra.prefix}/ 前缀并入 ${ex.files.size} 条`);
+    } else {
+      console.log(`[额外根] 跳过（不存在）：${extra.root}`);
+    }
+  }
 
   const packSet = new Set(entries);
   const missingAll = [...packSet].filter((n) => !target.files.has(n));
