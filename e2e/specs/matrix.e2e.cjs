@@ -391,9 +391,10 @@ module.exports = {
     // ⚠️ 喂入 ST 布局包后插件会**自动把 target 切成 `l`**（`index.js:1475`
     //   `if (item.detection.layout === 'st') targetSelect.value = 'l'`），
     //   故必须**显式切回 `native`** 才拿得到 native 分支的真实读数
-    //   （否则拿到的是 l 的读数，而下面那条「native 与 st 不同」的登记断言就名不副实了）。
+    //   （否则拿到的是 l 的读数，而下面那条「native 与显式布局码一致」的断言就名不副实了）。
     await page.selectOption('#target-select', 'native');
-    await waitForPlanBar(page, /预计产物[:：]?\s*7\s*个文件/);
+    // 修 N-1 后 `native` 会归一到宿主的布局码，故与显式宿主目标**同形**（产物 8，含 1 个合成项）
+    await waitForPlanBar(page, /预计产物[:：]?\s*8\s*个文件/);
     const norm = await readPlanBar(page);
     t.log(`  · [target=native] ${norm.bar}`);
 
@@ -457,21 +458,23 @@ module.exports = {
         /丢弃\s*4/.test(p.bar), `实际="${p.bar}"`);
     }
 
-    // —— 【待裁决差异】native 与显式布局码的计划口径不一致 ——
-    // 实测：外部包路径上 `targetSelect` 保持 `native` 时，计划读数是「直通 7 / **无合成** / 产物 7」；
-    // 显式选 `st` 则是「合成 1 / 产物 8」。根源是 **`native` 没有走布局码归一**：
-    //   · 宿主拉取路径**有**归一 —— `index.js:193`
-    //     `const target = rawTarget === 'native' ? hostLayoutCode(host.platform || 'st') : rawTarget;`
-    //   · 外部包路径**没有** —— `refreshPlan`（index.js:631-641）与 `btnConvert`（index.js:1519-1520）
-    //     都直接取 `targetSelect.value`，于是字符串 `'native'` 直达计划器/转换器，
-    //     而 `plan-preview.js` 的合成分支只认 `TARGETS.L` / `TARGETS.ST`（:372 / :383）
-    //     ⇒ `native` **不匹配任何合成分支**。
-    // 在 ST 宿主上（源就是 ST 布局）直通恰好等价，用户看不出差别；
-    // 在 **Luker 宿主上选「宿主原生格式」**时，期望得到 Luker 布局包，按此口径却会得到**原样直通**。
-    // ⇒ 这**疑似产品缺陷**，按本任务 Out of Scope「缺陷只登记、当轮不修」，此处只**钉住差异**：
-    // 将来若把 `native` 归一补齐，这条断言会报红，提示把期望值改成「两者一致」。
-    t.ok('M-3 差异登记：`native` 与显式 `st` 的计划读数**不相等**（疑似归一缺失，待裁决）',
-      norm.bar !== planSt.bar, `native="${norm.bar}" st="${planSt.bar}"`);
+    // —— 【N-1 已修】`native` 的读数必须与**该宿主的显式布局码**一致 ——
+    // 修前（2026-09-26 本矩阵查出）：外部包路径上 `native` 未走归一 ——
+    // `refreshPlan` / `btnConvert` 直接把字符串 `'native'` 交给计划器，
+    // 而 `plan-preview.js` 的合成分支只认 `TARGETS.L`(:372) / `TARGETS.ST`(:383)
+    // ⇒ `native` 不匹配任何分支，退化成**原样直通**。
+    // 后果不对称，故长期没被发现：ST 宿主上（源本就是 ST 布局）恰好等价；
+    // **Luker 宿主上选「宿主原生格式」会拿到未经布局转换的结果**。
+    // 修法：`resolveTargetLayout(rawValue, platform, fallback)`（`src/ui/host-bridge.js`）统一归一，
+    // `index.js` 的 5 处取目标全部改走它；单测 `test/target-resolve.test.js`（11 项，
+    // 并已**实测证明判别力**：临时去掉归一后 6 项转红）。
+    // 本断言在**两个实例上分别对照各自的布局码**：ST 宿主 ⇒ 与 `st` 一致；Luker 宿主 ⇒ 与 `l` 一致。
+    // 后者正是 N-1 的核心场景（Luker 上选「宿主原生格式」必须真的产出 Luker 布局）。
+    const nativeExpected = h.instanceId === 'dev-luker' ? planL.bar : planSt.bar;
+    const nativeExpectedName = h.instanceId === 'dev-luker' ? 'l' : 'st';
+    t.eq(`M-3【N-1 已修】native（宿主原生格式）读数 == 显式 ${nativeExpectedName} 的读数`,
+      norm.bar, nativeExpected,
+      `native="${norm.bar}" ${nativeExpectedName}="${nativeExpected}"`);
 
     // 动作预测 pill 与类目卡片（渲染链路的完整性）
     const widgets = await page.evaluate(() => ({

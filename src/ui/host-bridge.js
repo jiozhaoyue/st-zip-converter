@@ -197,6 +197,33 @@ export function hostLayoutCode(platform) {
   return platform;
 }
 
+/**
+ * 目标选择器的**原始值** → 转换器布局代码（`st|l|tt|pt`）。
+ *
+ * 目标下拉里的 `native` 是「**宿主原生格式**」的意思，不是一个布局码 ——
+ * 它的实际布局取决于**当前宿主**，故必须经 `hostLayoutCode()` 归一。
+ *
+ * 这个函数存在的理由是「**归一只能有一处**」：
+ * 修前只有宿主拉取路径与文件名预览做了归一，而 `refreshPlan` / `btnConvert` /
+ * `runBatchConversion` / 扩展清单的 `targetLayout` 都把字符串 `'native'`
+ * **直接交给了计划器与转换器**；计划器的合成分支只认 `TARGETS.L` / `TARGETS.ST`
+ * （`src/core/plan-preview.js`），`native` 不匹配任何分支 ⇒
+ * 「宿主原生格式」退化成**原样直通**：
+ * 在 ST 宿主上（源本就是 ST 布局）恰好等价、用户看不出差别；
+ * 在 **Luker 宿主上选「宿主原生格式」**就会拿到**未经布局转换**的结果。
+ *
+ * @param {string} [rawValue] 选择器原始值（可能是 `native`；空值走 fallback）
+ * @param {'st'|'luker'|'standalone'|string} [platform] 当前宿主平台码（`detectHost()` 的结果）
+ * @param {string} [fallback='l'] 选择器缺失/为空时的缺省布局码
+ * @returns {string} 布局码 `st|l|tt|pt`
+ */
+export function resolveTargetLayout(rawValue, platform, fallback = 'l') {
+  const v = String(rawValue ?? '').trim();
+  if (!v) return fallback;
+  if (v === 'native') return hostLayoutCode(platform || 'st');
+  return v;
+}
+
 export const FULL_SELECTION = Object.freeze({
   settings: true,
   secrets: true,

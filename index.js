@@ -60,6 +60,7 @@ import {
   mountSettingsDrawer,
   setupDrawerToggles,
   hostLayoutCode,
+  resolveTargetLayout,
   opfsHandleToFile,
   opfsTmpCleanup,
   supportsOpfs,
@@ -182,6 +183,30 @@ async function main(appRoot) {
   let lastBatchState = null;
   let currentBaseZip = null; // { name: string, blob: Blob, size: number }
 
+  /**
+   * 把目标选择器的**原始值**解析为**布局码**（`st|l|tt|pt`）。
+   *
+   * `native` 的语义是「当前宿主的原生格式」，必须经 `hostLayoutCode()` 归一
+   * （`luker → l`，见 `src/ui/host-bridge.js` 的 `hostLayoutCode`）。
+   *
+   * ⚠️ **归一必须在所有取目标处统一做** —— 这正是本函数存在的理由。
+   * 修前实际状况：只有「宿主拉取」路径（`handleHostExport` 内的
+   * `selectedTarget === 'native' ? hostLayoutCode(...)`）与**文件名预览**做了归一，
+   * 而 `refreshPlan` / `btnConvert` / `runBatchConversion` / 扩展清单的 `targetLayout`
+   * **把字符串 `'native'` 直接交给了计划器与转换器**。
+   * 计划器的合成分支只认 `TARGETS.L` / `TARGETS.ST`（`src/core/plan-preview.js`），
+   * `native` 不匹配任何分支 ⇒ 「宿主原生格式」退化成**原样直通**：
+   * 在 ST 宿主上（源本就是 ST 布局）恰好等价、用户看不出差别；
+   * 在 **Luker 宿主上选「宿主原生格式」**就会拿到**未经布局转换**的结果。
+   *
+   * @param {string} [raw] 选择器原始值（可能是 `native`）
+   * @param {string} [fallback='l'] 选择器缺失时的缺省布局码
+   * @returns {string} 布局码
+   */
+  function resolveTarget(raw, fallback = 'l') {
+    return resolveTargetLayout(raw, host.platform, fallback);
+  }
+
   // 实时生成文件名预览（统一目标格式选择器；native 选项经 hostLayoutCode 归一）
   function updateFilenamePreview() {
     const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
@@ -189,8 +214,7 @@ async function main(appRoot) {
     const extPreviewEl = document.getElementById('filename-preview');
     if (extPreviewEl) {
       const srcName = currentFile?.name || 'archive.zip';
-      const rawTarget = targetSelect ? targetSelect.value : 'pt';
-      const target = rawTarget === 'native' ? hostLayoutCode(host.platform || 'st') : rawTarget;
+      const target = resolveTarget(targetSelect ? targetSelect.value : 'pt', 'pt');
       const handle = currentFileHandle || currentHostHandle || 'default-user';
       extPreviewEl.textContent = previewFilename(template, {
         sourceName: srcName,
@@ -368,7 +392,7 @@ async function main(appRoot) {
   // 批量队列转换执行逻辑
   async function runBatchConversion(sourceRecords) {
     if (!sourceRecords || sourceRecords.length === 0) return;
-    const target = targetSelect ? targetSelect.value : 'pt';
+    const target = resolveTarget(targetSelect ? targetSelect.value : 'pt', 'pt');
     const totalCount = sourceRecords.length;
     workbenchBusy = true;
     applyActionAvailability();
@@ -547,7 +571,7 @@ async function main(appRoot) {
     exportQueue.enqueue({
       name: `extensions-manifest-${stamp}.json`,
       blob,
-      targetLayout: targetSelect ? targetSelect.value : '',
+      targetLayout: resolveTarget(targetSelect ? targetSelect.value : '', ''),
       origin: 'converted',
       ephemeral: true,
     });
@@ -635,7 +659,7 @@ async function main(appRoot) {
     isPlanning = true;
 
     try {
-      const target = targetSelect ? targetSelect.value : 'l';
+      const target = resolveTarget(targetSelect ? targetSelect.value : 'l');
       const selection = getSelectionState();
       const excludedPaths = getExcludedPaths();
       const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : false;
@@ -1518,7 +1542,7 @@ async function main(appRoot) {
   // 9. 开始转换外部 Zip
   btnConvert.addEventListener('click', async () => {
     if (!currentFile) return;
-    const target = targetSelect.value;
+    const target = resolveTarget(targetSelect.value);
     const selection = getSelectionState();
     const excludedPaths = getExcludedPaths();
     const includeBackups = includeBackupsCheck ? includeBackupsCheck.checked : false;
