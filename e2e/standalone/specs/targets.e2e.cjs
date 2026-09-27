@@ -194,6 +194,46 @@ module.exports = {
     t.ok('T-full.6 完整包含密钥（secrets 任何方向不剥离 —— 既有硬性约定）',
       whole.names.includes('secrets.json'), JSON.stringify(whole.names.slice(0, 10)));
 
+    // ============ ②b 预设「安全脱敏」（隐私向）：**产物里真的没有密钥与聊天** ============
+    await page.click('[data-preset="safe"]');
+    await page.waitForTimeout(250);
+    await page.selectOption('#target-select', 'st');
+    // **前置门**：先回读勾选态 —— 必须看到 chats / secrets 已**取消勾选**，否则后面的
+    // "产物里没有它们"就不是在验预设，而是在验别的（首版没有这一步，红得无法定性）
+    const preSel = await page.evaluate(() => {
+      const out = {};
+      for (const c of document.querySelectorAll('.category-card')) {
+        const box = c.querySelector('input[type="checkbox"]');
+        if (box && !box.disabled) out[c.dataset.category] = box.checked;
+      }
+      return out;
+    });
+    t.eq('T-safe.0 【前置门】预设「安全脱敏」已把 chats 取消勾选', preSel.chats, false,
+      JSON.stringify(preSel));
+    t.eq('T-safe.0b 【前置门】预设「安全脱敏」已把 secrets 取消勾选', preSel.secrets, false,
+      JSON.stringify(preSel));
+    const rowsBeforeSafe = await page.$$eval('.eq-name', (els) => els.length);
+    await page.click('#btn-convert');
+    const safeNames = await common.waitForQueue(page, rowsBeforeSafe + 1);
+    t.eq('T-safe.0c 新产物确实追加在队尾（不是把旧行当成新产物）',
+      (safeNames || []).length, rowsBeforeSafe + 1, JSON.stringify(safeNames));
+    t.ok('T-safe.1 安全脱敏预设转换完成', Array.isArray(safeNames) && safeNames.length >= rowIndex + 1,
+      JSON.stringify(safeNames));
+    const safeOut = await common.downloadNthRow(page, rowsBeforeSafe, ctx.fixtureDir, 'preset-safe.zip');
+    const safe = await common.readZip(safeOut);
+    t.log(`  · 安全脱敏产物：${JSON.stringify(safe.names)}`);
+    rowIndex += 1;
+    t.ge('T-safe.2 产物非空（前置门）', safe.names.length, 1, `entries=${safe.names.length}`);
+    t.ok('T-safe.3 安全脱敏**不含密钥**（secrets.json 不在产物里 —— 这是该预设的全部意义）',
+      !safe.names.includes('secrets.json'),
+      JSON.stringify(safe.names.filter((n) => n.includes('secret'))));
+    t.ok('T-safe.4 安全脱敏**不含聊天记录**（chats/ 不在产物里 —— 隐私向）',
+      !safe.names.some((n) => n.startsWith('chats/') || n.includes('/chats/')),
+      JSON.stringify(safe.names.filter((n) => n.includes('chats'))));
+    t.ok('T-safe.5 角色卡与系统设置照常在场（"脱敏"不是"清空"）',
+      safe.names.some((n) => n.startsWith('characters/')) && safe.names.includes('settings.json'),
+      JSON.stringify(safe.names.slice(0, 8)));
+
     t.eq('Z1 全流程零未捕获页面异常', rec.pageErrors.length, 0, JSON.stringify(rec.pageErrors.slice(0, 2)));
   },
 };
