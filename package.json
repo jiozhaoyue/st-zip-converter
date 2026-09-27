@@ -23,6 +23,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "e2e": "node e2e/run.cjs",
+    "e2e:web": "node e2e/standalone/run.cjs",
     "check:css-scope": "node scripts/css-scope.js",
     "check:dom-injection": "node scripts/dom-injection-guard.js",
     "check:template-source": "node scripts/single-template-source.js",
