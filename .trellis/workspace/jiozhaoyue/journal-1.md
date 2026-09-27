@@ -1903,3 +1903,17 @@ Worker 生命周期 5）占 16 个 spec；实例侧 冒烟 36/36、矩阵 dev-lu
 **留给下一位的三件事**：① `resume-checkpoint-invariant.md` 那处静默数据损失待裁决修法；
 ② 供给侧 `ChatFilesysApi` 待实现（指引已备好）；③ dev-st 上的 ChatFilesys 弹窗若仍在，
 矩阵仍会被它拦 —— 要么静音它、要么让矩阵只跑 dev-luker。
+
+### 十、07:0x 前的最后一段：一个可选的夹层能力 + 一处未竟
+
+**给共享运行器补了 `--instance <id>`**（修我自己踩过的脚枪）：`--url` 会**同时覆盖该 spec 的每一个实例**
+⇒ 声明 `['dev-st','dev-luker']` 的 spec 用 `--url` 指向 A 时，B 那一轮变成"拿 A 的页面满足 B 的宿主名断言"
+⇒ 报出一堆像产品问题的红（我今晚误判过一次）。现在：`--instance` 只跑声明过的某一个、
+未声明则**明确报错**；`--url` 多实例时打印显式告警。
+
+**一处未竟**：想让 dev-st 的矩阵不再被 ChatFilesys 的「入库提醒」拦（已按元素级定位：
+`chatfilesys-ip-mute-key` / `chatfilesys-ip-mute-all`），试了两次只读探针都没能稳定复现该弹窗
+（PT/dev-st 实例当前都加载缓慢，探针 60 s 内没等到），而它的操作控件是**非标准结构**
+（弹窗内只有两个 `<input>` 复选框，没有 `<button>`）⇒ 没有再往下做。
+**处置建议留给其 owner**：要么在 dev-st 上静音该提醒（那会改动它自己的持久设置、可能影响
+它的 `test_import_prompt.py`），要么让它自己的用例去 dismiss；两侧都不该由本仓代劳。
