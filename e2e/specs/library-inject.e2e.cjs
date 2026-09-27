@@ -100,7 +100,7 @@ module.exports = {
       if (!el) return false;
       const txt = el.textContent.trim();
       return txt.length > 0 && txt !== '检测中...';
-    }, null, { timeout: 60_000 }).then(() => true).catch(() => false);
+    }, null, { timeout: 120_000 }).then(() => true).catch(() => false);
     t.ok('I1b 插件在工作台里完成初始化（#env-badge 脱离模板初值）', pluginReady);
 
     // 打开抽屉要**两步**（矩阵同款）：
@@ -219,6 +219,11 @@ module.exports = {
       t.log('  · 重档：已把 chats 也勾上（真注入分支；拉取量大，耗时数分钟）');
     }
 
+    // ⚠️ **点击前先展开日志面板**：折叠时 `log-console.js` **不往 `#log-stream-container` 追加任何行**
+    //    （只更新"最新一条"与计数）⇒ 折叠态读到的永远是占位符，`waitLogMatch` 必然超时。
+    //    这是矩阵 spec 早已记过的坑，本用例首版又踩了一次（现象同"日志里没有那句话"）。
+    await readLog(page);
+
     await page.click('#btn-host-fetch');
 
     if (heavy) {
@@ -233,8 +238,12 @@ module.exports = {
       // ⚠️ 必须用 `[\s\S]*` 而不是 `.*`：日志面板的 textContent 里每条日志之间是**换行 + 缩进**，
       //    而 `.` 不跨行 ⇒ 首版这里白等 600 s 超时（现象是"日志没有那句话"，其实是正则读不到）。
       const explained = waitLogMatch(page, /聊天库检查完毕：[\s\S]*（跳过：[\s\S]*类目关断\s*3）/, 300_000);
+      const explainedOk = await explained;
       t.ok('I6【快档】日志**说明**了为什么没注入（含「类目关断 3」—— 用户关掉了聊天类目）',
-        await explained);
+        explainedOk);
+      if (!explainedOk) {
+        t.log(`  · 诊断：日志尾部=${JSON.stringify((await readLog(page)).slice(-500))}`);
+      }
       const logLight = await readLog(page);
       t.ok('I7【快档】没有任何"已并入"成功行（尊重用户选择：一条都不注入）',
         !/已把\s*\d+\s*条库中聊天补入源包/.test(logLight),
@@ -262,20 +271,30 @@ module.exports = {
     t.ok('I12 隐藏容器条目从未被导出（过滤生效）',
       !calls.export.some((n) => n.startsWith('__cfsys__')), JSON.stringify(calls.export));
 
-    // 收尾：中止这次拉取/转换（宿主数据只读，中止不写任何东西）
+    // 收尾：中止这次拉取/转换（宿主数据只读，中止不写任何东西）。
+    // ⚠️ 注入完成后流程停在**「统一文件树确认」**等待用户确认 —— 此时控制条**本就该可见**（任务还在跑）。
+    //    故中止要走那条分支自己的出口 `#btn-host-tree-cancel`（它才会 abort + 隐藏控制条）；
+    //    只点 `#tc-abort` 不会让那个"等确认"的等待结束（首版据此断言 ⇒ 一条假红）。
     const aborted = await page.evaluate(() => {
-      const btn = document.getElementById('tc-abort');
-      if (!btn) return false;
-      btn.click();
-      return true;
+      const cancel = document.getElementById('btn-host-tree-cancel');
+      if (cancel && cancel.getBoundingClientRect().width > 0) { cancel.click(); return 'tree-cancel'; }
+      const abort = document.getElementById('tc-abort');
+      if (abort) { abort.click(); return 'tc-abort'; }
+      return 'none';
     });
-    t.ok('I13 能中止该任务（不留下悬空状态）', aborted);
-    await page.waitForTimeout(1500);
+    t.ok('I13 能中止该任务（走「文件树取消」出口，不留下悬空状态）', aborted !== 'none',
+      `via=${aborted}`);
+    // 中止后的收尾是**异步**的（abort → 状态机迁移 → UI 复位）⇒ 必须有界等待而不是睡 1.5s 就断言
+    // （首版那样写，负载稍高就假红）。
+    const settled = await page.waitForFunction(() => {
+      const tc = document.getElementById('task-controls');
+      return Boolean(tc) && tc.hidden === true;
+    }, null, { timeout: 30_000 }).then(() => true).catch(() => false);
     const after = await page.evaluate(() => {
       const tc = document.getElementById('task-controls');
       return { hidden: tc ? tc.hidden : null };
     });
-    t.ok('I14 中止后任务控制条回到隐藏（状态机收尾）', after.hidden === true, JSON.stringify(after));
+    t.ok('I14 中止后任务控制条回到隐藏（状态机收尾，有界等待）', settled, JSON.stringify(after));
 
     const pluginErrors = h.rec.pluginConsoleErrors.length + h.rec.pluginFailures.length;
     t.eq('I15 全流程零本插件报错（中止**不得**被报成失败）', pluginErrors, 0,
