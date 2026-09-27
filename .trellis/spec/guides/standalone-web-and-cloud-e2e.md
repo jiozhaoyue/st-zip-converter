@@ -202,12 +202,14 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 > 首版就是这么错的（66 MB 用例量出 12 MB 包的耗时，读数"308 MB/s"一眼假）。
 > 现每次测量另开一个浏览器上下文（`measureFresh`）。
 
-当前断言总数：**266 项**（2026-09-28 实测全绿：workbench 42 · targets 51 · perf 21 · batch 18 ·
-chat-store-module 17 · flows 16 · pause-resume 16 · stash 15 · concurrency 13 · library-export 13 ·
-action-filter 12 · controls 16 · exclude 15 · split 10 · file-protocol 6）。
+当前断言总数：**281 项**（2026-09-28 实测全绿，且**连续两轮**同读数）：
+`targets` 51 · `workbench` 42 · `perf` 21 · `batch` 18 · `chat-store-module` 17 · `controls` 16 · `flows` 16 · `pause-resume` 16 · `exclude` 15 · `stash` 15 · `concurrency` 13 · `library-export` 13 · `action-filter` 12 · `split` 10 · `file-protocol` 6。
 
-未覆盖（登记，勿当成已覆盖）：`file://` 双击形态、插件模态态、Authority 增强层降级、
-多页签并发、超大批次（GB 级）、**宿主拉取路径的注入接线**（需真拉 1.5 GB 实例数据，代价过高）。
+未覆盖（登记，勿当成已覆盖 —— `file://` 双击形态与多页签并发**已在 2026-09-28 补上**）：
+**插件模态态**（只覆盖了抽屉态与独立态）· **Authority 增强层降级**（独立形态下 SDK 缺席，
+主路径不受影响这一点是被"全部用例都在无 SDK 环境跑通"隐式覆盖的，没有显式断言）·
+**恢复/写回宿主与增量补丁**（这三条只在宿主态存在，独立形态走不到）·
+**超大批次（GB 级）**（当前最大实测 66 MB）· **宿主拉取路径的注入接线**（需真拉 1.5 GB 实例数据，代价过高）。
 
 ## 6 运行
 
