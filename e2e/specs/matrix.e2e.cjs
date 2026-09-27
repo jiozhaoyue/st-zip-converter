@@ -33,6 +33,9 @@ const DRAWER_ID = 'st_zip_converter_settings';
 
 /** 现场生成夹具（进程内缓存，多个 spec 共用） */
 let fixturesPromise = null;
+/** 暂停窗口夹具的文件名（改名即可让本地缓存失效 —— 见 ensurePauseFixture 的事故记录） */
+const PAUSE_FIXTURE = 'fixture-pause-many-st.zip';
+
 function ensureFixtures() {
   if (!fixturesPromise) {
     fs.mkdirSync(FIXTURE_DIR, { recursive: true });
@@ -119,78 +122,171 @@ async function readPlanBar(page) {
 }
 
 /**
+ * 打开**宿主扩展抽屉**（`#extensions-settings-button`），不依赖聊天区消息。
+ *
+ * 三条路径，按「宿主原生程度」降序；**①永远在**，故优先：
+ *
+ *   ① `#extensions-settings-button > .drawer-toggle` —— 宿主 `public/index.html:5750`
+ *      的**静态** `.drawer`（顶栏那个方块图标，实测 36×32 可见），
+ *      `public/script.js:12150` 对它有**直接绑定**：`$('.drawer-toggle').on('click', doNavbarIconClick)`。
+ *      ⇒ 与聊天状态**无关**，什么时候都在、都能点。
+ *   ② `.drawer-opener[data-target=<id>]` —— 语义与①完全相同
+ *      （`public/script.js:10935 doDrawerOpenClick` 就是「取 `data-target` → 找 `#<id> .drawer-toggle` → 点它」），
+ *      但它**只出现在聊天区的系统消息里**：宿主 `templates/welcome.html:49` /
+ *      `welcomePrompt.html:10` 各有一个 `data-target="extensions-settings-button"` 的按钮。
+ *      ⚠️ **它会被消费掉**：实测 `resetWorkspace()` 重载后聊天区可能一条消息都没有
+ *      （`#chat .mes` = 0 ⇒ 全页 `.drawer-opener` = 0 ⇒ 旧版此处整段 fail）。
+ *      另有宿主扩展菜单项 `.drawer-opener` 形态的候选（文案跨宿主不同：
+ *      ST「扩展程序」、Luker「扩展」⇒ 只能按 class + 文字含「扩展」定位）。
+ *   ③ 兜底：任意 `[id*=extension].drawer`。
+ *
+ * ⚠️ 判可见**不能用 `offsetParent`**：宿主抽屉/菜单是 `position:fixed`，
+ * fixed 元素的 `offsetParent` 恒为 `null` ⇒ 会把可见按钮判成不可见（实测踩过）。
+ *
+ * @returns {Promise<{ok:boolean, via:string, target:string, why?:string}>}
+ */
+async function openHostExtensionsDrawer(page) {
+  const res = await page.evaluate(() => {
+    const sized = (e) => {
+      const r = e.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    /** 打开 `#<id>` 这个抽屉：已开则直接成功，否则点它自己的 `.drawer-toggle` */
+    const openOf = (id) => {
+      const el = document.getElementById(id);
+      if (!el) return null;
+      const content = el.querySelector('.drawer-content');
+      if (content && getComputedStyle(content).display !== 'none') {
+        return { ok: true, via: 'already-open', target: id, why: '' };
+      }
+      const toggle = el.querySelector('.drawer-toggle');
+      if (!toggle) return null;
+      toggle.click();
+      return { ok: true, via: 'drawer-toggle', target: id, why: 'clicked' };
+    };
+
+    // ① 宿主静态抽屉（ST 固定 id；其他宿主经 ② 推 id）
+    const found = openOf('extensions-settings-button');
+    if (found) return found;
+
+    // ② `.drawer-opener`：取其 data-target 推 id，仍走 `.drawer-toggle`（宿主原生语义）
+    const openers = Array.from(document.querySelectorAll('.drawer-opener'));
+    const pref = openers.find((e) => /扩展/.test(e.textContent || '')) || openers[0];
+    if (pref) {
+      const id = pref.getAttribute('data-target');
+      const viaTarget = id ? openOf(id) : null;
+      if (viaTarget) return { ...viaTarget, via: 'drawer-opener-target' };
+      if (sized(pref)) {
+        pref.click();
+        return { ok: true, via: 'drawer-opener-click', target: id || '', why: 'clicked' };
+      }
+    }
+
+    // ③ 兜底
+    const cand = Array.from(document.querySelectorAll('[id*="extension"]'))
+      .filter((e) => e.classList.contains('drawer') && e.querySelector('.drawer-toggle'));
+    const viaFallback = cand.length ? openOf(cand[0].id) : null;
+    if (viaFallback) return { ...viaFallback, via: 'fallback-drawer' };
+
+    return {
+      ok: false, via: 'none', target: '', why: 'not-found',
+      diag: {
+        openerCount: openers.length,
+        extDrawerIds: Array.from(document.querySelectorAll('[id*="extension"]')).map((e) => e.id).slice(0, 8),
+        chatMesCount: (document.getElementById('chat') || { querySelectorAll: () => [] }).querySelectorAll('.mes').length,
+      },
+    };
+  }).catch((e) => ({ ok: false, via: 'error', target: '', why: e.message.slice(0, 80) }));
+
+  // 有界等待：抽屉内容拿到真实尺寸（宿主抽屉是异步滑出的）
+  if (res.ok && res.via !== 'already-open') {
+    try {
+      await page.waitForFunction((id) => {
+        const el = id ? document.getElementById(id) : null;
+        const content = el ? el.querySelector('.drawer-content') : null;
+        return Boolean(content) && content.getBoundingClientRect().width > 0;
+      }, res.target, { timeout: 15_000 });
+    } catch { /* 尺寸验收由 openWorkbench 的可见性门负责 */ }
+  }
+  return res;
+}
+
+/**
+ * 读插件日志面板的文本（**先展开再读**）。
+ *
+ * ⚠️ **必须展开**：`src/ui/log-console.js:262` 在面板折叠时直接
+ * `return`（`if (!isExpanded || !streamContainer) return;`），**不往
+ * `#log-stream-container` 追加任何行**，只更新「最新一条」与徽标计数。
+ * 于是折叠态读到的是初始占位符「暂无日志记录」—— 实测把它误判成
+ * 「续传没有跳过条目」（假红），而真实日志一条不少地躺在 logger 缓冲里。
+ * 展开是**真实用户动作**（不展开本来也看不见日志），故此处点 `#btn-toggle-log`。
+ *
+ * @returns {Promise<string>} `#log-stream-container` 的全文
+ */
+async function readLogText(page) {
+  await page.evaluate(() => {
+    const body = document.getElementById('log-console-body');
+    if (body && getComputedStyle(body).display === 'none') {
+      const btn = document.getElementById('btn-toggle-log');
+      if (btn) btn.click();
+    }
+  });
+  await page.waitForTimeout(300);
+  return page.evaluate(() => {
+    const el = document.getElementById('log-stream-container');
+    return el ? el.textContent : '';
+  });
+}
+
+/**
  * 按**真实用户路径**打开插件工作台，并确认它真的可见。
  *
- * 路径（两宿主共通，2026-09-26 实地探明）：
- *   ① 点宿主顶栏的 `#extensionsMenuButton`（魔法棒图标）→ 菜单弹出
- *   ② 点菜单里带 `.drawer-opener` 的项 → `#rm_extensions_block` 由 `none` 变 `block`
- *      ⚠️ 文案**跨宿主不同**：ST 是「扩展程序」、Luker 是「扩展」⇒ 只能按 class 定位，
- *      按文字定位会在 Luker 上静默失效（实测 `n:0` 匹配不到）。
- *      ⚠️ class 名以**完整串**为准：`.drawer-opener` 的后缀是 `-opener`，
- *      先前一次探针用 `slice(0,40)` 打印 class，恰好把它截成 `.drawer-open`，
- *      我据此写了错选择器、两实例全红 —— **截断的输出会制造假事实**，
- *      dump 时必须打印完整 class（或明确标注截断长度）。
- *      ⚠️ 判可见**不能用 `offsetParent`**：宿主菜单是 `position:fixed`，
- *      fixed 元素的 `offsetParent` 恒为 `null` ⇒ 会把可见按钮判成不可见（实测踩过）。
- *   ③ 展开插件自己的 `#st_zip_converter_settings` inline-drawer
+ * 路径：
+ *   ① 打开**宿主扩展抽屉** `#extensions-settings-button`（见 `openHostExtensionsDrawer`）
+ *   ② 展开插件自己的 `#st_zip_converter_settings` inline-drawer
  *      —— **这一步不可省**：宿主的扩展抽屉打开 ≠ 插件抽屉展开，
  *      不展开则抽屉内所有控件 `getBoundingClientRect()` 仍是 0×0，
  *      Playwright 的 click / selectOption 会以「element is not visible」超时。
+ *   ③ 可见性验收：工作台第一个控件 `#target-select` 必须有真实尺寸
+ *      （这是后面所有真实交互的前提）。
  *
- * @returns {{hostDrawer:boolean, pluginDrawer:boolean, menuItem:string, visible:boolean, reason?:string}}
+ * ⚠️ **类名以完整串为准**：`.drawer-opener` 的后缀是 `-opener`，先前一次探针用
+ *    `slice(0,40)` 打印 class，恰好把它截成 `.drawer-open`，据此写了错选择器、两实例全红
+ *    —— **截断的输出会制造假事实**，dump 时必须打印完整 class（或明确标注截断长度）。
+ *
+ * @returns {{hostDrawer:boolean, pluginDrawer:boolean, menuItem:string, menuClick:string, via:string,
+ *            target:string, diag:object|null, visible:boolean, reason?:string}}
  */
 async function openWorkbench(page) {
-  const out = { hostDrawer: false, pluginDrawer: false, menuItem: '', visible: false };
+  const out = { hostDrawer: false, pluginDrawer: false, menuItem: '', menuClick: '', via: '', target: '', diag: null, visible: false };
 
-  // ① 宿主扩展菜单
-  const menuClick = await page.click('#extensionsMenuButton').then(() => 'ok').catch((e) => e.message.slice(0, 80));
-
-  // ② 菜单里的抽屉开关（.drawer-opener）；文案跨宿主不同，故按 class 找，
-  //    有多个候选时优先取文字含「扩展」的（仍不写死「扩展程序」四个字）。
-  let picked = null;
-  let diag = null;
-  for (let i = 0; i < 40 && !picked; i += 1) {
-    const probe = await page.evaluate(() => {
-      const sized = (e) => {
-        const r = e.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      };
-      const all = Array.from(document.querySelectorAll('.drawer-opener'));
-      const cands = all.filter(sized);
-      if (!cands.length) {
-        return {
-          clicked: false,
-          totalDrawerOptener: all.length,
-          sized: 0,
-          // 菜单是否弹出：数一数有尺寸的、且文字含「扩展」的菜单项
-          extish: Array.from(document.querySelectorAll('button, .menu_button, .list-group-item'))
-            .filter((e) => sized(e) && /扩展/.test(e.textContent || ''))
-            .map((e) => `${e.tagName} "${e.textContent.trim().slice(0, 16)}" .${(e.className || '').toString().slice(0, 50)}`)
-            .slice(0, 4),
-        };
-      }
-      const pref = cands.find((e) => /扩展/.test(e.textContent || ''));
-      const el = pref || cands[0];
-      el.click();
-      return { clicked: true, text: (el.textContent || '').trim().slice(0, 20) };
-    }).catch((e) => ({ clicked: false, error: e.message.slice(0, 80) }));
-    if (probe.clicked) picked = { text: probe.text };
-    else { diag = probe; await page.waitForTimeout(250); }
+  // ① 打开宿主扩展抽屉。**有界重试 2 次**：宿主抽屉是异步滑出的，
+  //    首轮页面刚 reload 时偶发「点到了但内容还没上尺寸」；重试代价极低。
+  let openedHost = null;
+  for (let attempt = 0; attempt < 2 && !out.hostDrawer; attempt += 1) {
+    openedHost = await openHostExtensionsDrawer(page);
+    out.via = openedHost.via;
+    out.target = openedHost.target;
+    if (openedHost.ok) {
+      try {
+        await page.waitForFunction((id) => {
+          const el = id ? document.getElementById(id) : null;
+          const content = el ? el.querySelector('.drawer-content') : null;
+          return Boolean(content) && getComputedStyle(content).display !== 'none' && content.getBoundingClientRect().width > 0;
+        }, openedHost.target, { timeout: 15_000 });
+        out.hostDrawer = true;
+      } catch { out.hostDrawer = false; }
+    } else {
+      out.diag = openedHost.diag || { why: openedHost.why };
+    }
+    if (!out.hostDrawer) await page.waitForTimeout(400);
   }
-  out.menuItem = picked ? picked.text : '';
-  out.menuClick = menuClick;
-  out.diag = diag;
+  out.menuItem = out.via === 'drawer-opener-target' || out.via === 'drawer-opener-click'
+    ? `${out.via}(${out.target || '—'})`
+    : out.via;
+  out.menuClick = openedHost && openedHost.why ? openedHost.why : '';
 
-  // 宿主抽屉容器真的打开了（有界等待，扩展面板是异步滑出的）
-  try {
-    await page.waitForFunction(() => {
-      const b = document.getElementById('rm_extensions_block');
-      return Boolean(b) && getComputedStyle(b).display !== 'none';
-    }, null, { timeout: 15_000 });
-    out.hostDrawer = true;
-  } catch { out.hostDrawer = false; }
-
-  // ③ 插件自己的 inline-drawer
+  // ② 插件自己的 inline-drawer
   const plugin = await openDrawer(page);
   out.pluginDrawer = plugin.ok;
   if (!plugin.ok) out.reason = plugin.reason;
@@ -264,7 +360,7 @@ function detBytes(len, seed) {
  * 造「大 ST 布局包」：`chats/` 下 `count` 个 1 MB 高熵条目。
  * 缓存判据 = 存在且 ≥ `minBytes`（确定性内容 ⇒ 可复用、可重跑）。
  */
-async function ensureBigFixture(fileName, count, minBytes, seedPrefix) {
+async function ensureBigFixture(fileName, count, minBytes, seedPrefix, entryBytes = 1024 * 1024) {
   const out = path.join(FIXTURE_DIR, fileName);
   if (fs.existsSync(out) && fs.statSync(out).size >= minBytes) return out;
 
@@ -272,14 +368,13 @@ async function ensureBigFixture(fileName, count, minBytes, seedPrefix) {
   const ioUrl = pathToFileURL(path.resolve(__dirname, '../../src/core/zip-io.js')).href;
   const [{ stEntries }, { zipIo }] = await Promise.all([import(genUrl), import(ioUrl)]);
 
-  const MB = 1024 * 1024;
   const writer = await zipIo.createWriter(out);
   for (const [name, data] of stEntries()) await writer.add(name, data);
   for (let i = 0; i < count; i += 1) {
     // 每份用不同种子 ⇒ 内容互不相同（防按内容去重），且各自不可压缩
     await writer.add(
-      `chats/Fixture Character/${seedPrefix}-${String(i).padStart(3, '0')}.jsonl`,
-      detBytes(MB, `${seedPrefix}-${i}`),
+      `chats/Fixture Character/${seedPrefix}-${String(i).padStart(4, '0')}.jsonl`,
+      detBytes(entryBytes, `${seedPrefix}-${i}`),
     );
   }
   await writer.close();
@@ -304,15 +399,77 @@ async function ensureLargeFixture() {
 }
 
 /**
- * **暂停窗口夹具**（M-7b 用，2026-09-27 新增）
+ * **暂停窗口夹具**（M-7b 用，2026-09-27 新增；同日改为「多条目、少字节」）
  *
  * 为什么 6 MB 不够：M-7b 要验「转换中途点暂停 → 续传」，而 6 MB 的转换在**数百毫秒**内结束 ——
  * 等控制条出现的往返里转换就完了，pause 会点在已隐藏的按钮上（**假红或假绿**）。
- * ⇒ 造 ~48 MB / 48 个 1 MB 条目，转换需**数秒**，pause 有可靠窗口；
- * 且条目数多 ⇒ 断点清单里会攒下若干条已完成条目 ⇒ 续传时能真的跳过（`totals.resumed > 0`）。
+ *
+ * ⚠️ **为什么不用「48 × 1 MB」那个版本**（原实现，同日被替换）：暂停窗口靠的是
+ * **条目数**（每条目都要过 crc + 写盘 + 进度往返），**不是字节数**。而 48 MB 的体积会被
+ * **上传进持久化 profile 的 IndexedDB**，`resetWorkspace` 又只删 `active_session`、**不删文件**
+ * ⇒ 跨轮次累积几百 MB，页面加载时 `listStoredFiles()` 要读出全部记录，宿主 UI 慢到
+ * `openWorkbench` 的有界窗口之外（**实测第 5 轮 dev-st 的「首个」openWorkbench 即失败**：菜单项为空）。
+ * 现版 = **1500 × 3 KB ≈ 4.5 MB**：条目数主导耗时（转换仍需数秒），profile 负担降到 1/10。
+ * 配套 `pruneOwnFixtures()` 兜底清掉历史遗留的大夹具。
  */
 async function ensurePauseFixture() {
-  return ensureBigFixture('fixture-pause-st.zip', 48, 40 * 1024 * 1024, 'pausebulk');
+  return ensureBigFixture(PAUSE_FIXTURE, 1500, 3 * 1024 * 1024, 'pausebulk', 3 * 1024);
+}
+
+/**
+ * 清理**本 spec 自己**在过往轮次留下的夹具记录。
+ *
+ * 为什么必须做：E2E 用**持久化 profile**，而 `resetWorkspace` 只删 `workspace` 的
+ * `active_session`、**不删 `files`** ⇒ 本 spec 上传的夹具会跨轮次累积（见 `ensurePauseFixture`
+ * 里那段事故记录：48 MB × 若干轮 = 页面加载慢到 openWorkbench 失败）。
+ *
+ * 只删**本 spec 生成的**夹具（按名精确匹配，不碰别的记录），并且必须在
+ * `resetWorkspace` 的 reload **之前**调用 —— 让那次 reload 本身就是干净的。
+ * @returns {Promise<number>} 删除条数；-1 表示存储不可用（不阻断用例）
+ */
+async function pruneOwnFixtures(page) {
+  return page.evaluate(async (names) => new Promise((resolve) => {
+    let req;
+    try { req = window.indexedDB.open('st_zip_converter_db'); } catch { resolve(-1); return; }
+    req.onerror = () => resolve(-1);
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const tx = db.transaction('files', 'readwrite');
+        const store = tx.objectStore('files');
+        let removed = 0;
+        const cur = store.openCursor();
+        cur.onsuccess = () => {
+          const c = cur.result;
+          if (!c) return;
+          const rec = c.value || {};
+          if (names.includes(rec.name)) { c.delete(); removed += 1; }
+          c.continue();
+        };
+        tx.oncomplete = () => resolve(removed);
+        tx.onerror = () => resolve(-1);
+        tx.onabort = () => resolve(-1);
+      } catch { resolve(-1); }
+    };
+  }), [PAUSE_FIXTURE, 'fixture-pause-st.zip', 'fixture-large-st.zip']);
+}
+
+/**
+ * 程序化点击 `#task-controls` 里的按钮（`tc-pause` / `tc-resume` / `tc-abort` / `tc-discard`）。
+ *
+ * ⚠️ **不要用 `page.click`**：控制条会和 `#fold-filename` 等折叠面板**在几何上重叠**，
+ * Playwright 的 actionability 检查会因「另一个元素会收到这次点击」而**拒绝点击并超时 30s**
+ * （实测 dev-st：`<b>…</b> from <div id="fold-filename"> subtree intercepts pointer events`，
+ * 而按钮自身报 "visible, enabled and stable"）。
+ * 本段要验的是按钮**处理函数**的语义（pause/resume 的状态迁移），不是指针事件路由，
+ * 故程序化派发真实的 DOM click 事件即可（`element.click()` 走的是同一套监听器）。
+ */
+async function clickTaskControl(page, id) {
+  await page.evaluate((elId) => {
+    const btn = document.getElementById(elId);
+    if (!btn) throw new Error(`未找到 ${elId}`);
+    btn.click();
+  }, id);
 }
 
 module.exports = {
@@ -321,6 +478,12 @@ module.exports = {
 
   async run(t, h) {
     const { page } = h;
+
+    // —— 0. 自清理：先删掉本 spec 过往轮次留在 profile 里的大夹具（见 pruneOwnFixtures 注释）——
+    //    必须**先于** resetWorkspace 的 reload，让那次重载直接就是干净的。
+    const pruned = await pruneOwnFixtures(page);
+    t.ok('已清理本 spec 过往轮次留下的大夹具（防 profile 累积拖慢宿主 UI）', pruned >= 0,
+      `删除 ${pruned} 条`);
 
     // —— 0a. 先把工作台清回初态（持久化 profile 会恢复上一轮的源包/目标 ⇒ 不清则不可重跑） ——
     const reset = await resetWorkspace(page);
@@ -367,8 +530,8 @@ module.exports = {
 
     // ================= 按真实用户路径打开工作台 =================
     const opened = await openWorkbench(page);
-    t.ok('宿主扩展抽屉已打开（`.drawer-opener` 菜单项生效）', opened.hostDrawer,
-      `菜单项="${opened.menuItem}" 菜单点击=${opened.menuClick}`);
+    t.ok('宿主扩展抽屉已打开（宿主原生 `.drawer-toggle` / 回退 `.drawer-opener`）', opened.hostDrawer,
+      `路径=${opened.via} 目标=${opened.target} 点击=${opened.menuClick}`);
     if (!opened.hostDrawer) {
       t.log(`      ! 诊断：${JSON.stringify(opened.diag)}`);
     }
@@ -376,7 +539,7 @@ module.exports = {
       opened.reason || '');
     t.ok('工作台控件**真实可见**（target-select 有尺寸）—— 后续一切真实交互的前提',
       opened.visible);
-    t.log(`  · 打开路径：宿主菜单项「${opened.menuItem}」`);
+    t.log(`  · 打开路径：${opened.via} → ${opened.target}`);
 
     // ================= M-3 计划预览 =================
     // 喂 ST 布局迷你包 → 插件应产出计划并在类目面板渲染。
@@ -412,16 +575,26 @@ module.exports = {
     //   `if (item.detection.layout === 'st') targetSelect.value = 'l'`），
     //   故必须**显式切回 `native`** 才拿得到 native 分支的真实读数
     //   （否则拿到的是 l 的读数，而下面那条「native 与显式布局码一致」的断言就名不副实了）。
-    await page.selectOption('#target-select', 'native');
-    // 修 N-1 后 `native` 会归一到宿主的布局码，故与显式宿主目标**同形**（产物 8，含 1 个合成项）
-    await waitForPlanBar(page, /预计产物[:：]?\s*8\s*个文件/);
-    const norm = await readPlanBar(page);
-    t.log(`  · [target=native] ${norm.bar}`);
-
+    //
+    // ⚠️⚠️ **切目标必须先经过一个「读数必然不同」的中间态**（2026-09-27 实测踩坑）：
+    //    只 `selectOption` 之后按 `/预计产物 8 个文件/` 等待会**立刻返回陈旧读数** ——
+    //    `l` 与 `st` 两个目标的读数模式**完全相同**（都是「直通 7 合成 1 丢弃 4 产物 8」，
+    //    只有字节数不同：l=826.0 B / st=870.0 B），上一个状态的读数**本来就匹配**该模式。
+    //    实测后果：ST 宿主的 `native == 显式 st` 拿到的是**未刷新的 l 读数**（恒假），
+    //    而 Luker 宿主的同一条断言因为「陈旧值恰好等于期望值」（两者都是 l）**侥幸变绿**
+    //    —— 同一个 bug 同时制造假红与假绿，是最难查的一类。
+    //    修法：先切到 `tt`（跨布局 ⇒ 读数变为「路由 7 / 产物 7」，与两端都不同），
+    //    等它真的落地后再切目标值；此时目标模式只可能由**新计划**满足。
     const setTarget = async (value, pattern) => {
+      await page.selectOption('#target-select', 'tt');
+      await waitForPlanBar(page, /路由\s*7/);
       await page.selectOption('#target-select', value);
       return waitForPlanBar(page, pattern);
     };
+
+    await setTarget('native', /预计产物[:：]?\s*8\s*个文件/);
+    const norm = await readPlanBar(page);
+    t.log(`  · [target=native] ${norm.bar}`);
 
     // ===== 分支① 目标 = Luker（源 ST 布局 ⇒ 需合成 settings） =====
     const lReady = await setTarget('l', /预计产物[:：]?\s*8\s*个文件/);
@@ -819,6 +992,19 @@ module.exports = {
     //    （`index.js` 分卷分支末尾 `lastConvertedBlob = null; // 原始整包不再有任何消费方`）
     //    ⇒ 恢复入口应随之**重新隐藏**。这把 M-8 的「可见性由 hasArtifact 决定」钉成双向可判别，
     //    而不是「碰巧一直可见」。 ——
+    // ⚠️ **有界等待**：分卷分支里 `lastConvertedBlob = null` 与随后的
+    // `applyActionAvailability()` 都发生在把各分卷 `enqueue` **之后**，
+    // 而上面是在「队列数量增长」时就继续的 ⇒ 立即采样会有竞态。
+    let restoreHiddenAfter = false;
+    try {
+      await page.waitForFunction(() => {
+        const btn = document.getElementById('btn-restore-luker');
+        if (!btn) return true;
+        const r = btn.getBoundingClientRect();
+        return !(r.width > 0 && r.height > 0);
+      }, null, { timeout: 20_000 });
+      restoreHiddenAfter = true;
+    } catch { restoreHiddenAfter = false; }
     const restoreAfter = await page.evaluate(() => {
       const btn = document.getElementById('btn-restore-luker');
       if (!btn) return { present: false };
@@ -826,23 +1012,37 @@ module.exports = {
       return { present: true, visible: r.width > 0 && r.height > 0 };
     });
     t.ok('M-8 分卷接管后（lastConvertedBlob 置 null）恢复入口**重新隐藏** —— 可见性确实由产物决定',
-      !restoreAfter.present || !restoreAfter.visible, JSON.stringify(restoreAfter));
+      restoreHiddenAfter && (!restoreAfter.present || !restoreAfter.visible), JSON.stringify(restoreAfter));
 
     // —— 转换结束后控制条回到隐藏（`complete` → `taskControls.hide()`）——
     // ⚠️ 旧断言是「转换期间控制条**始终隐藏**（转换不进 TaskManager 的直接证据）」——
     //    R-16 修好后那句**变成假的**，此处随之反转为「结束后隐藏」。
-    t.ok('M-7 转换结束后控制条回到隐藏（`complete` → `taskControls.hide()`）',
-      await page.evaluate(() => {
+    // ⚠️ **有界等待，不要立即采样**：`taskManager.complete()` / `taskControls.hide()` 发生在
+    //    `exportQueue.enqueue()` **之后**（R-16 新增的两步），而 M-9 是在「队列出现新产物」时
+    //    继续执行的 ⇒ 立即采样会与这两步**竞态**（实测 Luker 轮偶发拿到 `hidden=false`）。
+    let tcHiddenAfterConvert = false;
+    try {
+      await page.waitForFunction(() => {
         const root = document.getElementById('task-controls');
         return Boolean(root) && root.hidden === true;
-      }));
+      }, null, { timeout: 20_000 });
+      tcHiddenAfterConvert = true;
+    } catch { tcHiddenAfterConvert = false; }
+    t.ok('M-7 转换结束后控制条回到隐藏（`complete` → `taskControls.hide()`）',
+      tcHiddenAfterConvert);
 
     // ============ M-7b 真实 pause → resume 续传（R-16 的核心验收面）============
-    // 用**暂停窗口夹具**（~48 MB / 48 条目）：6 MB 的转换在数百毫秒内结束，
-    // 等控制条出现的往返里就完了 ⇒ pause 会点在已隐藏的按钮上（**假红或假绿**）。
+    // 用**暂停窗口夹具**（`ensurePauseFixture`：1500 条 × 3 KB ≈ 4.5 MB）：
+    // 6 MB / 48 条目的旧版转换在数百毫秒内结束，等控制条出现的往返里就完了
+    // ⇒ pause 会点在已隐藏的按钮上（**假红或假绿**）。
+    // ⚠️ 暂停窗口靠的是**条目数**（每条目都要过 crc + 写盘 + 进度往返），**不是字节数**；
+    //    旧版 48 × 1 MB 的体积会压垮持久化 profile，已改成「多条目、少字节」
+    //    （原委见 `ensurePauseFixture` 的事故记录）。
+    //    故此处的阈值必须与 `ensurePauseFixture` 的 `minBytes`（3 MB）**同源**，
+    //    不得再写旧的 40 MB —— 那会让本断言在正确实现下**恒假**。
     const pausePath = await ensurePauseFixture();
-    t.ok('M-7b 暂停窗口夹具已生成（> 40 MB，确定性高熵 ⇒ 转换需数秒）',
-      fs.statSync(pausePath).size > 40 * 1024 * 1024,
+    t.ok('M-7b 暂停窗口夹具已生成（> 3 MB / 1500 条目，确定性高熵 ⇒ 转换需数秒）',
+      fs.statSync(pausePath).size > 3 * 1024 * 1024,
       `${(fs.statSync(pausePath).size / 1048576).toFixed(1)} MB`);
 
     // 换源包必须先清回初态（spec §11.2：持久化 profile 会恢复上一轮的源包，
@@ -871,6 +1071,7 @@ module.exports = {
     await page.waitForTimeout(400);
 
     await page.click('#btn-convert');
+    t.log('  · M-7b 已点转换，等待控制条出现...');
 
     // ① 转换期间控制条**可见**（转换确实注册了 TaskManager —— 旧实现此处恒隐藏）
     let tcRunning = false;
@@ -885,8 +1086,9 @@ module.exports = {
     } catch { tcRunning = false; }
     t.ok('M-7b 转换期间控制条**可见**（running 态 —— 转换已注册 TaskManager）', tcRunning);
 
+    t.log('  · M-7b 等待暂停后出现「继续」...');
     // ② 暂停 ⇒ 出现「继续」（running → paused）
-    await page.click('#tc-pause');
+    await clickTaskControl(page, 'tc-pause');
     let pausedVisible = false;
     try {
       await page.waitForFunction(() => {
@@ -899,14 +1101,15 @@ module.exports = {
     } catch { pausedVisible = false; }
     t.ok('M-7b 点暂停后出现「继续」按钮（控制条 running → paused）', pausedVisible);
 
+    t.log('  · M-7b 续传中，等待任务 complete...');
     // ③ 续传 ⇒ 跑完（complete → 控制条隐藏）
-    await page.click('#tc-resume');
+    await clickTaskControl(page, 'tc-resume');
     let resumeDone = false;
     try {
       await page.waitForFunction(() => {
         const root = document.getElementById('task-controls');
         return Boolean(root) && root.hidden === true;
-      }, null, { timeout: 300_000 });
+      }, null, { timeout: 180_000 });
       resumeDone = true;
     } catch { resumeDone = false; }
     t.ok('M-7b 续传跑完（控制条回到隐藏 = 任务 complete）', resumeDone);
@@ -914,10 +1117,7 @@ module.exports = {
     // ④ **续传命中可观测** —— 本任务新增的可观测面。
     //    真实字段是 `report.totals.resumed`（**不是** `resumedCount`，该字段从不存在），
     //    经 `resumedNote()` 渲染进成功日志，故可从日志 DOM 读到。
-    const logText = await page.evaluate(() => {
-      const mount = document.getElementById('log-console-mount');
-      return mount ? mount.textContent : '';
-    });
+    const logText = await readLogText(page);
     const resumedMatch = /沿用断点跳过\s*(\d+)\s*项/.exec(logText);
     t.log(`  · M-7b 日志尾部：${JSON.stringify(logText.slice(-240))}`);
     t.ok('M-7b 续传**真的跳过了条目**（日志含「沿用断点跳过 N 项」）', Boolean(resumedMatch),
@@ -940,22 +1140,43 @@ module.exports = {
     const mini = await ensureFixtures();
     const smallPath = mini['fixture-st.zip'];
 
-    const resetForBatch = await resetWorkspace(page);
-    const readyBatch = await waitForPluginReady(page);
-    const openedBatch = await openWorkbench(page);
-    t.ok('M-10 工作台已清回初态并重新就绪',
-      resetForBatch && readyBatch && openedBatch.visible, JSON.stringify(openedBatch));
+    // ⚠️ **不在这里清初态 / 重载**：M-7b 结束时工作台已开着、暂存区里已有大包。
+    // 批量**不需要**干净的暂存区 —— 按名定位要勾的两个源包即可，且失效检测按 `taskId` 计数
+    // （不依赖队列里有没有别的产物）。少一次 reload 就少一处「宿主抽屉偶发不出来」的窗口。
+    const openedBatch = await page.evaluate(() => {
+      const sel = document.getElementById('target-select');
+      if (!sel) return { visible: false, reason: '无 #target-select' };
+      const r = sel.getBoundingClientRect();
+      return { visible: r.width > 0 && r.height > 0 };
+    });
+    t.ok('M-10 工作台仍开着（复用 M-7b 的会话，不重载）', openedBatch.visible,
+      JSON.stringify(openedBatch));
 
-    await page.setInputFiles('#file-input', [smallPath, pausePath]);
-    let twoStashed = false;
-    try {
-      await page.waitForFunction(
-        () => document.querySelectorAll('#stash-list .stash-select-box').length >= 2,
-        null, { timeout: 60_000 },
-      );
-      twoStashed = true;
-    } catch { twoStashed = false; }
-    t.ok('M-10 暂存区有两个源包（小包 + 大包）', twoStashed);
+    // 按**名**核对暂存区（不用计数 —— 计数说不出缺了谁，失败时无法归因）
+    const stashNames = () => page.evaluate(() => Array.from(
+      document.querySelectorAll('#stash-list .archive-name')).map((e) => e.textContent.trim()));
+    const waitStashName = async (name) => {
+      try {
+        await page.waitForFunction((n) => Array.from(
+          document.querySelectorAll('#stash-list .archive-name'))
+          .some((e) => e.textContent.trim() === n), name, { timeout: 30_000 });
+        return true;
+      } catch { return false; }
+    };
+
+    // 大包在 M-7b 已入暂存区（`#file-input` 的处理是「总是入库，仅在尚无源包时采纳为当前源」），
+    // 小包在这里补传 —— 先按名判断，避免重复入库造出同名两条记录。
+    let names = await stashNames();
+    if (!names.includes('fixture-st.zip')) {
+      await page.setInputFiles('#file-input', smallPath);
+      await waitStashName('fixture-st.zip');
+    }
+    if (!names.includes(PAUSE_FIXTURE)) await waitStashName(PAUSE_FIXTURE);
+    names = await stashNames();
+    t.log(`  · M-10 暂存区（${names.length} 项）：${JSON.stringify(names.slice(-8))}`);
+    t.ok('M-10 暂存区含大包与小包（按名核对）',
+      names.includes('fixture-st.zip') && names.includes(PAUSE_FIXTURE),
+      JSON.stringify(names.slice(-8)));
 
     const idByName = (name) => page.evaluate((n) => {
       const rows = Array.from(document.querySelectorAll('#stash-list .eq-name-row'));
@@ -963,7 +1184,7 @@ module.exports = {
       return row ? (row.querySelector('.stash-select-box')?.dataset.id ?? null) : null;
     }, name);
     const smallId = await idByName('fixture-st.zip');
-    const bigId = await idByName('fixture-pause-st.zip');
+    const bigId = await idByName(PAUSE_FIXTURE);
     t.ok('M-10 两个源包都能按名定位到勾选框', Boolean(smallId) && Boolean(bigId),
       `small=${smallId} big=${bigId}`);
 
@@ -987,6 +1208,7 @@ module.exports = {
     await page.fill('#split-input', '0');
     await page.waitForTimeout(400);
 
+    t.log('  · M-10 点击「批量转换」...');
     const qBeforeBatch = (await queueNames()).length;
     await page.click('#stash-batch-bar button:has-text("批量转换")');
 
@@ -1004,6 +1226,7 @@ module.exports = {
     t.ok('M-10 批量期间控制条**可见**（批量转换已注册 TaskManager，不再是死代码路径）',
       batchTcRunning);
 
+    t.log('  · M-10 等待第 0 个子项完成...');
     // ② 等第 0 个子项完成（队列 +1）⇒ 此刻第 1 个子项正在跑 ⇒ 暂停
     let firstItemDone = false;
     try {
@@ -1015,7 +1238,7 @@ module.exports = {
     } catch { firstItemDone = false; }
     t.ok('M-10 批次第 0 个子项已完成（队列 +1）', firstItemDone);
 
-    await page.click('#tc-pause');
+    await clickTaskControl(page, 'tc-pause');
     let batchPaused = false;
     try {
       await page.waitForFunction(() => {
@@ -1028,13 +1251,14 @@ module.exports = {
     } catch { batchPaused = false; }
     t.ok('M-10b 批次中途可暂停（控制条 running → paused）', batchPaused);
 
-    await page.click('#tc-resume');
+    t.log('  · M-10b 批次续传中，等待任务 complete...');
+    await clickTaskControl(page, 'tc-resume');
     let batchResumed = false;
     try {
       await page.waitForFunction(() => {
         const root = document.getElementById('task-controls');
         return Boolean(root) && root.hidden === true;
-      }, null, { timeout: 300_000 });
+      }, null, { timeout: 180_000 });
       batchResumed = true;
     } catch { batchResumed = false; }
     t.ok('M-10b 批次续传跑完（控制条回到隐藏 = 任务 complete）', batchResumed);
@@ -1047,10 +1271,7 @@ module.exports = {
       `实际新增 ${batchNew} 份：${JSON.stringify(qAfterBatch.slice(qBeforeBatch))}`);
 
     // ④ 续传命中同样可观测（第 1 个子项在暂停前已完成的条目被跳过）
-    const batchLogText = await page.evaluate(() => {
-      const mount = document.getElementById('log-console-mount');
-      return mount ? mount.textContent : '';
-    });
+    const batchLogText = await readLogText(page);
     const batchResumedMatch = /沿用断点跳过\s*(\d+)\s*项/.exec(batchLogText);
     t.log(`  · M-10b 日志尾部：${JSON.stringify(batchLogText.slice(-240))}`);
     t.ok('M-10b 批次续传**真的跳过了条目**（日志含「沿用断点跳过 N 项」）',
