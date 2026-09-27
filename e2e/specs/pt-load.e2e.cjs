@@ -175,6 +175,94 @@ module.exports = {
         !names.some((n) => n.startsWith('data/')), JSON.stringify(names.slice(0, 4)));
     }
 
+    // ============ 追加：PT 上的**智能分卷**（第 4 宿主的第三条流程）============
+    // 分卷要真切得动，夹具必须够大（小夹具在毫秒内转完、切不出第二份）—— 复用独立形态
+    // 那套放大夹具（`test-results/fixtures-web/fixture-web-split-st.zip`，SHA-256 计数器模式、
+    // 不可压缩、确定性）。
+    const splitFixture = path.resolve(__dirname, '..', '..', 'test-results', 'fixtures-web',
+      'fixture-web-split-st.zip');
+    t.ok('P16 放大夹具存在（否则分卷这条无从验证）', fs.existsSync(splitFixture), splitFixture);
+
+    if (fs.existsSync(splitFixture)) {
+      // 换源包：**必须先清回无源包初态**（`#file-input` 只在尚无源包时采纳新文件 —— 本仓老坑）。
+      // ⚠️ 首版这里点了一个**并不存在**的 `#btn-clear-workspace`（`if (x) x.click()` 这种写法
+      //    在按钮不存在时**照样不报错**）⇒ 源包根本没换、分卷断言量的是旧包。改用矩阵的可靠做法：
+      //    删掉 IndexedDB 里的 `active_session` 记录再重载（重载后抽屉是关的 ⇒ 要重新两层打开）。
+      const cleared = await page.evaluate(() => new Promise((resolve) => {
+        let req;
+        try { req = indexedDB.open('st_zip_converter_db'); } catch { resolve(false); return; }
+        req.onerror = () => resolve(false);
+        req.onsuccess = () => {
+          try {
+            const db = req.result;
+            const tx = db.transaction('workspace', 'readwrite');
+            tx.objectStore('workspace').delete('active_session');
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => resolve(false);
+          } catch { resolve(false); }
+        };
+      }));
+      t.ok('P16b 已清掉工作区会话记录（换源包的前提）', cleared === true, `cleared=${cleared}`);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      // ⚠️ 重载会让 PT **重新初始化** ⇒ splash 再次出现并**拦全页指针事件**（点击会 30 s 超时）。
+      //    夹具的 `openInstance().goto()` 里有这层等待，但这里是手工 reload、绕过了它 ⇒ 补上。
+      const splashGone = await page.waitForFunction(() => {
+        const ds = Array.from(document.querySelectorAll('dialog[open]'));
+        return !ds.some((d) => d.querySelector('#loader') || /正在初始化/.test(d.textContent || ''));
+      }, null, { timeout: 90_000 }).then(() => true).catch(() => false);
+      t.ok('P16c 重载后等 PT 初始化完成（splash 关闭 —— 否则后续点击会被它拦）', splashGone);
+      // 重载后**重新两层打开**抽屉
+      await page.evaluate(() => {
+        const btn = document.querySelector('#extensions-settings-button .drawer-toggle')
+          || document.querySelector('.drawer-opener[data-target="extensions-settings-button"]');
+        if (btn) btn.click();
+      });
+      await page.waitForTimeout(1200);
+      await page.evaluate((id) => {
+        const drawer = document.getElementById(id);
+        const content = drawer && drawer.querySelector(':scope > .inline-drawer-content');
+        if (content) content.style.display = 'block';
+      }, DRAWER_ID);
+      await page.waitForTimeout(300);
+      await page.setInputFiles('#file-input', splitFixture);
+      const planReady2 = await page.waitForFunction(() => {
+        const bar = document.getElementById('plan-summary-bar');
+        return Boolean(bar) && getComputedStyle(bar).display !== 'none';
+      }, null, { timeout: 60_000 }).then(() => true).catch(() => false);
+      t.ok('P17 换源包后计划重算（放大夹具已采纳）', planReady2);
+
+      // 分卷阈值置 1 MB：`page.fill` **会静默不写入**（本仓老坑；PT 上实测又遇到一次）
+      // ⇒ 回读确认，失败则退回程序化赋值（与独立形态 `common.fillNumber` 同一手法）
+      const readSplit = () => page.$eval('#split-input', (el) => el.value).catch(() => null);
+      await page.fill('#split-input', '1').catch(() => {});
+      let applied = await readSplit();
+      if (applied !== '1') {
+        await page.evaluate(() => {
+          const el = document.getElementById('split-input');
+          if (!el) return;
+          el.value = '1';
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        applied = await readSplit();
+      }
+      t.eq('P18 分卷阈值已写入 1（回读确认；fill 静默失败时退回程序化赋值）', applied, '1');
+
+      const rowsBeforeSplit = await page.$$eval('.eq-name', (els) => els.length);
+      await page.click('#btn-convert');
+      const parts = await page.waitForFunction(
+        (n) => document.querySelectorAll('.eq-name').length >= n + 2, rowsBeforeSplit,
+        { timeout: 240_000 },
+      ).then(async () => page.$$eval('.eq-name', (els) => els.map((e) => e.textContent.trim())))
+        .catch(() => null);
+      t.ok('P19 PT 上分卷产出**多份**（≥ 2）',
+        Array.isArray(parts) && parts.length >= rowsBeforeSplit + 2, JSON.stringify(parts));
+      const newParts = (parts || []).slice(rowsBeforeSplit);
+      const nums = newParts.map((n) => (n.match(/part(\d+)/i) || [])[1]).filter(Boolean).map(Number);
+      t.ok('P20 分卷序号从 1 起连续（PT 上命名同样正确）',
+        nums.length === newParts.length && nums.every((v, i) => v === i + 1), JSON.stringify(nums));
+    }
+
     t.eq('P15 功能闭环后本插件仍零报错', h.rec.pluginConsoleErrors.length, 0,
       JSON.stringify(h.rec.pluginConsoleErrors.slice(0, 2)));
   },
