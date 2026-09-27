@@ -107,10 +107,22 @@ async function fillNumber(page, selector, value) {
 
 /** 点第一行的下载按钮并落盘，返回保存路径 */
 async function downloadFirstRow(page, dir, fileName) {
+  return downloadNthRow(page, 0, dir, fileName);
+}
+
+/**
+ * 点导出区**第 n 行**（0 起）的下载按钮并落盘。
+ *
+ * 连续做多次转换时**必须**指定行号：待导出区是累积的，永远点第一行会反复拿到同一份产物
+ * （这属于「读数与目标不是同一个东西」，本仓已有同类坑）。
+ * @param {number} n 行下标（0 = 第一行）
+ */
+async function downloadNthRow(page, n, dir, fileName) {
   const target = path.join(dir, fileName);
+  const rows = page.locator('.btn-archive-action.download');
   const dl = await Promise.all([
     page.waitForEvent('download', { timeout: 60_000 }),
-    page.click('.btn-archive-action.download'),
+    rows.nth(n).click(),
   ]).then(([d]) => d);
   await dl.saveAs(target);
   return target;
@@ -152,6 +164,7 @@ module.exports = {
   waitForQueue,
   fillNumber,
   downloadFirstRow,
+  downloadNthRow,
   readZip,
   buildZip,
   exists: fs.existsSync,

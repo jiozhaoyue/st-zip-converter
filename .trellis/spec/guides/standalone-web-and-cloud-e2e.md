@@ -99,6 +99,24 @@
 修法（未做）：按 `L1-MR-11` 惯例把 FA 落到 `src/vendor/fontawesome/` 本地副本，
 再用该读数的**归零**作为验收 —— 注意用户级全局规则 `nocdn` 明确要求零外部依赖。
 
+### 4.3 默认扩展模式是「轻量清单」⇒ 扩展实体代码**不在产物里**
+
+`workbench-template.js:176` 的 radio **默认选中 `manifest`**（轻量清单模式），该模式按设计
+「不打包扩展实体代码，但合成索引与安装脚本」（产物里能看到 `_extensions-index.json` /
+`_convert/INSTALL.md` / `_convert/extensions-manifest.json`，看不到 `extensions/<名>/`）。
+⇒ 任何「扩展落位」断言都必须**先把模式切到 `full`**，并把「默认值是什么」显式断言为**前提**
+（`targets.e2e.cjs` 的 T5/T10 就是干这个的；首版漏了这一步，直接吃到三条假红）。
+
+**切模式不能靠 `page.check()`**：该 radio 在折叠区里，可见性门会 30 s 超时，
+`check({ force: true })` 也点不动 ⇒ 走 DOM 事件（`el.checked = true` + `change` 事件），
+再**回读 `:checked` 确认真的切过去了**（动作方式不是判据，回读才是）。
+
+### 4.4 `targets.e2e.cjs` 的落位判据来源
+
+四目标的落位规则全部取自仓内权威文档 `tavern-datapack-formats.md` 的「包布局速查」，
+且只断言其中标注**〔仓内〕**的条：ST/L 摊平（L 另加根 `manifest.json`）、TT/PT 走
+`data/default-user/` + 扩展在 `data/extensions/third-party/` + PT 需**来源记录**。
+
 ## 5 覆盖范围（当前）
 
 | spec | 挂载点 | 覆盖 |
@@ -106,8 +124,9 @@
 | `specs/workbench.e2e.cjs` | dist | 形态判定（`独立 Web 模式`）、形态差异可见契约（无「从宿主拉取」/ 无「写回宿主」行按钮）、**子路径挂载**、计划预览、**包选择预设**（精简/完整）、转换闭环（上传→转换→**下载并解包核对**）、转换后报告读数、零报错 |
 | `specs/split.e2e.cjs` | dist | 阈值真写进输入框（回读校验）、**真的切成多份**（≥2 且序号从 1 连续）、分卷产物是合法 zip |
 | `specs-src/chat-store-module.e2e.cjs` | src-tree | 聊天库适配消费侧全链路（真模块 / 真 Blob / 真转换 / 桩供给方）+ **判别力对照**（无桩 ⇒ 补齐消失） |
+| `specs/targets.e2e.cjs` | dist | **四目标兼容矩阵**（ST/L/TT/PT 落位规则，取自 `tavern-datapack-formats.md` 的〔仓内〕条）+ **扩展模式两态**（默认轻量清单 vs 完整）+ **包选择预设两态**（精简 vs 完整，含密钥/世界书/设置的取舍） |
 
-当前断言总数：**66 项**（2026-09-28 实测 66/66 全绿）。
+当前断言总数：**117 项**（2026-09-28 实测 117/117 全绿：66 + 51）。
 
 未覆盖（登记，勿当成已覆盖）：`file://` 双击形态、插件模态态、Authority 增强层降级、
 多页签并发、超大批次（GB 级）、**宿主拉取路径的注入接线**（需真拉 1.5 GB 实例数据，代价过高）。
