@@ -10,7 +10,12 @@
  *    复用会让第二个子项**错误跳过** ⇒ 产物缺条目。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { batchResumeVerdict, runBatchItems, seedEntriesFor } from '../index.js';
+import {
+  batchResumeVerdict,
+  createCheckpointThrottle,
+  runBatchItems,
+  seedEntriesFor,
+} from '../index.js';
 
 function abortError() {
   const err = new Error('转换任务已被中止/暂停');
@@ -96,6 +101,79 @@ describe('batchResumeVerdict · 跨重载失效检测', () => {
 
   it('产物被清空（页面重载后队列为空）⇒ 作废，不得硬续', () => {
     expect(batchResumeVerdict({ expectedOutputs: 5, productsPresent: 0 }).valid).toBe(false);
+  });
+});
+
+describe('⭐ 批量断点清单的往返（本轮实修过的缺陷）', () => {
+  /** 落盘替身：`TaskManager.onCheckpoint` 把清单**原样**存成 `task.checkpoint`，`pause()` 落盘它 */
+  const sinkOf = () => {
+    const calls = [];
+    return { sink: vi.fn(async (m) => { calls.push(m); }), calls };
+  };
+
+  /**
+   * 复刻 `handleBatchConvert` 的清单组装（字段与顺序一致）。
+   * @param {object} p
+   * @param {boolean} p.legacy 只用旧的 `{doneEntries, totalEntries}`（= 曾经那个 bug 的形态）
+   */
+  function assembleBatchManifest({ legacy = false } = {}) {
+    const outputs = [{ index: 0, name: 'a.zip' }];
+    const itemIds = ['id0', 'id1'];
+    const totalItems = 2;
+    const nextIndex = 1; // 第 0 项已完成 ⇒ 下一个待处理是第 1 项
+    const doneEntries = new Map([['chunk-0.jsonl', 123]]);
+
+    const { sink, calls } = sinkOf();
+    const maybeCheckpoint = createCheckpointThrottle(sink, doneEntries, legacy
+      ? {} // 旧写法：不给 buildManifest
+      : {
+        buildManifest: (doneObject, { totalEntries = 0 } = {}) => ({
+          kind: 'batch',
+          itemIndex: nextIndex,
+          outputs: [...outputs],
+          doneEntries: doneObject,
+          itemIds: [...itemIds],
+          totalItems,
+          totalEntries,
+        }),
+      });
+    maybeCheckpoint({ force: true, totalEntries: 1 });
+    return calls.at(-1);
+  }
+
+  it('⭐ 清单必须承载游标/产物/源包 id（否则续传永远作废重跑整批）', () => {
+    const checkpoint = assembleBatchManifest();
+    // 这三个字段是续传的全部依据：游标（从哪继续）、产物清单（还剩多少）、源包 id（去哪取源）
+    expect(checkpoint.itemIndex).toBe(1);
+    expect(checkpoint.outputs).toEqual([{ index: 0, name: 'a.zip' }]);
+    expect(checkpoint.itemIds).toEqual(['id0', 'id1']);
+    expect(checkpoint.totalItems).toBe(2);
+    expect(checkpoint.kind).toBe('batch');
+    expect(checkpoint.doneEntries).toEqual({ 'chunk-0.jsonl': 123 });
+  });
+
+  it('⭐ 往返：清单 → 落盘 → 续传判定 必须判为**可续**', () => {
+    const checkpoint = assembleBatchManifest();
+    // 内存队列里第 0 项的产物还在 ⇒ 数目相符 ⇒ 可续（**不是**"作废重跑"）
+    const verdict = batchResumeVerdict({
+      expectedOutputs: (checkpoint.outputs ?? []).length,
+      productsPresent: 1,
+    });
+    expect(verdict.valid).toBe(true);
+  });
+
+  it('⚠️ 旧写法（清单只有 doneEntries/totalEntries）⇒ **静默误判**，故作废重跑', () => {
+    // 这是本仓实际栽过的形态：`{doneEntries, totalEntries}` 原样成为 `task.checkpoint`
+    // ⇒ `checkpoint.outputs` 为 undefined ⇒ 失效检测把「已完成 1 项」读成「0 项」
+    // ⇒ 与内存里真实存在的 1 个产物不符 ⇒ **每次续传都作废重跑整批**（跳过语义永不生效）。
+    const legacy = assembleBatchManifest({ legacy: true });
+    expect(legacy.itemIndex).toBeUndefined();
+    expect(legacy.outputs).toBeUndefined();
+    const verdict = batchResumeVerdict({
+      expectedOutputs: (legacy.outputs ?? []).length, // = 0（读不到）
+      productsPresent: 1,                             // 实际有 1 个
+    });
+    expect(verdict.valid).toBe(false);
   });
 });
 

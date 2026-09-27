@@ -167,6 +167,7 @@ const CHECKPOINT_EVERY_MS = 2000;
 export function createCheckpointThrottle(onCheckpoint, doneEntries, {
   everyEntries = CHECKPOINT_EVERY_ENTRIES,
   everyMs = CHECKPOINT_EVERY_MS,
+  buildManifest = null,
 } = {}) {
   let lastFlushAt = 0;
   let lastFlushedSize = -1;
@@ -178,10 +179,17 @@ export function createCheckpointThrottle(onCheckpoint, doneEntries, {
     if (!due) return;
     lastFlushedSize = doneEntries.size;
     lastFlushAt = now;
-    void onCheckpoint(
-      { doneEntries: Object.fromEntries(doneEntries), totalEntries },
-      { bytes, force },
-    );
+    const doneObject = Object.fromEntries(doneEntries);
+    // ⚠️ 这里造出来的对象会**原样**成为 `task.checkpoint` —— `TaskManager.onCheckpoint` 直接
+    // `task.checkpoint = manifest`（`task-manager.js:106`），`pause()` 落盘它（`:142`），
+    // `resume()` 还原它（`:186`）。**故它必须承载续传所需的全部状态**。
+    // 反面教材（本仓实修过）：此处曾恒为 `{doneEntries, totalEntries}` ⇒ 批量的
+    // `itemIndex` / `outputs` / `itemIds` **全被丢掉** ⇒ 续传读不到游标与产物清单
+    // ⇒ 失效检测必然判定「数目不符」⇒ **每次续传都作废重跑整批**，跳过语义永不生效。
+    const manifest = typeof buildManifest === 'function'
+      ? buildManifest(doneObject, { totalEntries })
+      : { doneEntries: doneObject, totalEntries };
+    void onCheckpoint(manifest, { bytes, force });
   };
 }
 
@@ -722,9 +730,28 @@ async function main(appRoot) {
     const { signal, onCheckpoint } = taskManager.start(taskId, '批量转换', { resumable: true, totalBytes: 0 });
     taskControls.showRunning(taskId, { totalBytes: 0 });
     const outputs = resumeCheckpoint ? [...(resumeCheckpoint.outputs ?? [])] : [];
+    // 断点游标：**下一个待处理**子项下标（不是"已完成个数"，避免 off-by-one 歧义）。
+    // 处理第 i 项期间 = i；该项完成后 = i + 1（此时 `outputs` 恰好覆盖 0…i，两者一致）。
+    let nextIndex = startIndex;
     // 当前子项的条目断点（每个子项**重建**，见 seedEntriesFor）
     let doneEntries = new Map();
-    let maybeCheckpoint = createCheckpointThrottle(onCheckpoint, doneEntries);
+    /**
+     * 批量断点清单的组装（**必须完整** —— 它会被原样存成 `task.checkpoint`，见
+     * `createCheckpointThrottle` 的注释）。缺任何一个字段都会让续传读不到而静默降级。
+     */
+    const buildBatchManifest = (doneObject, { totalEntries = 0 } = {}) => ({
+      kind: 'batch',
+      itemIndex: nextIndex,
+      outputs: [...outputs],
+      doneEntries: doneObject,
+      itemIds: [...itemIds],
+      totalItems,
+      totalEntries,
+    });
+    const makeBatchThrottle = () => createCheckpointThrottle(onCheckpoint, doneEntries, {
+      buildManifest: buildBatchManifest,
+    });
+    let maybeCheckpoint = makeBatchThrottle();
     let trackProgress = attachConversionProgress({ doneEntries, maybeCheckpoint });
     const totalCount = totalItems;
 
@@ -762,7 +789,8 @@ async function main(appRoot) {
 
           // 每个子项重置条目断点（跨子项复用 crc 清单会因同名条目错误跳过 ⇒ 产物缺条目）
           doneEntries = seedEntriesFor({ checkpoint: resumeCheckpoint, index: i, startIndex });
-          maybeCheckpoint = createCheckpointThrottle(onCheckpoint, doneEntries);
+          nextIndex = i; // 游标指向「正在处理的这一项」（尚未完成）
+          maybeCheckpoint = makeBatchThrottle();
           trackProgress = attachConversionProgress({ doneEntries, maybeCheckpoint });
 
           const { report, resultBlob } = await runConversionTask({
@@ -801,6 +829,7 @@ async function main(appRoot) {
             taskId, // ← 失效检测的锚点：续传前按它数"产物还在不在"
           });
           outputs.push({ index: i, name: outputFilename });
+          nextIndex = i + 1; // 本项已完成 ⇒ 下一个待处理是 i+1（与 outputs 的覆盖范围一致）
           // 子项边界是**天然断点**：强制落一次（比 64 条节流更对齐语义）
           maybeCheckpoint({ force: true, totalEntries: doneEntries.size });
           view.renderReport(report);
