@@ -178,9 +178,13 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 | `specs/workbench.e2e.cjs` | dist | 形态判定（`独立 Web 模式`）、形态差异可见契约（无「从宿主拉取」/ 无「写回宿主」行按钮）、**子路径挂载**、计划预览、**包选择预设**（精简/完整）、转换闭环（上传→转换→**下载并解包核对**）、转换后报告读数、零报错 |
 | `specs/split.e2e.cjs` | dist | 阈值真写进输入框（回读校验）、**真的切成多份**（≥2 且序号从 1 连续）、分卷产物是合法 zip |
 | `specs-src/chat-store-module.e2e.cjs` | src-tree | 聊天库适配消费侧全链路（真模块 / 真 Blob / 真转换 / 桩供给方）+ **判别力对照**（无桩 ⇒ 补齐消失） |
+| `specs/flows.e2e.cjs` | dist | **文件名模板**（回读确认 + 预览求值 + 产物名真的按模板生成）+ **存工作区**（落库 `origin`/`role`、跨重载语义：临时产物清空而库内记录仍在） |
+| `specs/pause-resume.e2e.cjs` | dist | 转换的暂停/续传（无需实例）—— 含 **§4.5 那处已知缺陷**的取证与 `KNOWN-DEFECT` 锁 |
+| `specs/file-protocol.e2e.cjs` | dist | `file://` 双击形态的**边界登记**（模块被 CORS 拒）+ 那层「可照做的说明」确实出现 |
 | `specs/targets.e2e.cjs` | dist | **四目标兼容矩阵**（ST/L/TT/PT 落位规则，取自 `tavern-datapack-formats.md` 的〔仓内〕条）+ **扩展模式两态**（默认轻量清单 vs 完整）+ **包选择预设两态**（精简 vs 完整，含密钥/世界书/设置的取舍） |
 
-当前断言总数：**117 项**（2026-09-28 实测 117/117 全绿：66 + 51）。
+当前断言总数：**170 项**（2026-09-28 实测全绿：workbench 42 · targets 51 · flows 16 ·
+chat-store-module 17 · perf 12 · split 10 · pause-resume 16 · file-protocol 6）。
 
 未覆盖（登记，勿当成已覆盖）：`file://` 双击形态、插件模态态、Authority 增强层降级、
 多页签并发、超大批次（GB 级）、**宿主拉取路径的注入接线**（需真拉 1.5 GB 实例数据，代价过高）。
