@@ -29,10 +29,11 @@ const { assertDevTarget } = require('./lib/guard.cjs');
 const SPEC_DIR = path.join(__dirname, 'specs');
 
 function parseArgs(argv) {
-  const out = { only: '', url: '' };
+  const out = { only: '', url: '', instance: '' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--only') out.only = argv[++i] || '';
     else if (argv[i] === '--url') out.url = argv[++i] || '';
+    else if (argv[i] === '--instance') out.instance = argv[++i] || '';
   }
   return out;
 }
@@ -66,7 +67,7 @@ function makeT() {
 }
 
 async function main() {
-  const { only, url } = parseArgs(process.argv.slice(2));
+  const { only, url, instance } = parseArgs(process.argv.slice(2));
 
   let files = fs.readdirSync(SPEC_DIR).filter((f) => f.endsWith('.e2e.cjs')).sort();
   if (only) files = files.filter((f) => f.includes(only));
@@ -85,8 +86,31 @@ async function main() {
     log(`── ${label} ${'─'.repeat(Math.max(0, 58 - label.length))}`);
 
     // 目标实例：支持单实例（`requiresInstance`）与多实例（`requiresInstances`，逐个跑一遍）
-    const ids = spec.requiresInstances
+    let ids = spec.requiresInstances
       || (spec.requiresInstance ? [spec.requiresInstance] : [null]);
+
+    /**
+     * `--instance <id>`: run only ONE of the instances the spec declares.
+     *
+     * WHY (measured 2026-09-28): `--url` overrides EVERY instance of that spec
+     * (the loop below overrides per-instance), so pointing `--url` at A makes the
+     * B round "satisfy B's host-name assertions using A's page" => a pile of reds
+     * that look like product bugs. To run one instance, use `--instance`, NOT `--url`.
+     */
+    if (instance) {
+      if (!ids.includes(instance)) {
+        ok(`${label}: --instance ${instance} 不在该 spec 声明的实例里 `
+          + `(${ids.filter(Boolean).join(', ') || '无'})`, false);
+        log('');
+        continue;
+      }
+      ids = [instance];
+    }
+    // Warn when --url still applies to multiple instances (it overrides each of them)
+    if (url && ids.filter(Boolean).length > 1) {
+      log(`  ⚠ --url 覆盖会作用于本 spec 的**每一个**实例（${ids.filter(Boolean).join(' / ')}）——`
+        + ' 只想跑其中一个请改用 `--instance <id>`');
+    }
 
     for (const id of ids) {
       let inst = id ? getInstance(id) : null;
