@@ -178,6 +178,7 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 | `specs/workbench.e2e.cjs` | dist | 形态判定（`独立 Web 模式`）、形态差异可见契约（无「从宿主拉取」/ 无「写回宿主」行按钮）、**子路径挂载**、计划预览、**包选择预设**（精简/完整）、转换闭环（上传→转换→**下载并解包核对**）、转换后报告读数、零报错 |
 | `specs/split.e2e.cjs` | dist | 阈值真写进输入框（回读校验）、**真的切成多份**（≥2 且序号从 1 连续）、分卷产物是合法 zip |
 | `specs-src/chat-store-module.e2e.cjs` | src-tree | 聊天库适配消费侧全链路（真模块 / 真 Blob / 真转换 / 桩供给方）+ **判别力对照**（无桩 ⇒ 补齐消失） |
+| `specs/controls.e2e.cjs` | dist | **控件边界**：类目三键（全选/全不选/反选）的互补契约 · 空模板与含未闭合花括号的模板都**回退/字面**而非产出坏名字 · 分卷输入负值/超界值一律**归一为不分卷** |
 | `specs/concurrency.e2e.cjs` | dist | **同源双页签并发**（同一 context 两个 page ⇒ 共享 IndexedDB）：两页同时转换、各自产物正确、队列不串 |
 | `specs/action-filter.e2e.cjs` | dist | **动作筛选 pill**：点 pill 变 active + 出现重置入口 → 明细**只剩该动作的行** → 重置后回到基线 |
 | `specs/exclude.e2e.cjs` | dist | **类目内逐文件排除**：三值勾选态（`indeterminate`）· 预计产物数下降 · **产物里真的没有被排除的文件而同类目其余仍在** |
@@ -201,9 +202,9 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 > 首版就是这么错的（66 MB 用例量出 12 MB 包的耗时，读数"308 MB/s"一眼假）。
 > 现每次测量另开一个浏览器上下文（`measureFresh`）。
 
-当前断言总数：**250 项**（2026-09-28 实测全绿：workbench 42 · targets 51 · perf 21 · batch 18 ·
+当前断言总数：**266 项**（2026-09-28 实测全绿：workbench 42 · targets 51 · perf 21 · batch 18 ·
 chat-store-module 17 · flows 16 · pause-resume 16 · stash 15 · concurrency 13 · library-export 13 ·
-action-filter 12 · exclude 15 · split 10 · file-protocol 6）。
+action-filter 12 · controls 16 · exclude 15 · split 10 · file-protocol 6）。
 
 未覆盖（登记，勿当成已覆盖）：`file://` 双击形态、插件模态态、Authority 增强层降级、
 多页签并发、超大批次（GB 级）、**宿主拉取路径的注入接线**（需真拉 1.5 GB 实例数据，代价过高）。
