@@ -178,6 +178,7 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 | `specs/workbench.e2e.cjs` | dist | 形态判定（`独立 Web 模式`）、形态差异可见契约（无「从宿主拉取」/ 无「写回宿主」行按钮）、**子路径挂载**、计划预览、**包选择预设**（精简/完整）、转换闭环（上传→转换→**下载并解包核对**）、转换后报告读数、零报错 |
 | `specs/split.e2e.cjs` | dist | 阈值真写进输入框（回读校验）、**真的切成多份**（≥2 且序号从 1 连续）、分卷产物是合法 zip |
 | `specs-src/chat-store-module.e2e.cjs` | src-tree | 聊天库适配消费侧全链路（真模块 / 真 Blob / 真转换 / 桩供给方）+ **判别力对照**（无桩 ⇒ 补齐消失） |
+| `specs/misc.e2e.cjs` | dist | **只读扩展清单导出**（产物是 `.json` 不写包；**不含扩展代码** —— 用夹具里那行代码当精确判据）· **日志面板展开/折叠**（折叠态不追加行那个坑）· **进度收尾 = 100%**（有界等待，不读瞬时值） |
 | `specs/controls.e2e.cjs` | dist | **控件边界**：类目三键（全选/全不选/反选）的互补契约 · 空模板与含未闭合花括号的模板都**回退/字面**而非产出坏名字 · 分卷输入负值/超界值一律**归一为不分卷** |
 | `specs/concurrency.e2e.cjs` | dist | **同源双页签并发**（同一 context 两个 page ⇒ 共享 IndexedDB）：两页同时转换、各自产物正确、队列不串 |
 | `specs/action-filter.e2e.cjs` | dist | **动作筛选 pill**：点 pill 变 active + 出现重置入口 → 明细**只剩该动作的行** → 重置后回到基线 |
@@ -186,7 +187,7 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 | `specs/batch.e2e.cjs` | dist | **批量转换**：多选 → 批量条可见性 · 逐个转换产出**两个按源包区分的产物名** · 两份产物都解包核对 · 报告面板语义（最后一个子项的） |
 | `specs/library-export.e2e.cjs` | dist | **从聊天库导出**：无库时按钮不可见（默认路径零变化）/ 有库时真实点击 → 产物解包核对（聊天入库内容、隐藏容器过滤、目标落位） |
 | `specs/flows.e2e.cjs` | dist | **文件名模板**（回读确认 + 预览求值 + 产物名真的按模板生成）+ **存工作区**（落库 `origin`/`role`、跨重载语义：临时产物清空而库内记录仍在） |
-| `specs/pause-resume.e2e.cjs` | dist | 转换的暂停/续传（无需实例）—— 含 **§4.6 那处已知缺陷**的取证与 `KNOWN-DEFECT` 锁 |
+| `specs/pause-resume.e2e.cjs` | dist | 转换的暂停/续传（无需实例）—— 含 **§4.6 那处已知缺陷**的取证与 `KNOWN-DEFECT` 锁；另含 **Worker 生命周期回归守护**（`034b7ab`：terminate 后未置空引用 ⇒ 此后每次转换静默挂死）：再转 → 暂停 → 丢弃 → **再转仍须出产物** |
 | `specs/file-protocol.e2e.cjs` | dist | `file://` 双击形态的**边界登记**（模块被 CORS 拒）+ 那层「可照做的说明」确实出现 |
 | `specs/targets.e2e.cjs` | dist | **四目标兼容矩阵**（ST/L/TT/PT 落位规则，取自 `tavern-datapack-formats.md` 的〔仓内〕条）+ **扩展模式两态**（默认轻量清单 vs 完整）+ **包选择预设两态**（精简 vs 完整，含密钥/世界书/设置的取舍） |
 
@@ -202,8 +203,8 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 > 首版就是这么错的（66 MB 用例量出 12 MB 包的耗时，读数"308 MB/s"一眼假）。
 > 现每次测量另开一个浏览器上下文（`measureFresh`）。
 
-当前断言总数：**281 项**（2026-09-28 实测全绿，且**连续两轮**同读数）：
-`targets` 51 · `workbench` 42 · `perf` 21 · `batch` 18 · `chat-store-module` 17 · `controls` 16 · `flows` 16 · `pause-resume` 16 · `exclude` 15 · `stash` 15 · `concurrency` 13 · `library-export` 13 · `action-filter` 12 · `split` 10 · `file-protocol` 6。
+当前断言总数：**305 项**（2026-09-28 实测全绿）：
+`targets` 51 · `workbench` 42 · `pause-resume` 21 · `perf` 21 · `misc` 19 · `batch` 18 · `chat-store-module` 17 · `controls` 16 · `flows` 16 · `exclude` 15 · `stash` 15 · `concurrency` 13 · `library-export` 13 · `action-filter` 12 · `split` 10 · `file-protocol` 6。
 
 未覆盖（登记，勿当成已覆盖 —— `file://` 双击形态与多页签并发**已在 2026-09-28 补上**）：
 **插件模态态**（只覆盖了抽屉态与独立态）· **Authority 增强层降级**（独立形态下 SDK 缺席，
