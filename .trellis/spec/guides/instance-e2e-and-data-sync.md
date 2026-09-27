@@ -602,3 +602,23 @@ node scripts/instance-sync/import-pt.cjs --report
 # 真导入（策略默认 merge、方式默认 slow；>100 MB 需 --allow-large）
 node scripts/instance-sync/import-pt.cjs --pack <pack-tt-*.zip> --allow-large --timeout 3600000
 ```
+
+### 11.9 第 4 宿主 **PureTavern** 的加载冒烟（2026-09-28 实测 9/9 全绿）
+
+PT 此前**没有任何自动化**（`smoke.e2e.cjs` 的 `requiresInstances` 只有 dev-st / dev-luker，且部分断言
+绑定了宿主名）。新增 `e2e/specs/pt-load.e2e.cjs`（`requiresInstance: 'pt-web'`，端口 **8899** 在白名单内）
+只做**与宿主无关**的判读：插件抽屉注入、工作台容器渲染、五项关键控件齐全、平台徽标脱离模板初值、
+**零本插件报错/失败请求**。
+
+两条**预期差异**（不是缺陷，别误判）：
+
+1. **PT 上「从宿主拉取」不可见** —— PT 是纯前端宿主、没有 `/api/users/backup` 那类整包端点，
+   该按钮的可用性由 `computeActionAvailability` 按 `isHost` 求值 ⇒ 隐藏是**正确行为**；
+2. **平台徽标显示「SillyTavern 插件 · v1.18.0」** —— PT 兼容 ST 的这批 id/端点，故走 ST 分支；
+   与之相对，**扩展设置面板 / 菜单锚点 / 抽屉注入**在 PT 上都在（`extPanel=true`、菜单锚点存在）。
+
+**就绪等待要给足**：PT 实测 t+15 s 仍在「正在初始化…」，**t+30 s** 插件抽屉才出现 ⇒ 上界给 90 s
+（与 ST 的 splash 同类；夹具里已有「等 splash 关闭」的处置，见 `harness.cjs`）。
+
+**PT 的扩展在浏览器侧**（无磁盘用户目录）⇒ 本仓 e2e 登记表里 `pt-web` 的 `userDir: null`；
+装/卸扩展走 PT 自身流程，不要试图往磁盘目录里塞文件。
