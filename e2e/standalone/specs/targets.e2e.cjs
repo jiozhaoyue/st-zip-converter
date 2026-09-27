@@ -194,6 +194,47 @@ module.exports = {
     t.ok('T-full.6 完整包含密钥（secrets 任何方向不剥离 —— 既有硬性约定）',
       whole.names.includes('secrets.json'), JSON.stringify(whole.names.slice(0, 10)));
 
+    // ============ ②a 预设「仅角色卡」（与「仅聊天记录」同集 —— 联动恒开）：产物级验证 ============
+    // 语义依据（源码既有裁决）：`category-filter.js:applyPreset` 里 `isLinked = true` 恒开
+    // ⇒ 「仅角色卡」= characters + assets + **chats**（聊天跟卡走）。这里是**产物级**证据，
+    // 与 workbench spec 的 C10（UI 级事实登记）互为佐证。
+    await page.click('[data-preset="chars"]');
+    await page.waitForTimeout(250);
+    const preChars = await page.evaluate(() => {
+      const out = {};
+      for (const c of document.querySelectorAll('.category-card')) {
+        const box = c.querySelector('input[type="checkbox"]');
+        if (box && !box.disabled) out[c.dataset.category] = box.checked;
+      }
+      return out;
+    });
+    t.eq('T-chars.0 【前置门】「仅角色卡」下 chats **仍勾选**（联动恒开：聊天跟卡走）',
+      preChars.chats, true, JSON.stringify(preChars));
+    t.eq('T-chars.0b 【前置门】「仅角色卡」下 lorebooks / settings 已取消勾选',
+      `${preChars.lorebooks}/${preChars.settings}`, 'false/false', JSON.stringify(preChars));
+
+    await page.selectOption('#target-select', 'st');
+    const rowsBeforeChars = await page.$$eval('.eq-name', (els) => els.length);
+    await page.click('#btn-convert');
+    const charsNames = await common.waitForQueue(page, rowsBeforeChars + 1);
+    t.ok('T-chars.1 转换完成', Array.isArray(charsNames) && charsNames.length >= rowsBeforeChars + 1,
+      JSON.stringify(charsNames));
+    const charsProduct = await common.readZip(
+      await common.downloadNthRow(page, rowsBeforeChars, ctx.fixtureDir, 'preset-chars.zip'),
+    );
+    rowIndex += 1;
+    t.ge('T-chars.2 产物非空（前置门）', charsProduct.names.length, 1,
+      `entries=${charsProduct.names.length}`);
+    t.ok('T-chars.3 产物含角色卡', charsProduct.names.some((n) => n.startsWith('characters/')),
+      JSON.stringify(charsProduct.names.slice(0, 6)));
+    t.ok('T-chars.4 产物含聊天（联动恒开的产物级证据）',
+      charsProduct.names.some((n) => n.startsWith('chats/')), JSON.stringify(charsProduct.names.slice(0, 8)));
+    t.ok('T-chars.5 产物**不含**世界书 / 系统设置 / 密钥（收窄在产物上生效）',
+      !charsProduct.names.some((n) => n.startsWith('worlds/'))
+      && !charsProduct.names.includes('settings.json')
+      && !charsProduct.names.includes('secrets.json'),
+      JSON.stringify(charsProduct.names.slice(0, 10)));
+
     // ============ ②b 预设「安全脱敏」（隐私向）：**产物里真的没有密钥与聊天** ============
     await page.click('[data-preset="safe"]');
     await page.waitForTimeout(250);
