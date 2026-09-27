@@ -242,6 +242,30 @@ export async function renderStashList({
     `;
     item.appendChild(info);
 
+    // ⚠️ ⚠️ 本块**三样东西都不可删**（2026-09-27 实测事故）：`f9c7cfe`「按钮契约解耦」
+    // 把行级按钮工厂搬进了 `refreshBatchBar`（那是**批量条**的 4 参签名），却漏删了
+    // 行级的两处声明 —— 而下面的调用点仍在引用它们：
+    //   ① `btns`（容器）  ② `mkBtn`（行级工厂，(cls, text, title, onClick) 签名）
+    // ⇒ `renderStashList` 在**第一个非当前源条目**上抛 `ReferenceError: btns is not defined`
+    // （修掉 ① 后紧接着就是 `mkBtn is not defined`）⇒ 容器在函数末尾的
+    // `containerEl.appendChild(list)` **之前**就中断 ⇒ **暂存区恒为空**（连空态占位都没有），
+    // 且 `index.js` 的 `updateWorkspaceUI` 里同一处 try/catch 会连带跳过配额条与待导出区的刷新。
+    // 静默性极强：单测只覆盖 `filterStashFiles` / `stashBatchCapability` 两个纯函数，
+    // **渲染路径无人守** ⇒ 缺陷潜伏两个提交未被发现，最终由 E2E 矩阵的 M-10 抓出
+    // （页面控制台里只有一行 `[warning] 刷新工作区 UI 失败: ReferenceError: btns is not defined`）。
+    // 守护见 `test/stash-list-render.test.js`。
+    const btns = document.createElement('div');
+    btns.className = 'archive-buttons';
+    const mkBtn = (cls, text, title, onClick) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `btn-archive-action ${cls}`;
+      b.textContent = text;
+      if (title) b.title = title;
+      b.addEventListener('click', onClick);
+      return b;
+    };
+
     // 行内只留「载入 + ⋯」：下载 / 写回宿主 / 删除 收进更多菜单，
     // 消除与批量条动作的双重表达（用户裁决 9）。
     if (!isActive) {
