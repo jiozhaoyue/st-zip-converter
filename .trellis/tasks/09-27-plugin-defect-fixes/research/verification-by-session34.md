@@ -43,9 +43,23 @@
 
 两次全量跑**都在同一处**失败（另一次日志同形），且 **dev-luker 从不发生**。
 
-**最可能的成因（待 owner 确认）**：宿主的一次性弹窗（刚 `git pull` 更新过扩展 ⇒ 宿主可能弹
-"扩展已更新"一类提示；或 ST 的 splash `<dialog>` 未关）。本仓规范 §11.6（负载型假红）与
-§11.7（宿主冷启动窗口）已收录同族问题：**矩阵要独占机器**跑。
+**成因已定位（只读探针挖出具体元素，2026-09-28）**：那个拦截点击的 `<dialog>` 就是
+**ST 的 splash** ——
+
+```json
+{ "open": true,
+  "cls": "popup wide_dialogue_popup large_dialogue_popup transparent_dialogue_popup popup--animation-none",
+  "text": "正在初始化… 确定 取消",
+  "childIds": ["loader", "load-spinner", "toast-container"] }
+```
+
+即**宿主根本没初始化完**（`#loader` 还在，文案「正在初始化…」），它拦截全页指针事件。
+这与本仓规范 §11.7「宿主冷启动窗口」同族、与 §11.6「负载型假红」同源（本机同时跑着
+并发会话的 30+ chromium 与那个挂死数小时的 e2e，实例每次开页都要重新初始化）。
+
+**本会话的处置**：在**共享夹具** `e2e/lib/harness.cjs` 的 `openInstance().goto()` 里
+**有界等待 splash 关闭**（不存在 `dialog[open]` 含 `#loader` 或文案含「正在初始化」，上限 90 s，
+超时只告警不失败）—— 两个会话的所有实例侧用例都因此不再被它卡住。
 
 **排除代码回归的证据**：
 ① 同一份代码在 **dev-luker 上矩阵全绿**；
