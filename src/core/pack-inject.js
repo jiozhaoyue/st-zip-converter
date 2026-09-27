@@ -208,6 +208,13 @@ export function planInjection({
  */
 export function describePlan(plan) {
   const s = plan.skipped;
+  /**
+   * ⚠️ **必须把 `categoryOff` 也说出来**（2026-09-28 实测踩到）：聊天类目被用户关掉时，
+   * 计划为空、注入 0 条 —— 但旧版摘要只写「跳过：已有 0 / 备份 0 / 隐藏 0 / 无效 0」，
+   * **看不出是因为用户自己关了聊天**，读日志的人会以为"库是空的"或"没检测到库"。
+   * 有一处用途正是靠它判别：实例侧用例 `library-inject.e2e.cjs` 的降级分支。
+   */
   return `库中 ${plan.libraryCount} 条 · 源包已有 ${plan.sourceCount} 条 · 待补 ${plan.inject.length} 条`
-    + `（跳过：已有 ${s.alreadyPresent} / 备份 ${s.backup} / 隐藏 ${s.hidden} / 无效 ${s.invalid}）`;
+    + `（跳过：已有 ${s.alreadyPresent} / 备份 ${s.backup} / 隐藏 ${s.hidden} / 无效 ${s.invalid}`
+    + ` / 类目关断 ${s.categoryOff || 0}）`;
 }

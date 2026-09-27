@@ -141,9 +141,32 @@ globalThis.ChatFilesysApi = Object.freeze({
 3. **群聊落点未取证**：`isGroup` 依据库索引，本机没有群聊样本验证 `group chats/` 落位。
 4. **`*.bak.jsonl` 形态不在既有备份判据内**（`isBackupChatOrSnapshot` 只认 `*.bak`），
    本任务**未擅自扩展**（它同时服务既有备份过滤），仅登记。
-5. **实例侧环境阻塞**：另一会话的 `e2e/run.cjs` 自 09-27 22:20 起挂死（12 个 chromium 持着
-   共享 Playwright profile），期间 dev-st 页面停在 `Initializing…`、注入点全缺失，
-   读数**不可解释**，故**未据此作任何判定**，也**未杀该进程**（不是本会话的进程）。
+5. ~~实例侧环境阻塞~~ **已解除**（2026-09-28 03:1x 复核）：此前读数不可解释的成因是实例页面
+   一度停在 `Initializing…`（并发会话的挂死进程 + 高负载）。现在：
+   - 两个 Dev 实例的插件从 `d15737a` 更新到 **`61ce2f5`**（`git pull --ff-only`，**只更新 Dev**，
+     Real 未动；这正是父任务 R-20 的既定纪律）；
+   - **dev-st 冒烟 36/36 全绿**（注入点 panel/drawer/menu 全在、零本插件报错/失败请求）
+     ⇒ 顺带证明**本轮新增的代码没有破坏宿主侧注入**；
+   - 新增实例侧用例 `e2e/specs/library-inject.e2e.cjs`：驱动此前**从未被任何 E2E 驱动过**的
+     `#btn-host-fetch → injectLibraryChatsIntoSource()` 接线（用 dev-luker 的 selection 收窄拉取量，
+     只勾 `characters`，避开 Luker 的 `settings` ⇒ `backups/` 巨量隐含打包）。
+
+### 追加：实例侧接线验证（`e2e/specs/library-inject.e2e.cjs`）
+
+`#btn-host-fetch → injectLibraryChatsIntoSource()` 这条接线此前**没有任何自动化覆盖**
+（矩阵 spec 不驱动宿主拉取）。该用例把它补上，并做了成本取舍：
+
+- **快档（默认）**：只勾 `characters`（≈40 MB，且是布局判据之一）⇒ 拉取快；
+  此时 `chats` 未勾选 ⇒ 插件**正确地不注入**（尊重用户选择）。断言的是
+  「路径确实被走到」（探针 `lastListCount > 0` + 桩的 `listChats` 被调过）与
+  「**为什么**没注入可观测」（日志含「类目关断 3」）—— 后者顺带促成一处产品改进：
+  `describePlan()` 原来不在摘要里报 `categoryOff`，用户/排障者看不出"是自己关了聊天"。
+- **重档（`SZC_HEAVY_HOSTPULL=1`）**：把 `chats` 也勾上 ⇒ 真注入（dev-luker 的 chats ≈ 670 MB，
+  全量拉取要几分钟）。**默认不跑**，以免这条用例拖慢他人每次的 E2E。
+
+首轮假红三处，全部记在用例注释里：① 没等插件初始化（宿主 DOM 就绪 ≠ 插件已注入）；
+② 只强制显示了插件抽屉内容、**没开宿主的扩展抽屉**（祖先隐藏 ⇒ Playwright 一律判不可见）；
+③ 判「收窄生效」只断言"点了全不选"、没**回读** ⇒ 实际拉了全量，几分钟也没到注入点。
 
 ## 顺带发现（不在本任务范围，已另行登记）
 
