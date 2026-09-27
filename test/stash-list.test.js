@@ -24,7 +24,9 @@ describe('filterStashFiles', () => {
 describe('stashBatchCapability', () => {
   it('未选中时全部不可用', () => {
     const cap = stashBatchCapability(new Set());
-    expect(cap).toEqual({ canLoad: false, canDownload: false, canRestore: false, canDelete: false });
+    expect(cap).toEqual({
+      canLoad: false, canBatchConvert: false, canDownload: false, canRestore: false, canDelete: false,
+    });
   });
 
   it('单选时允许载入为源', () => {
@@ -37,6 +39,15 @@ describe('stashBatchCapability', () => {
     expect(cap.canLoad).toBe(false);
     expect(cap.canDownload).toBe(true);
     expect(cap.canDelete).toBe(true);
+  });
+
+  it('批量转换：选中 ≥1 即可用（不复用 canLoad 的单选语义）', () => {
+    // ⚠️ 回归守护：`canLoad` 是 n === 1 的**单选**语义，若批量转换误用它，
+    // 选 2 个以上时按钮会被禁用 —— 而批量**恰恰只在多选时才有意义**
+    expect(stashBatchCapability(new Set(['a'])).canBatchConvert).toBe(true);
+    expect(stashBatchCapability(new Set(['a', 'b'])).canBatchConvert).toBe(true);
+    expect(stashBatchCapability(new Set(['a', 'b', 'c'])).canBatchConvert).toBe(true);
+    expect(stashBatchCapability(new Set()).canBatchConvert).toBe(false);
   });
 
   it('宿主不可用时禁止写回', () => {

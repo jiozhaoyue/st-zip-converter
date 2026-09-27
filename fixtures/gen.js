@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { zipIo } from '../src/core/zip-io.js';
 
 /**
@@ -141,11 +142,36 @@ export async function generateAll(outDir) {
   return outputs;
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`) {
+/**
+ * 入口守卫：仅当本文件被**作为 CLI 直跑**时落盘；被 `import` 时**零副作用**。
+ *
+ * ⚠️ 2026-09-27 修复（R-17）：原实现用模板字符串手拼
+ * `file://${process.argv[1].replace(/\\/g, '/')}`，而 Windows 上 `import.meta.url` 是
+ * `file:///D:/…`（**三个**斜杠），模板拼出的是 `file://D:/…`（**两个**）⇒ **永不相等** ⇒
+ * `npm run gen-fixtures` 自存在起**从未产出过任何夹具**（退出码 0、零输出、零产物 —— **静默空操作**）。
+ * 改用 `node:url` 的 `pathToFileURL`（**不引新依赖**，L1-MR-11）。
+ * 回归守护：`test/gen-fixtures-cli.test.js` 的**双向负例**（直跑确实产出 / import 零副作用）。
+ */
+const isCliEntry = (() => {
+  const entry = process.argv[1];
+  if (!entry) return false; // 存在性守卫：pathToFileURL(undefined) 会抛
+  const entryUrl = pathToFileURL(entry).href;
+  if (entryUrl === import.meta.url) return true;
+  // Windows 路径大小写不敏感：`node FIXTURES/gen.js` 这类调用不应被误判成「非 CLI」
+  return process.platform === 'win32' && entryUrl.toLowerCase() === import.meta.url.toLowerCase();
+})();
+
+if (isCliEntry) {
   const outDir = process.argv[2] ?? 'fixtures';
-  generateAll(outDir).then((outputs) => {
-    for (const [name, outPath] of Object.entries(outputs)) {
-      console.log(`generated ${name} -> ${outPath}`);
-    }
-  });
+  generateAll(outDir)
+    .then((outputs) => {
+      for (const [name, outPath] of Object.entries(outputs)) {
+        console.log(`generated ${name} -> ${outPath}`);
+      }
+    })
+    // 显式收口失败：「静默空操作」与「失败却看不出原因」是同一类问题的两面
+    .catch((err) => {
+      console.error(`[fixtures/gen] 生成失败: ${err?.message || err}`);
+      process.exitCode = 1;
+    });
 }

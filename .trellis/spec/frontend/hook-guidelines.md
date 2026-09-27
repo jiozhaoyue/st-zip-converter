@@ -105,20 +105,40 @@ async function getHandle() {
 
 ---
 
-## 无全局命名空间（替代旧的 globalThis 调试钩子）
+## 全局命名空间：默认禁止，只许「显式登记」的只读接缝
 
-`globalThis.__tavernConvert` 已随 IIFE 打包形态一并移除。**当前不存在任何挂到 `globalThis`
-的自有命名空间**——`src/` 下对 `globalThis` 的引用只有**读取**宿主信号
-（`globalThis.lukerContext` / `globalThis.SillyTavern`，见 `detectHost()`）。
+`globalThis.__tavernConvert` 已随 IIFE 打包形态一并移除。**隐式全局对象一律不得恢复**
+（见下方 Forbidden Patterns）。
 
-自动化与调试的现行入口：
+**当前存在的自有全局命名空间：恰好 1 个 —— `window.__stZipConverterDebug`（2026-09-27 登记，R-19）。**
+
+| 项 | 值 |
+| --- | --- |
+| **显式命名** | `window.__stZipConverterDebug` |
+| **挂载点** | `index.js` 的 `mountDebugProbe()`，由 `bootstrap()` **最先**调用（两种形态都挂：插件态的工作台在抽屉里且抽屉默认为关，放进 `main()` 会让「抽屉未打开」时探针不可用） |
+| **成员** | 仅 `getRestoreProbe()`（数据来自 `src/ui/host-bridge.js` 的同名导出，遵 `L0-9`：平台差异唯一落点） |
+| **只读契约** | 命名空间对象 `Object.freeze`；`getRestoreProbe()` **每次返回新的 `Object.freeze` 快照** ⇒ 调用方改不动 `capability`，**E2E 无法伪造状态**（防伪能力来自快照冻结，不是命名空间冻结） |
+| **不覆盖** | 挂载前查 `Object.prototype.hasOwnProperty.call(window, KEY)`，**已占用则不覆盖并 `logger.warn`**（宿主或别的扩展可能同名；静默覆盖会悄悄弄坏别人的对象） |
+| **不泄漏** | 只暴露能力枚举（`unknown`/`available`/`unsupported`）与原因文案（形如 `/api/users/restore → 404、…`，两项都是源码里的静态常量）；**不含** CSRF token / user handle / 文件系统路径 |
+| **无 window 环境** | `typeof window === 'undefined'` 时静默跳过（Node / Worker 环境不抛） |
+| **测试** | `test/restore-probe.test.js`（7 项：初始态 / 探测后 unsupported / 冻结 / 快照非共享 / 挂载 / 已占用不覆盖 / 无 window 跳过） |
+
+**新增这类接缝的规矩**（本节是唯一登记处）：
+
+1. **必须是显式命名**的，且命名带插件前缀（`__stZipConverter*`），不得用泛名；
+2. **必须只读** —— 返回冻结快照，**不得**暴露 setter（否则自动化能伪造状态，断言失去判别力）；
+3. **必须做占用检查**，已存在则不覆盖并 warn；
+4. **必须不泄漏**敏感项（token / handle / 绝对路径）；
+5. **必须在本节登记**（补一行表格），否则规格与实现脱节 —— 本节标题曾写作
+   「**当前不存在任何挂到 `globalThis` 的自有命名空间**」，若不随之更正就变成**假事实**（`P-3` 同形）。
+
+自动化与调试的**其余**入口（不带全局对象）：
 
 - **Node / Vitest**：所有模块都是 ES Module，`src/core/**` 无 DOM 依赖可直接 import；
   `test/plugin.test.js` 即在 Node 下 import `src/ui/host-bridge.js` 校验导出面与清单字段。
 - **静态守卫**：`npm run check:dom-injection`、`npm run check:css-scope`。
 - **浏览器手测**：`npm run dev` 起 Vite 开发服务器走独立 Web 形态；宿主插件形态需加载到
   **Dev 实例**（8001 ST / 8003 Luker），用 DevTools 直接断点调试 `host-bridge.js` 的导出函数。
-- 若后续确需自动化钩子，应新增**显式命名**的接缝并在本节登记，**不要**恢复隐式全局对象。
 
 ---
 

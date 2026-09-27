@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-27-instance-sync-and-plugin-hardening/prd.md", "reason": "父任务自身的需求与验收：PR-1 共享契约、PR-2 集成验收、AC-P1…AC-P8——父任务不是实现目标，其职责是收齐两个子任务的独立读数并做集成核对"}
+{"file": ".trellis/spec/guides/instance-e2e-and-data-sync.md", "reason": "集成核对（AC-P3）的判据来源：逐目标覆盖率与零删除的证据形态、PT 模块读数判据、可重跑性纪律"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "AC-P5 质量门的执行口径：npm test 零回退、静态守卫 exit 0、构建通过"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "AC-P5 的脚本侧质量门与测试矩阵口径"}
+{"file": ".trellis/spec/guides/subagent-collaboration.md", "reason": "父任务要汇总两个子代理的产物：来源唯一性与写权限边界是汇总前的前置检查"}

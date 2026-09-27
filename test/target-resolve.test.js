@@ -5,7 +5,7 @@
  *
  * 目标下拉里的 `native` 表示「宿主原生格式」，必须经 `hostLayoutCode()` 归一；
  * 但修前只有宿主拉取路径与文件名预览做了归一，而 `refreshPlan` / `btnConvert` /
- * `runBatchConversion` / 扩展清单的 `targetLayout` 都把字符串 `'native'`
+ * `runBatchConversion`（现 `handleBatchConvert`）/ 扩展清单的 `targetLayout` 都把字符串 `'native'`
  * **直接交给计划器与转换器**。计划器的合成分支只认 `TARGETS.L` / `TARGETS.ST`
  * （`src/core/plan-preview.js`）⇒ `native` 不匹配任何分支，
  * 「宿主原生格式」退化成**原样直通**。

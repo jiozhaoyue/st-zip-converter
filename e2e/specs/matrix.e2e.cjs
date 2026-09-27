@@ -245,10 +245,51 @@ async function resetWorkspace(page) {
   return cleared;
 }
 
+/** 确定性高熵字节：SHA-256 计数器模式（不可压缩，故转换/分卷都有真实工作量） */
+function detBytes(len, seed) {
+  const outBuf = Buffer.alloc(len);
+  let off = 0;
+  let ctr = 0;
+  while (off < len) {
+    const h = crypto.createHash('sha256').update(`${seed}:${ctr}`).digest();
+    const n = Math.min(h.length, len - off);
+    h.copy(outBuf, off, 0, n);
+    off += n;
+    ctr += 1;
+  }
+  return outBuf;
+}
+
 /**
- * 生成**放大夹具**（M-7 需要暂停窗口、M-9 需要切出多分卷）
+ * 造「大 ST 布局包」：`chats/` 下 `count` 个 1 MB 高熵条目。
+ * 缓存判据 = 存在且 ≥ `minBytes`（确定性内容 ⇒ 可复用、可重跑）。
+ */
+async function ensureBigFixture(fileName, count, minBytes, seedPrefix) {
+  const out = path.join(FIXTURE_DIR, fileName);
+  if (fs.existsSync(out) && fs.statSync(out).size >= minBytes) return out;
+
+  const genUrl = pathToFileURL(path.resolve(__dirname, '../../fixtures/gen.js')).href;
+  const ioUrl = pathToFileURL(path.resolve(__dirname, '../../src/core/zip-io.js')).href;
+  const [{ stEntries }, { zipIo }] = await Promise.all([import(genUrl), import(ioUrl)]);
+
+  const MB = 1024 * 1024;
+  const writer = await zipIo.createWriter(out);
+  for (const [name, data] of stEntries()) await writer.add(name, data);
+  for (let i = 0; i < count; i += 1) {
+    // 每份用不同种子 ⇒ 内容互不相同（防按内容去重），且各自不可压缩
+    await writer.add(
+      `chats/Fixture Character/${seedPrefix}-${String(i).padStart(3, '0')}.jsonl`,
+      detBytes(MB, `${seedPrefix}-${i}`),
+    );
+  }
+  await writer.close();
+  return out;
+}
+
+/**
+ * 生成**放大夹具**（M-9 需要切出多分卷）
  *
- * 迷你夹具 2.5 KB：转换是毫秒级 —— 来不及点暂停，也切不出第二个分卷。
+ * 迷你夹具 2.5 KB：转换是毫秒级 —— 切不出第二个分卷。
  * 故此处造一个 ~6 MB 的 ST 布局包：`chats/` 下 6 个 1 MB 文件。
  *
  * ⚠️ 内容必须是**真正高熵**的字节：先用 LCG（`seed & 0xff`）生成过一版，
@@ -259,40 +300,19 @@ async function resetWorkspace(page) {
  * 输出不可压缩、且**完全确定性** ⇒ 包真的 ~6 MB，spec 仍可重跑。
  */
 async function ensureLargeFixture() {
-  const out = path.join(FIXTURE_DIR, 'fixture-large-st.zip');
-  if (fs.existsSync(out) && fs.statSync(out).size > 4 * 1024 * 1024) return out;
+  return ensureBigFixture('fixture-large-st.zip', 6, 4 * 1024 * 1024, 'bulk');
+}
 
-  const genUrl = pathToFileURL(path.resolve(__dirname, '../../fixtures/gen.js')).href;
-  const ioUrl = pathToFileURL(path.resolve(__dirname, '../../src/core/zip-io.js')).href;
-  const [{ stEntries }, { zipIo }] = await Promise.all([import(genUrl), import(ioUrl)]);
-
-  /** 确定性高熵字节：SHA-256 计数器模式（不可压缩，故转换/分卷都有真实工作量） */
-  const bytes = (len, seed) => {
-    const outBuf = Buffer.alloc(len);
-    let off = 0;
-    let ctr = 0;
-    while (off < len) {
-      const h = crypto.createHash('sha256').update(`${seed}:${ctr}`).digest();
-      const n = Math.min(h.length, len - off);
-      h.copy(outBuf, off, 0, n);
-      off += n;
-      ctr += 1;
-    }
-    return outBuf;
-  };
-
-  const MB = 1024 * 1024;
-  const writer = await zipIo.createWriter(out);
-  for (const [name, data] of stEntries()) await writer.add(name, data);
-  for (let i = 0; i < 6; i += 1) {
-    // 每份用不同种子 ⇒ 六份内容互不相同（防按内容去重），各自都不可压缩
-    await writer.add(
-      `chats/Fixture Character/bulk-${String(i).padStart(3, '0')}.jsonl`,
-      bytes(MB, `bulk-${i}`),
-    );
-  }
-  await writer.close();
-  return out;
+/**
+ * **暂停窗口夹具**（M-7b 用，2026-09-27 新增）
+ *
+ * 为什么 6 MB 不够：M-7b 要验「转换中途点暂停 → 续传」，而 6 MB 的转换在**数百毫秒**内结束 ——
+ * 等控制条出现的往返里转换就完了，pause 会点在已隐藏的按钮上（**假红或假绿**）。
+ * ⇒ 造 ~48 MB / 48 个 1 MB 条目，转换需**数秒**，pause 有可靠窗口；
+ * 且条目数多 ⇒ 断点清单里会攒下若干条已完成条目 ⇒ 续传时能真的跳过（`totals.resumed > 0`）。
+ */
+async function ensurePauseFixture() {
+  return ensureBigFixture('fixture-pause-st.zip', 48, 40 * 1024 * 1024, 'pausebulk');
 }
 
 module.exports = {
@@ -658,13 +678,12 @@ module.exports = {
     }
 
     // ============ M-7 任务控制条状态机 / 断点续传可达性 ============
-    // 【可达性如实登记】设计文档 §3.4 的 M-7 写「pause → resume 后 `resumedCount > 0`」，
-    // 但**转换路径不给 TaskManager 注册任务** —— 全仓 `taskControls.showRunning` 只出现一次
-    // （`index.js:942`），其上文是 `index.js:938` `taskManager.start(taskId, '宿主拉取', …)`；
-    // `btnConvert` 路径（`index.js:1519` 起）自始至终**不碰 TaskManager**。
-    // 且 `onResume`（`index.js:491`）只在 `id.startsWith('fetch-')` 时才真正续传。
-    // ⇒ 「转换任务的暂停/续传」在产品里**不存在**；续传只存在于**宿主拉取**路径。
-    // 故 M-7 按**实际可达面**分三步验，并把「设计文档声称 vs 实际实现」的差异钉住。
+    // 【2026-09-27 更新 —— R-16 已修】本节此前如实登记的是**旧现实**：
+    //   「转换路径不给 TaskManager 注册任务（`taskControls.showRunning` 全仓一处，在宿主拉取路径）
+    //    ⇒ 转换任务的暂停/续传在产品里不存在；`onResume` 只在 `id.startsWith('fetch-')` 时续传」。
+    // 现 `btnConvert` → `handleExternalConvert` 已接 `taskManager.start`，
+    // 且 `onResume` 按 `taskKindOf` **查表分派**（不再只认 `fetch-` 前缀）。
+    // ⇒ M-7 从「只验初态隐藏」升级为**真实 pause → resume 续传**（见本段之后的 M-7b）。
     const tcInit = await page.evaluate(() => {
       const root = document.getElementById('task-controls');
       return { exists: Boolean(root), hidden: root ? root.hidden : null };
@@ -672,6 +691,34 @@ module.exports = {
     t.ok('M-7 任务控制条存在（#task-controls）', tcInit.exists);
     t.ok('M-7 无活动任务时控制条**隐藏**（状态机初态）', tcInit.hidden === true,
       `hidden=${tcInit.hidden}`);
+
+    // —— R-19 只读探针：三态必须可被页面外读取（否则 E2E 断言不了真正的三态）——
+    const probe = await page.evaluate(() => {
+      const ns = window.__stZipConverterDebug;
+      if (!ns || typeof ns.getRestoreProbe !== 'function') return { present: false };
+      const p = ns.getRestoreProbe();
+      const before = p.capability;
+      let threw = false;
+      try { p.capability = 'available'; } catch { threw = true; }   // 严格模式会抛
+      return {
+        present: true,
+        capability: before,
+        reasonLen: (p.unsupportedReason || '').length,
+        frozen: Object.isFrozen(p),
+        tamperThrew: threw,
+        afterTamper: p.capability,
+        namespaceFrozen: Object.isFrozen(ns),
+      };
+    });
+    t.log(`  · R-19 调试探针：${JSON.stringify(probe)}`);
+    t.ok('R-19 只读探针存在（window.__stZipConverterDebug.getRestoreProbe）', probe.present,
+      JSON.stringify(probe));
+    t.ok('R-19 未探测时三态为 `unknown`（延迟探测：不为探测预先发请求）',
+      probe.capability === 'unknown', JSON.stringify(probe));
+    t.ok('R-19 探针快照**冻结**且**改不动**（否则 E2E 能伪造状态，断言失去判别力）',
+      probe.frozen === true && probe.afterTamper === 'unknown', JSON.stringify(probe));
+    t.ok('R-19 命名空间对象本身也冻结（不可被追加/替换成员）',
+      probe.namespaceFrozen === true, JSON.stringify(probe));
 
     // —— M-8 批量恢复：恢复入口的可见性契约 ——
     // 契约（源码）：`computeActionAvailability`（`index.js:134-144`）
@@ -781,11 +828,235 @@ module.exports = {
     t.ok('M-8 分卷接管后（lastConvertedBlob 置 null）恢复入口**重新隐藏** —— 可见性确实由产物决定',
       !restoreAfter.present || !restoreAfter.visible, JSON.stringify(restoreAfter));
 
-    // —— 顺带钉住：转换期间控制条**始终隐藏**（转换不进 TaskManager 的直接证据）——
-    t.ok('M-7 转换期间控制条保持隐藏（转换任务不注册 TaskManager —— 与 M-7 可达性登记一致）',
+    // —— 转换结束后控制条回到隐藏（`complete` → `taskControls.hide()`）——
+    // ⚠️ 旧断言是「转换期间控制条**始终隐藏**（转换不进 TaskManager 的直接证据）」——
+    //    R-16 修好后那句**变成假的**，此处随之反转为「结束后隐藏」。
+    t.ok('M-7 转换结束后控制条回到隐藏（`complete` → `taskControls.hide()`）',
       await page.evaluate(() => {
         const root = document.getElementById('task-controls');
         return Boolean(root) && root.hidden === true;
       }));
+
+    // ============ M-7b 真实 pause → resume 续传（R-16 的核心验收面）============
+    // 用**暂停窗口夹具**（~48 MB / 48 条目）：6 MB 的转换在数百毫秒内结束，
+    // 等控制条出现的往返里就完了 ⇒ pause 会点在已隐藏的按钮上（**假红或假绿**）。
+    const pausePath = await ensurePauseFixture();
+    t.ok('M-7b 暂停窗口夹具已生成（> 40 MB，确定性高熵 ⇒ 转换需数秒）',
+      fs.statSync(pausePath).size > 40 * 1024 * 1024,
+      `${(fs.statSync(pausePath).size / 1048576).toFixed(1)} MB`);
+
+    // 换源包必须先清回初态（spec §11.2：持久化 profile 会恢复上一轮的源包，
+    // 而 `index.js` 只在 `!currentFile` 时采纳新文件）
+    const resetForPause = await resetWorkspace(page);
+    const readyPause = await waitForPluginReady(page);
+    const openedPause = await openWorkbench(page);
+    t.ok('M-7b 工作台已清回初态并重新就绪', resetForPause && readyPause && openedPause.visible,
+      JSON.stringify(openedPause));
+
+    await page.setInputFiles('#file-input', pausePath);
+    let pausePlanned = false;
+    try {
+      await page.waitForFunction(() => {
+        const el = document.getElementById('plan-summary-bar');
+        if (!el) return false;
+        const m = /直通\s*(\d+)/.exec(el.textContent.replace(/\s+/g, ' '));
+        return Boolean(m) && Number(m[1]) >= 13;
+      }, null, { timeout: 90_000 });
+      pausePlanned = true;
+    } catch { pausePlanned = false; }
+    t.ok('M-7b 大包计划已产出（确实换了源包）', pausePlanned, (await readPlanBar(page)).bar);
+
+    await page.selectOption('#target-select', 'st');
+    await page.fill('#split-input', '0');  // 关掉分卷：本段只验续传，不混入分卷语义
+    await page.waitForTimeout(400);
+
+    await page.click('#btn-convert');
+
+    // ① 转换期间控制条**可见**（转换确实注册了 TaskManager —— 旧实现此处恒隐藏）
+    let tcRunning = false;
+    try {
+      await page.waitForFunction(() => {
+        const root = document.getElementById('task-controls');
+        if (!root || root.hidden) return false;
+        const r = root.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }, null, { timeout: 30_000 });
+      tcRunning = true;
+    } catch { tcRunning = false; }
+    t.ok('M-7b 转换期间控制条**可见**（running 态 —— 转换已注册 TaskManager）', tcRunning);
+
+    // ② 暂停 ⇒ 出现「继续」（running → paused）
+    await page.click('#tc-pause');
+    let pausedVisible = false;
+    try {
+      await page.waitForFunction(() => {
+        const btn = document.getElementById('tc-resume');
+        if (!btn || btn.hidden) return false;
+        const r = btn.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }, null, { timeout: 30_000 });
+      pausedVisible = true;
+    } catch { pausedVisible = false; }
+    t.ok('M-7b 点暂停后出现「继续」按钮（控制条 running → paused）', pausedVisible);
+
+    // ③ 续传 ⇒ 跑完（complete → 控制条隐藏）
+    await page.click('#tc-resume');
+    let resumeDone = false;
+    try {
+      await page.waitForFunction(() => {
+        const root = document.getElementById('task-controls');
+        return Boolean(root) && root.hidden === true;
+      }, null, { timeout: 300_000 });
+      resumeDone = true;
+    } catch { resumeDone = false; }
+    t.ok('M-7b 续传跑完（控制条回到隐藏 = 任务 complete）', resumeDone);
+
+    // ④ **续传命中可观测** —— 本任务新增的可观测面。
+    //    真实字段是 `report.totals.resumed`（**不是** `resumedCount`，该字段从不存在），
+    //    经 `resumedNote()` 渲染进成功日志，故可从日志 DOM 读到。
+    const logText = await page.evaluate(() => {
+      const mount = document.getElementById('log-console-mount');
+      return mount ? mount.textContent : '';
+    });
+    const resumedMatch = /沿用断点跳过\s*(\d+)\s*项/.exec(logText);
+    t.log(`  · M-7b 日志尾部：${JSON.stringify(logText.slice(-240))}`);
+    t.ok('M-7b 续传**真的跳过了条目**（日志含「沿用断点跳过 N 项」）', Boolean(resumedMatch),
+      `日志尾部=${JSON.stringify(logText.slice(-240))}`);
+    if (resumedMatch) {
+      t.ok('M-7b 跳过条数 > 0', Number(resumedMatch[1]) > 0, `N=${resumedMatch[1]}`);
+    }
+
+    // ============ M-10 批量转换：入口可达 + 暂停续传（U-7 / R-16 批量的验收面）============
+    // 取证（本仓 2026-09-27）：`grep -rn runBatchConversion` ⇒ 只有**定义** + 3 处注释/测试注释，
+    //   **零调用者**；暂存区批量栏只渲染「载入为源/下载/写回宿主/删除」；模板无批量入口。
+    //   而 `README.md:74` 写着「…批量转换与自定义包名」 ⇒ 承诺有、入口无（与 R-16 同族）。
+    // 本段验：① 入口**可达**；② 批量转换真产出；③ 批次中途 pause → resume 时
+    //   **已完成子项不重跑**、从断点游标继续。
+    //
+    // 顺序设计：**先选小包、后选大包**（勾选顺序 = Set 插入顺序 = 批次顺序）
+    //   ⇒ 第 0 个子项（小包）很快完成，第 1 个子项（48 MB 大包）跑得久
+    //   ⇒ 在「队列新增 1 个产物」之后点暂停，暂停必然落在**第 1 个子项内部**
+    //   ⇒ 断点游标 = 1、outputs = [第 0 项] ⇒ 续传时**必须跳过第 0 项**（这正是要验的语义）。
+    const mini = await ensureFixtures();
+    const smallPath = mini['fixture-st.zip'];
+
+    const resetForBatch = await resetWorkspace(page);
+    const readyBatch = await waitForPluginReady(page);
+    const openedBatch = await openWorkbench(page);
+    t.ok('M-10 工作台已清回初态并重新就绪',
+      resetForBatch && readyBatch && openedBatch.visible, JSON.stringify(openedBatch));
+
+    await page.setInputFiles('#file-input', [smallPath, pausePath]);
+    let twoStashed = false;
+    try {
+      await page.waitForFunction(
+        () => document.querySelectorAll('#stash-list .stash-select-box').length >= 2,
+        null, { timeout: 60_000 },
+      );
+      twoStashed = true;
+    } catch { twoStashed = false; }
+    t.ok('M-10 暂存区有两个源包（小包 + 大包）', twoStashed);
+
+    const idByName = (name) => page.evaluate((n) => {
+      const rows = Array.from(document.querySelectorAll('#stash-list .eq-name-row'));
+      const row = rows.find((r) => (r.querySelector('.archive-name')?.textContent || '').trim() === n);
+      return row ? (row.querySelector('.stash-select-box')?.dataset.id ?? null) : null;
+    }, name);
+    const smallId = await idByName('fixture-st.zip');
+    const bigId = await idByName('fixture-pause-st.zip');
+    t.ok('M-10 两个源包都能按名定位到勾选框', Boolean(smallId) && Boolean(bigId),
+      `small=${smallId} big=${bigId}`);
+
+    if (smallId) await page.check(`.stash-select-box[data-id="${smallId}"]`);
+    if (bigId) await page.check(`.stash-select-box[data-id="${bigId}"]`);
+    await page.waitForTimeout(400);
+
+    const batchBtn = await page.evaluate(() => {
+      const bar = document.getElementById('stash-batch-bar');
+      if (!bar || bar.hidden) return { ok: false, reason: '批量栏未显示' };
+      const btn = Array.from(bar.querySelectorAll('button'))
+        .find((b) => (b.textContent || '').includes('批量转换'));
+      if (!btn) return { ok: false, reason: '无「批量转换」按钮' };
+      const r = btn.getBoundingClientRect();
+      return { ok: true, visible: r.width > 0 && r.height > 0, disabled: Boolean(btn.disabled) };
+    });
+    t.ok('M-10 多选后出现「批量转换」按钮且可用（U-7 的入口补上了）',
+      batchBtn.ok && batchBtn.visible && batchBtn.disabled === false, JSON.stringify(batchBtn));
+
+    await page.selectOption('#target-select', 'st');
+    await page.fill('#split-input', '0');
+    await page.waitForTimeout(400);
+
+    const qBeforeBatch = (await queueNames()).length;
+    await page.click('#stash-batch-bar button:has-text("批量转换")');
+
+    // ① 批量期间控制条可见（批量是**一个**任务 —— 不是每个子项一个）
+    let batchTcRunning = false;
+    try {
+      await page.waitForFunction(() => {
+        const root = document.getElementById('task-controls');
+        if (!root || root.hidden) return false;
+        const r = root.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }, null, { timeout: 30_000 });
+      batchTcRunning = true;
+    } catch { batchTcRunning = false; }
+    t.ok('M-10 批量期间控制条**可见**（批量转换已注册 TaskManager，不再是死代码路径）',
+      batchTcRunning);
+
+    // ② 等第 0 个子项完成（队列 +1）⇒ 此刻第 1 个子项正在跑 ⇒ 暂停
+    let firstItemDone = false;
+    try {
+      await page.waitForFunction(
+        (n) => document.querySelectorAll('#export-queue-panel .eq-name').length >= n + 1,
+        qBeforeBatch, { timeout: 240_000 },
+      );
+      firstItemDone = true;
+    } catch { firstItemDone = false; }
+    t.ok('M-10 批次第 0 个子项已完成（队列 +1）', firstItemDone);
+
+    await page.click('#tc-pause');
+    let batchPaused = false;
+    try {
+      await page.waitForFunction(() => {
+        const btn = document.getElementById('tc-resume');
+        if (!btn || btn.hidden) return false;
+        const r = btn.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }, null, { timeout: 60_000 });
+      batchPaused = true;
+    } catch { batchPaused = false; }
+    t.ok('M-10b 批次中途可暂停（控制条 running → paused）', batchPaused);
+
+    await page.click('#tc-resume');
+    let batchResumed = false;
+    try {
+      await page.waitForFunction(() => {
+        const root = document.getElementById('task-controls');
+        return Boolean(root) && root.hidden === true;
+      }, null, { timeout: 300_000 });
+      batchResumed = true;
+    } catch { batchResumed = false; }
+    t.ok('M-10b 批次续传跑完（控制条回到隐藏 = 任务 complete）', batchResumed);
+
+    // ③ **已完成子项不重跑**：整批只应新增 **2** 个产物（若第 0 项被重跑就是 3 个）
+    const qAfterBatch = await queueNames();
+    const batchNew = qAfterBatch.length - qBeforeBatch;
+    t.log(`  · M-10 批次新增产物 ${batchNew} 份：${JSON.stringify(qAfterBatch.slice(qBeforeBatch))}`);
+    t.ok('M-10b 整批新增产物 == 2（**已完成子项没有被重跑**）', batchNew === 2,
+      `实际新增 ${batchNew} 份：${JSON.stringify(qAfterBatch.slice(qBeforeBatch))}`);
+
+    // ④ 续传命中同样可观测（第 1 个子项在暂停前已完成的条目被跳过）
+    const batchLogText = await page.evaluate(() => {
+      const mount = document.getElementById('log-console-mount');
+      return mount ? mount.textContent : '';
+    });
+    const batchResumedMatch = /沿用断点跳过\s*(\d+)\s*项/.exec(batchLogText);
+    t.log(`  · M-10b 日志尾部：${JSON.stringify(batchLogText.slice(-240))}`);
+    t.ok('M-10b 批次续传**真的跳过了条目**（日志含「沿用断点跳过 N 项」）',
+      Boolean(batchResumedMatch), `日志尾部=${JSON.stringify(batchLogText.slice(-240))}`);
+    t.ok('M-10b 批量成功日志出现两次（两个子项各一次）',
+      (batchLogText.match(/批量转换|数据包转换成功/g) || []).length >= 2,
+      `匹配数=${(batchLogText.match(/批量转换|数据包转换成功/g) || []).length}`);
   },
 };

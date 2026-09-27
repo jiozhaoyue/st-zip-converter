@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "核查 R-16：TaskManager 的状态语义与节流常数（64 条 / 2000ms）未被改动；Worker terminate 后仍置空 workerInstance；新增的 per-entry 回调未接 DOM 或已合帧"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "核查 R-19：新接缝是否已在「无全局命名空间」一节登记、是否只读、是否泄漏 CSRF token / handle / 路径；并确认该节原文已同步更正（否则规格变成假事实）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核查质量门：npm test 零回退、五条静态守卫 exit 0、单一模板源、禁止模式清单"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "核查测试矩阵与 Zip IO 并发契约；fixtures/gen.js 的改动是否影响既有测试的隐含前提（PRD OQ-3）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核查：startsWith('fetch-') 类前缀硬编码是否已被全部收敛到 taskKindOf（不得残留第二处判据）"}
+{"file": ".trellis/spec/guides/subagent-collaboration.md", "reason": "核查纪律：派发子代理前的来源唯一性与写权限边界——本任务为新脚本与新测试文件，须确认无重叠写者"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核查：enqueue 新增的 taskId 字段是否已同步进 §358 的签名说明（否则规格成假事实）；「产物不自动落库」的契约是否未被批量续传改动"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核查接线未把呈现依赖引入 src/core/：判据与 UI 控制在 index.js，纯逻辑层无 DOM 触碰"}

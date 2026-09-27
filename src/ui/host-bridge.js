@@ -102,6 +102,33 @@ export function getRestoreUnsupportedReason() {
   return restoreUnsupportedDetail;
 }
 
+/**
+ * 只读调试探针：供自动化（E2E）断言恢复能力**三态**。
+ *
+ * 存在的理由：`restoreCapability` 是模块级 `let`，此前**没有任何出口**给页面侧读取
+ * ⇒ Playwright 只能验非破坏性的可见性契约，**断言不了真正的三态**（R-19）。
+ *
+ * 三条硬约束（`design.md` D3.2，违约即缺陷）：
+ * 1. **只读**：返回 `Object.freeze` 的快照，**不得**暴露 setter
+ *    （否则 E2E 能伪造状态，断言当场失去判别力）；
+ * 2. **不成为攻击面**：只暴露**能力枚举 + 原因文案**，
+ *    **不得**含 CSRF token / user handle / 文件系统路径
+ *    —— 那些有各自的受控获取路径（`getCsrfToken()` / `getHandle()`），不从这里漏出；
+ * 3. **挂载由调用方负责**：本函数只在 `host-bridge`（平台差异唯一落点，`L0-9`）产出数据，
+ *    是否挂到 `window` 由 `index.js` 决定（含占用检查）。
+ *
+ * 挂载后须在 `.trellis/spec/frontend/hook-guidelines.md` 的「无全局命名空间」一节**登记**
+ * （该节 `:121` 的明文要求）。
+ *
+ * @returns {Readonly<{capability: 'unknown'|'available'|'unsupported', unsupportedReason: string}>}
+ */
+export function getRestoreProbe() {
+  return Object.freeze({
+    capability: restoreCapability,
+    unsupportedReason: restoreUnsupportedDetail || '',
+  });
+}
+
 /** 构造「本宿主无恢复能力」错误（统一文案，避免各处措辞漂移） */
 function restoreUnsupportedError() {
   const err = new Error(
@@ -205,7 +232,7 @@ export function hostLayoutCode(platform) {
  *
  * 这个函数存在的理由是「**归一只能有一处**」：
  * 修前只有宿主拉取路径与文件名预览做了归一，而 `refreshPlan` / `btnConvert` /
- * `runBatchConversion` / 扩展清单的 `targetLayout` 都把字符串 `'native'`
+ * `runBatchConversion`（现 `handleBatchConvert`）/ 扩展清单的 `targetLayout` 都把字符串 `'native'`
  * **直接交给了计划器与转换器**；计划器的合成分支只认 `TARGETS.L` / `TARGETS.ST`
  * （`src/core/plan-preview.js`），`native` 不匹配任何分支 ⇒
  * 「宿主原生格式」退化成**原样直通**：

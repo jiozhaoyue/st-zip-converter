@@ -242,7 +242,8 @@ const L_SELECTION = Object.freeze({
  * @param {boolean} [options.dryRun] 只产出报告不写文件(数据条目跳过读取)
  * @param {AbortSignal} [options.signal] 中止信号（每条目边界检查；暂停/中止由 TaskManager 触发）
  * @param {Map<string,number>|Object<string,number>} [options.resumeCrcMap] 断点续传清单：
- *   源条目名 → 已写入目标时的 crc32；命中且值相等的条目跳过（report 计入 resumedCount）
+ *   源条目名 → 已写入目标时的 crc32；命中且值相等的条目跳过（计入 `report.totals.resumed`，
+ *   命中名单在 `report.resumed`。**注**：旧注释写作 `resumedCount`，该字段从不存在 —— 2026-09-27 订正）
  * @param {function(string, number): void} [options.onEntryDone] 每完成一个源条目回调
  *   (源条目名, crc32)——供 TaskManager 更新断点清单
  * @returns {Promise<Report>}

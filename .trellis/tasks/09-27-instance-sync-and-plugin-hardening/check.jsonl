@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-27-instance-sync-and-plugin-hardening/prd.md", "reason": "核查 AC-P1…AC-P8：两个子任务的 AC 是否各自有独立读数证据、五个可写目标的覆盖率与零删除读数是否齐备、插件产包可重跑性证据是否存在、规范是否已落 .trellis/spec/ 且自包含"}
+{"file": ".trellis/spec/guides/instance-e2e-and-data-sync.md", "reason": "核查集成读数是否按正确口径得出（§7 三口径、§12.5 PT 判据）；不可达条目是否显式列出而非静默剔除"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核查 AC-P5 质量门：npm test 零回退、五条静态守卫、构建通过"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "核查脚本侧质量门与测试矩阵"}
+{"file": ".trellis/spec/guides/subagent-collaboration.md", "reason": "核查：汇总的两个子任务产物来源唯一、无写权限越界、无跨任务污染"}

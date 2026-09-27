@@ -38,7 +38,10 @@ async function readZipNames(outPath) {
 }
 
 describe('convert 断点续传 (resumeCrcMap + signal + onEntryDone)', () => {
-  it('crc 命中清单的条目跳过且 report.resumedCount > 0；未命中条目正常写出', async () => {
+  // ⚠️ 用例名订正（2026-09-27）：原写作 `report.resumedCount > 0`，但 **`resumedCount` 这个字段
+  //    全仓从未存在**（零赋值零读取）—— 真正断言的是 `report.totals.resumed`（计数）
+  //    与 `report.resumed`（命中条目名单）。用例名说错字段 = 假事实（P-3 同形），已订正。
+  it('crc 命中清单的条目跳过且 report.totals.resumed > 0；未命中条目正常写出', async () => {
     const entries = stEntries();
     const source = await zipFrom(entries);
     const { crcs: sourceCrcs } = await readZipNames(source);

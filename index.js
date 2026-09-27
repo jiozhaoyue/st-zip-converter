@@ -48,6 +48,7 @@ import {
   cancelRestoreInFlight,
   isRestoreUnsupported,
   getRestoreUnsupportedReason,
+  getRestoreProbe,
   alertDialog,
   confirmDialog,
   hostSelectionCapability,
@@ -82,6 +83,283 @@ function formatBytes(bytes) {
   const units = ['B', 'KB', 'MB', 'GB'];
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+/* ────────────────────────── 任务类型判据（唯一） ────────────────────────── */
+
+/**
+ * 任务 id 前缀 ↔ 类型。**这是全仓唯一的任务类型判据** ——
+ * 任何地方都不得再写 `id.startsWith('fetch-')` 这类硬编码（同一判据两处实现 = 立即漂移）。
+ *
+ * 加一条新任务路径时：只在此处加类型 + 在 `RESUMABLE_HANDLERS` 加执行体。
+ * （R-16 之前只有宿主拉取接了状态机，转换/写回都是"读得到但续不了"，
+ * 根因之一就是判据写成了散落的 `startsWith`。）
+ */
+export const TASK_KINDS = Object.freeze({
+  FETCH: 'fetch',
+  CONVERT: 'convert',
+  CONVERT_BATCH: 'convert-batch',
+  RESTORE: 'restore',
+});
+
+/** 类型 → id 前缀 */
+export const TASK_PREFIX = Object.freeze({
+  [TASK_KINDS.FETCH]: 'fetch-',
+  [TASK_KINDS.CONVERT]: 'convert-',
+  [TASK_KINDS.CONVERT_BATCH]: 'convert-batch-',
+  [TASK_KINDS.RESTORE]: 'restore-',
+});
+
+/**
+ * 从任务 id 反解类型。
+ *
+ * ⚠️ **必须按前缀长度降序匹配**：`convert-batch-` 与 `convert-` 是**前缀重叠**的，
+ * 按声明顺序遍历会让 `convert-batch-<ts>` 被 `convert-` 先吃掉 ⇒ **静默降级成单包语义**
+ * （断点字段读不到、恢复走错执行体，且不报错）。
+ * 故此处**显式排序**，**不依赖对象字面量的插入顺序** —— 依赖插入顺序的写法
+ * 会在有人重排常量时无声失效。
+ *
+ * @param {string} id
+ * @returns {'fetch'|'convert'|'convert-batch'|'restore'|null} 未知 id 返回 null（调用方须 warn，不得静默）
+ */
+export function taskKindOf(id) {
+  if (typeof id !== 'string') return null;
+  const entries = Object.entries(TASK_PREFIX).sort((a, b) => b[1].length - a[1].length);
+  for (const [kind, prefix] of entries) {
+    if (id.startsWith(prefix)) return kind;
+  }
+  return null;
+}
+
+/* ────────────────────── 断点清单节流（单包/批量共用） ────────────────────── */
+
+// 与 `src/core/task-manager.js:23-25` **同源**的节流窗口 —— 不另立一套数字，
+// 否则「什么时候落盘」在两处会有两种答案。
+const CHECKPOINT_EVERY_ENTRIES = 64;
+const CHECKPOINT_EVERY_MS = 2000;
+
+/**
+ * 造一个断点清单节流器（转换路径专用）。
+ *
+ * **为什么必须节流**：`Object.fromEntries(doneEntries)` 是 O(n)。若每个进度回调都建一次对象，
+ * n 个条目就是 O(n²) 次属性分配 + 大量短命对象（8683 条目的包 ≈ 7500 万次分配），
+ * 制造 GC 压力与长任务（`L1-MR-9` 的相邻风险）。
+ * **未到窗口时不建对象** —— 这是与「只在 adapter.save 处节流」的关键差别
+ * （后者仍会每 tick materialize 一次）。
+ *
+ * ⚠️ **首次调用一定落盘**（`lastFlushAt` 初值 0 ⇒ 时间条件立刻成立）—— 这是**载荷属性，别"修掉"**：
+ * `TaskManager.pause()` 落盘的是**内存里的 `task.checkpoint`**，而它只在 `onCheckpoint`
+ * **被调用时**才更新 ⇒ 若首次调用被节流掉，「任务刚开始就暂停」会因 `checkpoint === null`
+ * 而 `resume()` 返回 null ⇒ **无法续传**（正是 R-16 的形态）。
+ * 该行为与 `src/core/task-manager.js` 自身的节流一致（其时间条件同样在首调用成立）。
+ *
+ * **方向纪律（不可颠倒）**：快照**只含已完成条目**。滞后窗口 ≤63 条 ⇒ 续传时这 ≤63 条被**重做**（安全）；
+ * 若让快照**超前**（把未完成的条目算进去）⇒ 续传时被**错误跳过** ⇒ **产物缺条目**。
+ *
+ * **必须挂在 `onProgress` 上**：`runConversionTask` 的 `onEntryDone` 只在**主线程降级**分支触发，
+ * Worker 路径（= 真浏览器）**永不触发**（见 `src/core/worker-client.js:89` 的 JSDoc）
+ * ⇒ 只挂 `onEntryDone` 会让断点在浏览器里永不落盘、`npm test` 却全绿。
+ *
+ * @param {function} onCheckpoint TaskManager.start() 返回的落盘句柄
+ * @param {Map<string, number>} doneEntries 已完成条目（**累积中**，本函数只读它的 size 与内容）
+ * @returns {function({force?: boolean, totalEntries?: number, bytes?: number}): void}
+ */
+export function createCheckpointThrottle(onCheckpoint, doneEntries, {
+  everyEntries = CHECKPOINT_EVERY_ENTRIES,
+  everyMs = CHECKPOINT_EVERY_MS,
+} = {}) {
+  let lastFlushAt = 0;
+  let lastFlushedSize = -1;
+  return function maybeCheckpoint({ force = false, totalEntries = 0, bytes = 0 } = {}) {
+    const now = Date.now();
+    const due = force
+      || doneEntries.size - lastFlushedSize >= everyEntries
+      || now - lastFlushAt >= everyMs;
+    if (!due) return;
+    lastFlushedSize = doneEntries.size;
+    lastFlushAt = now;
+    void onCheckpoint(
+      { doneEntries: Object.fromEntries(doneEntries), totalEntries },
+      { bytes, force },
+    );
+  };
+}
+
+/* ────────────────── 续传命中的可观测面 ────────────────── */
+
+/**
+ * 「本轮沿用了断点」的提示串（`> 0` 才给，避免正常转换被噪音污染）。
+ *
+ * ⚠️ 字段名是 **`report.totals.resumed`**（计数；`report.resumed` 是命中条目**名单**）。
+ * 仓里曾有注释与用例名写作 `resumedCount` —— **该字段从来不存在**（全仓零赋值零读取）。
+ * 续传是否真的生效必须**可观测**（E2E 要断言它），故把它显式渲染进完成文案与日志。
+ *
+ * @param {object} report `convert()` 的 Report（或其 toJSON()）
+ * @returns {string} 形如「（沿用断点跳过 2 项）」，无命中时为空串
+ */
+export function resumedNote(report) {
+  const n = report?.totals?.resumed ?? 0;
+  return n > 0 ? `（沿用断点跳过 ${n} 项）` : '';
+}
+
+/* ────────────────── 转换收尾出口的判定（单一入口） ────────────────── */
+
+/**
+ * 转换路径的**收尾出口判定**：给定错误与任务记录，决定走哪个出口。
+ *
+ * ⚠️ **为什么必须抽出来**：`design.md` 说这是"最容易写错的一处" ——
+ * 暂停是**正常用户操作**，若误走 `fail()`，`fail` 会 `adapter.remove(id)`
+ * 清掉**刚落盘的断点** ⇒ 续传能力当场失效，且 UI 显示"失败"。
+ * 内联在 `main()` 的 catch 里时这段逻辑**单测够不着**（`main()` 需要 DOM），
+ * 抽成纯函数后「暂停**绝不**走 fail」这条才成为可断言契约。
+ *
+ * 「静默」的正确含义：**不调 `fail()`、不 `logger.error`、不显示"失败"**；
+ * **不是**"什么都不做" —— 暂停必须**显示暂停态**（`showPaused` + `setPausedCheckpoint`）。
+ *
+ * @param {object} p
+ * @param {Error} p.err 执行体抛出的错误
+ * @param {object|null} p.record `taskManager.get(taskId)` 的结果
+ * @returns {{action: 'fail'|'paused'|'aborted'|'none'}}
+ */
+export function convertExitForAbort({ err, record }) {
+  if (err?.name !== 'AbortError') return { action: 'fail' };
+  if (record?.state === TASK_STATES.PAUSED) return { action: 'paused' };
+  if (record?.state === TASK_STATES.ABORTED) return { action: 'aborted' };
+  return { action: 'none' };
+}
+
+/* ────────────────── 转换路径的进度记账（单一入口） ────────────────── */
+
+/**
+ * 造「转换进度回调核」：**唯一**允许挂断点落盘的地方（单包与批量共用，避免两处漂移）。
+ *
+ * ⚠️ **为什么必须有这个函数**：落盘**只能**挂 `onProgress`。
+ * `runConversionTask` 的 `onEntryDone` 是顶层参数，只被传进**主线程降级分支**；
+ * Worker 分支走 `postMessage`，**函数过不了结构化克隆** ⇒ **真浏览器里永不触发**
+ * （见 `src/core/worker-client.js:89` 的 JSDoc：*"主线程路径直通；Worker 路径由 onProgress 累积"*）。
+ * 若把落盘改挂到 `onEntryDone` 上：断点在**浏览器里永不落盘** ⇒ 暂停后无法续传，
+ * 而 `npm test` 全绿（Vitest 无 `Worker`，走主线程路径，`onEntryDone` 会触发）**⇒ 缺陷被测试掩盖**。
+ *
+ * 所以这条契约被拆成可断言的形式：本函数的单测**只调 `onProgress` 一种签名**（模拟 Worker 路径），
+ * 断言断点仍然被喂到。「是否真的接在 `onProgress` 上」这一层由 **E2E（真浏览器）** 守 —— 两者缺一不可。
+ *
+ * @param {object} p
+ * @param {Map<string, number>} p.doneEntries 已完成条目（**就地累积**，供续传时命中即跳过）
+ * @param {function} p.maybeCheckpoint 断点节流器（`createCheckpointThrottle` 的产物）
+ * @returns {function(number, number, string, number|undefined): void}
+ */
+export function attachConversionProgress({ doneEntries, maybeCheckpoint }) {
+  return function trackConversionProgress(cur, total, name, crc32) {
+    // 只做 Map.set + 节流判定，**不碰 DOM** —— 渲染由调用方在下一行做（已由 view 侧合帧，L1-MR-9）
+    if (name && crc32 != null) doneEntries.set(name, crc32);
+    maybeCheckpoint({ force: total > 0 && cur === total, totalEntries: total });
+  };
+}
+
+/* ────────────────── 批量转换的纯编排核（可 Node 直测） ────────────────── */
+
+/**
+ * 批量子项循环核：**纯编排**（无 DOM / 存储 / 任务管理器依赖），故可在 Node 下直测。
+ * `main()` 内的接线代码够不着测试，把语义放这里才对得上「纯逻辑必须可单测」的规格要求。
+ *
+ * 被测试锁定的两条语义：
+ * 1. **从 `startIndex` 开始**（子项游标续传：已完成的子项不重跑）；
+ * 2. **`AbortError` 必须终止循环** —— 其余错误"记日志继续"是既有语义（单个坏包不该打断整批），
+ *    但暂停/中止是**用户意图**，必须是"停"：否则用户点了暂停，界面显示已暂停，
+ *    后台却还在往下跑后续子项，且断点游标与实际进度脱节。
+ *
+ * @param {object} p
+ * @param {Array<*>} p.items 子项列表（**下标即游标**）
+ * @param {number} [p.startIndex=0] 下一个待处理的子项下标
+ * @param {function(*, number): Promise<void>} p.convertItem (item, index) => Promise
+ * @param {function(Error, number): void} [p.onItemError] 非中止错误的回调（**不终止循环**）
+ * @returns {Promise<{processed: number, aborted: boolean, error: Error|null}>}
+ */
+export async function runBatchItems({ items, startIndex = 0, convertItem, onItemError }) {
+  let processed = 0;
+  for (let i = startIndex; i < items.length; i += 1) {
+    try {
+      await convertItem(items[i], i);
+      processed += 1;
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        // 原样上抛中止信号：状态迁移（PAUSED / ABORTED）与 UI 由调用方完成
+        return { processed, aborted: true, error: err };
+      }
+      if (typeof onItemError === 'function') onItemError(err, i);
+    }
+  }
+  return { processed, aborted: false, error: null };
+}
+
+/**
+ * 批量续传的**可验证前提**（R-16 / U-6）：断点说「前 k 个子项已完成」，
+ * 但那 k 个产物是 `ephemeral`（只在内存 `ExportQueue.items` 里），断点却是持久化的
+ * ⇒ 两者可能不一致（产物被删除、被清空、或页面重载过）。
+ *
+ * 判据刻意取**真正依赖的那个东西**（产物还在不在），而**不是**「会话是否同一个」这类代理量 ——
+ * 代理量会在「同会话但用户手动删了产物」时误判为可续。
+ *
+ * @param {object} p
+ * @param {number} p.expectedOutputs 断点记录的已完成产物数
+ * @param {number} p.productsPresent 内存队列里该 taskId 的产物数
+ * @returns {{valid: boolean, reason: string}}
+ */
+export function batchResumeVerdict({ expectedOutputs, productsPresent }) {
+  if (expectedOutputs === productsPresent) return { valid: true, reason: '' };
+  return {
+    valid: false,
+    reason: `断点记 ${expectedOutputs} 个已完成产物，内存队列里只有 ${productsPresent} 个`
+      + '（产物已不在内存：可能被移除，或页面已重载过）',
+  };
+}
+
+/**
+ * 为**指定子项**播种条目级断点。
+ *
+ * ⚠️ 断点里的 `doneEntries` **只对断点游标指向的那个子项有效**：
+ * 不同源包可能含**同名条目**（`characters/X.png`、`settings.json` 几乎必然重名），
+ * 跨子项复用 crc 清单会让第二个子项**错误跳过**那些条目 ⇒ **产物缺条目**。
+ *
+ * @param {object} p
+ * @param {object|null} p.checkpoint 断点清单
+ * @param {number} p.index 当前子项下标
+ * @param {number} p.startIndex 断点游标
+ * @returns {Map<string, number>}
+ */
+export function seedEntriesFor({ checkpoint, index, startIndex }) {
+  if (!checkpoint || index !== startIndex || !checkpoint.doneEntries) return new Map();
+  return new Map(Object.entries(checkpoint.doneEntries));
+}
+
+/**
+ * 挂载只读调试探针 `window.__stZipConverterDebug`（R-19）。
+ *
+ * **规格依据**：`.trellis/spec/frontend/hook-guidelines.md` 的「无全局命名空间」一节明文写着
+ * 「若后续确需自动化钩子，应新增**显式命名**的接缝**并在本节登记**，**不要**恢复隐式全局对象」
+ * ⇒ 本挂载走的是规格**已预留**的那条路，并已在同节完成登记。
+ *
+ * **三条约束**（`design.md` D3.2，违约即缺陷）：
+ * 1. **只读**：命名空间对象 `Object.freeze`，且 `getRestoreProbe()` 返回的**快照**本身也冻结
+ *    —— 防伪能力主要来自后者：E2E 拿到的 `capability` 改不动，断言才有判别力；
+ * 2. **不覆盖已占用者**：宿主或别的扩展可能同名，已存在时**不覆盖**并 warn（静默覆盖会
+ *    悄悄弄坏别人的对象）；
+ * 3. **不泄漏**：只暴露**能力枚举 + 原因文案**，**不含** CSRF token / user handle / 文件路径
+ *    （那些各有受控获取路径，不从这里漏出）。
+ *
+ * 导出面仅为了让单测能覆盖「已占用时不覆盖」这条分支（`test/restore-probe.test.js`）；
+ * 生产路径由 `bootstrap()` 调用。
+ */
+export function mountDebugProbe() {
+  if (typeof window === 'undefined') return;
+  const DEBUG_KEY = '__stZipConverterDebug';
+  if (Object.prototype.hasOwnProperty.call(window, DEBUG_KEY)) {
+    logger.warn(`window.${DEBUG_KEY} 已被占用，跳过挂载（不覆盖既有对象）`);
+    return;
+  }
+  window[DEBUG_KEY] = Object.freeze({
+    getRestoreProbe,
+  });
 }
 
 /**
@@ -192,7 +470,7 @@ async function main(appRoot) {
    * ⚠️ **归一必须在所有取目标处统一做** —— 这正是本函数存在的理由。
    * 修前实际状况：只有「宿主拉取」路径（`handleHostExport` 内的
    * `selectedTarget === 'native' ? hostLayoutCode(...)`）与**文件名预览**做了归一，
-   * 而 `refreshPlan` / `btnConvert` / `runBatchConversion` / 扩展清单的 `targetLayout`
+   * 而 `refreshPlan` / `btnConvert` / `runBatchConversion`（现 `handleBatchConvert`）/ 扩展清单的 `targetLayout`
    * **把字符串 `'native'` 直接交给了计划器与转换器**。
    * 计划器的合成分支只认 `TARGETS.L` / `TARGETS.ST`（`src/core/plan-preview.js`），
    * `native` 不匹配任何分支 ⇒ 「宿主原生格式」退化成**原样直通**：
@@ -389,70 +667,178 @@ async function main(appRoot) {
     btnHostTreeSelectAll.addEventListener('click', () => categorySelectAll());
   }
 
-  // 批量队列转换执行逻辑
-  async function runBatchConversion(sourceRecords) {
-    if (!sourceRecords || sourceRecords.length === 0) return;
+  // 批量队列转换执行逻辑（R-16 / U-5 / U-7：接入任务状态机 + 子项游标续传）
+  //
+  // 形态：**一个任务 + 子项游标**（不给每个子项建任务）——`taskControls` 一次只展示一个活动任务，
+  // N 个控制条会让用户心智断裂。断点清单：
+  //   { kind:'batch', itemIndex, outputs:[{index,name}], doneEntries, totalItems, itemIds }
+  //   - `itemIndex` = **下一个待处理**子项下标（不是"已完成个数"，避免 off-by-one 歧义）
+  //   - `itemIds`   = 源包在 files store 的记录 id（源包是**入库**的，故续传时可按 id 取回）
+  //   - `doneEntries` **只属于 itemIndex 那个子项**（见 seedEntriesFor 的注释）
+  async function handleBatchConvert({
+    resumeCheckpoint = null, resumeTaskId = null, sourceRecords = null,
+  } = {}) {
     const target = resolveTarget(targetSelect ? targetSelect.value : 'pt', 'pt');
-    const totalCount = sourceRecords.length;
-    workbenchBusy = true;
-    applyActionAvailability();
-    view.setProgress(0, `正在开始批量转换 ${totalCount} 个数据包...`);
-    logger.info(`启动批量转换队列，共 ${totalCount} 个包，目标格式: ${target.toUpperCase()}`);
+    const taskId = resumeTaskId || `${TASK_PREFIX[TASK_KINDS.CONVERT_BATCH]}${Date.now()}`;
 
-    let completed = 0;
-    for (let i = 0; i < totalCount; i++) {
-      const srcMeta = sourceRecords[i];
-      const full = await getFile(srcMeta.id);
-      if (!full?.blob) continue;
+    // 续传时按 id 取回源包（列表页刷新也不影响：源包入的是 files store，产物才是内存态）
+    let records = sourceRecords;
+    if (!records && Array.isArray(resumeCheckpoint?.itemIds)) {
+      records = [];
+      for (const id of resumeCheckpoint.itemIds) {
+        const full = await getFile(id);
+        if (full?.blob) records.push(full);
+      }
+    }
+    if (!records || records.length === 0) {
+      logger.warn('批量转换无可处理的源包（选择为空或源包已不在工作区），未启动任务');
+      return;
+    }
+    const itemIds = sourceRecords ? records.map((r) => r.id) : [...resumeCheckpoint.itemIds];
+    const totalItems = itemIds.length;
+    const startIndex = resumeCheckpoint?.itemIndex ?? 0;
 
-      const currentBlob = full.blob;
-      currentBlob.name = full.name;
-
-      const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
-      const outputFilename = resolveFilename(template, {
-        sourceName: currentBlob.name,
-        target,
-        handle: srcMeta.handle || currentHostHandle || 'default-user',
+    // ⚠️ 可验证前提（U-6）：产物是 ephemeral（只在内存），断点却持久化 —— 两者可能不一致。
+    // 不校验就硬续 ⇒ 跳过产物已丢失的子项 ⇒ **静默产出残缺批次**。故此处**不满足即作废断点**。
+    if (resumeCheckpoint) {
+      const verdict = batchResumeVerdict({
+        expectedOutputs: (resumeCheckpoint.outputs ?? []).length,
+        productsPresent: exportQueue.items.filter((it) => it.taskId === taskId).length,
       });
-
-      const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
-
-      try {
-        const { report, resultBlob } = await runConversionTask({
-          source: currentBlob,
-          target,
-          options: {
-            includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : false,
-            includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
-            includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
-            compressionLevel,
-          },
-          onProgress: (cur, tot, name) => {
-            const basePct = Math.round((i / totalCount) * 100);
-            const itemPct = tot > 0 ? Math.round((cur / tot) * (100 / totalCount)) : 0;
-            view.setProgress(basePct + itemPct, `[${i + 1}/${totalCount}] ${currentBlob.name} -> ${name}`);
-          },
-        });
-
-        exportQueue.enqueue({
-          name: outputFilename,
-          blob: resultBlob,
-          targetLayout: target,
-          origin: 'converted',
-          ephemeral: true,
-        });
-
-        completed++;
-        logger.success(`[${completed}/${totalCount}] 数据包转换成功: ${outputFilename}`);
-      } catch (err) {
-        logger.error(`批量转换失败 [${srcMeta.name}]: ${err.message}`);
+      if (!verdict.valid) {
+        logger.warn(`批量续传前提不成立，断点作废、将重跑整批：${verdict.reason}`);
+        // 任务记录可能已随页面重载消失（TaskManager 是内存态）⇒ abort 会返回 false，
+        // 此时直接清持久化断点，否则它会一直留在 adapter 里（孤儿条目，且将来若恢复
+        // "暂停态展示"就会变成活缺陷）
+        if (!(await taskManager.abort(taskId))) {
+          try { await authorityCheckpointAdapter?.remove?.(taskId); } catch { /* 清理失败不阻断 */ }
+        }
+        taskControls.hide();
+        await handleBatchConvert({ sourceRecords: records });
+        return;
       }
     }
 
-    view.setProgress(100, `批量队列处理完成：成功 ${completed}/${totalCount} 个包`);
-    workbenchBusy = false;
+    const { signal, onCheckpoint } = taskManager.start(taskId, '批量转换', { resumable: true, totalBytes: 0 });
+    taskControls.showRunning(taskId, { totalBytes: 0 });
+    const outputs = resumeCheckpoint ? [...(resumeCheckpoint.outputs ?? [])] : [];
+    // 当前子项的条目断点（每个子项**重建**，见 seedEntriesFor）
+    let doneEntries = new Map();
+    let maybeCheckpoint = createCheckpointThrottle(onCheckpoint, doneEntries);
+    let trackProgress = attachConversionProgress({ doneEntries, maybeCheckpoint });
+    const totalCount = totalItems;
+
+    workbenchBusy = true;
     applyActionAvailability();
-    await updateWorkspaceUI();
+    view.setProgress(0, `正在开始批量转换 ${totalCount} 个数据包...`);
+    logger.info(`启动批量转换队列，共 ${totalCount} 个包，目标格式: ${target.toUpperCase()}`
+      + (startIndex > 0 ? `（从第 ${startIndex + 1} 个续传）` : ''));
+
+    try {
+      const run = await runBatchItems({
+        items: itemIds,
+        startIndex,
+        onItemError: (err, i) => {
+          // 单个子项失败沿用既有语义：记日志、继续（任务级 fail 只留给结构性错误）
+          logger.error(`批量转换失败 [${itemIds[i]}]: ${err.message}`);
+        },
+        convertItem: async (itemId, i) => {
+          const full = await getFile(itemId);
+          if (!full?.blob) {
+            logger.warn(`[${i + 1}/${totalCount}] 源包已不在工作区，跳过: ${itemId}`);
+            return;
+          }
+          const currentBlob = full.blob;
+          currentBlob.name = full.name;
+
+          const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
+          const outputFilename = resolveFilename(template, {
+            sourceName: currentBlob.name,
+            target,
+            handle: full.handle || currentHostHandle || 'default-user',
+          });
+          const compressionLevel = compressionSelect ? parseInt(compressionSelect.value, 10) : 5;
+          const pruneBuiltinCheck = document.getElementById('prune-builtin-check');
+
+          // 每个子项重置条目断点（跨子项复用 crc 清单会因同名条目错误跳过 ⇒ 产物缺条目）
+          doneEntries = seedEntriesFor({ checkpoint: resumeCheckpoint, index: i, startIndex });
+          maybeCheckpoint = createCheckpointThrottle(onCheckpoint, doneEntries);
+          trackProgress = attachConversionProgress({ doneEntries, maybeCheckpoint });
+
+          const { report, resultBlob } = await runConversionTask({
+            source: currentBlob,
+            target,
+            // 与单包转换**同源**的参数面：类目勾选/排除/压缩等一律取当前 UI 状态，
+            // 不引入第二套参数面（否则两条路径会漂移）
+            options: {
+              selection: getSelectionState(),
+              excludedPaths: getExcludedPaths(),
+              includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : false,
+              includeCache: includeCacheCheck ? includeCacheCheck.checked : false,
+              includeAppPrivate: includePrivateCheck ? includePrivateCheck.checked : false,
+              compressionLevel,
+              extensionMode: getExtensionMode(),
+              gitMode: getGitMode(),
+              keepDevFiles: getKeepDevFiles(),
+              pruneBuiltinAssets: pruneBuiltinCheck ? pruneBuiltinCheck.checked : true,
+              signal,
+              resumeCrcMap: doneEntries,
+            },
+            onProgress: (cur, tot, name, crc32) => {
+              trackProgress(cur, tot, name, crc32);
+              const basePct = Math.round((i / totalCount) * 100);
+              const itemPct = tot > 0 ? Math.round((cur / tot) * (100 / totalCount)) : 0;
+              view.setProgress(basePct + itemPct, `[${i + 1}/${totalCount}] ${currentBlob.name} -> ${name}`);
+            },
+          });
+
+          exportQueue.enqueue({
+            name: outputFilename,
+            blob: resultBlob,
+            targetLayout: target,
+            origin: 'converted',
+            ephemeral: true,
+            taskId, // ← 失效检测的锚点：续传前按它数"产物还在不在"
+          });
+          outputs.push({ index: i, name: outputFilename });
+          // 子项边界是**天然断点**：强制落一次（比 64 条节流更对齐语义）
+          maybeCheckpoint({ force: true, totalEntries: doneEntries.size });
+          view.renderReport(report);
+          logger.success(`[${outputs.length}/${totalCount}] 数据包转换成功${resumedNote(report)}: ${outputFilename}`);
+        },
+      });
+
+      if (run.aborted) {
+        // 把中止信号交给下方 catch 统一做状态迁移（与单包路径**逐字节同构**）
+        throw run.error;
+      }
+
+      view.setProgress(100, `批量队列处理完成：成功 ${outputs.length}/${totalCount} 个包`);
+      await taskManager.complete(taskId);
+      taskControls.hide();
+    } catch (err) {
+      const rec = taskManager.get(taskId);
+      const { action } = convertExitForAbort({ err, record: rec });
+      if (action === 'paused') {
+        const pct = totalCount > 0 ? Math.min(99, Math.round((outputs.length / totalCount) * 100)) : 0;
+        taskControls.showPaused(taskId, { percent: pct, receivedBytes: outputs.length, totalBytes: totalCount });
+        taskControls.setPausedCheckpoint(taskId, rec?.checkpoint ?? null);
+        view.setProgress(pct, `批量转换已暂停于第 ${outputs.length}/${totalCount} 个包，可从断点继续或丢弃`);
+        logger.info(`批量转换已暂停：已完成 ${outputs.length}/${totalCount}`);
+      } else if (action === 'aborted') {
+        taskControls.hide();
+        view.setProgress(100, '批量转换已中止');
+      } else if (action === 'fail') {
+        await taskManager.fail(taskId, true);
+        taskControls.hide();
+        view.setProgress(100, `批量转换出错: ${err.message}`);
+        logger.error('批量转换出错', err);
+      }
+    } finally {
+      workbenchBusy = false;
+      applyActionAvailability();
+      await updateWorkspaceUI();
+    }
   }
 
   // 上传暂存区源包列表（含选中批操作）
@@ -489,6 +875,10 @@ async function main(appRoot) {
       onRestoreToHost: (fileRecord) => {
         openRestoreModal(fileRecord);
       },
+      // U-7：批量转换入口。此前 `runBatchConversion` 是**无调用者的死代码**
+      // （暂存区批量栏只有"载入为源/下载/写回宿主/删除"），而 README 承诺了"批量转换"
+      // ⇒ 补上这个入口，让已有实现可达、让 README 的承诺成立。
+      onBatchConvert: (records) => { void handleBatchConvert({ sourceRecords: records }); },
     });
   }
 
@@ -505,15 +895,36 @@ async function main(appRoot) {
   // 断点持久化：Authority 后端可用时走服务端 KV（跨会话/多端），否则回退默认内存 adapter
   const authorityCheckpointAdapter = await createCheckpointAdapter();
   const taskManager = new TaskManager(authorityCheckpointAdapter || undefined);
+
+  /**
+   * 可续传任务的分派表：**类型 → 执行体**（与 `TASK_KINDS` 一一对应，唯一判据见 `taskKindOf`）。
+   *
+   * 用箭头函数包一层是刻意的：惰性解引用，避免"表在函数声明之前求值"的时序依赖。
+   * 加新任务路径时：`TASK_KINDS` / `TASK_PREFIX` 加一项 + 此处加一行 —— **不得再写第二个 `if (id.startsWith(...))`**。
+   */
+  const RESUMABLE_HANDLERS = Object.freeze({
+    [TASK_KINDS.FETCH]: (args) => handleHostExport(args),
+    [TASK_KINDS.CONVERT]: (args) => handleExternalConvert(args),
+    [TASK_KINDS.CONVERT_BATCH]: (args) => handleBatchConvert(args),
+  });
+
   const taskControls = initTaskControls({
     taskManager,
     onPause: (id) => {
       // 拉取执行体在 reader 循环内感知 signal.aborted 后自行 checkpoint+cancel；
-      // 此处仅记录暂停请求已发起。
+      // 转换执行体则由 Worker 侧的 signal abort 触发 terminate（`worker-client.js:136`）。
+      // 两处都只记录"暂停请求已发起"，真正的状态迁移由 TaskManager.pause 完成。
       logger.info(`暂停请求已发送: ${id}`);
     },
     onResume: (id, checkpoint) => {
-      if (id.startsWith('fetch-')) handleHostExport({ resumeCheckpoint: checkpoint, resumeTaskId: id });
+      const kind = taskKindOf(id);
+      const handler = RESUMABLE_HANDLERS[kind];
+      if (!handler) {
+        // 查不到就**说清楚**，不静默 —— 静默返回会让用户以为"点了继续但没反应"
+        logger.warn(`无可续传的执行体: ${id}（识别出的类型: ${kind ?? 'null'}）`);
+        return;
+      }
+      handler({ resumeCheckpoint: checkpoint, resumeTaskId: id });
     },
     onAbort: (id) => {
       logger.warn(`任务已中止: ${id}`);
@@ -1539,8 +1950,11 @@ async function main(appRoot) {
     includePrivateCheck.addEventListener('change', () => refreshPlan());
   }
 
-  // 9. 开始转换外部 Zip
-  btnConvert.addEventListener('click', async () => {
+  // 9. 开始转换外部 Zip（R-16：接入任务状态机，支持暂停/续传）
+  //
+  // 具名函数而非内联箭头：`RESUMABLE_HANDLERS` 要按任务类型分派到它（与 handleHostExport 同形）。
+  // 函数声明会被提升，故可以安全地在定义之前的 `onResume` 里被引用。
+  async function handleExternalConvert({ resumeCheckpoint = null, resumeTaskId = null } = {}) {
     if (!currentFile) return;
     const target = resolveTarget(targetSelect.value);
     const selection = getSelectionState();
@@ -1555,6 +1969,24 @@ async function main(appRoot) {
     const shouldSplit = splitMb > 0;
     const pruneBuiltinCheck = document.getElementById('prune-builtin-check');
     const pruneBuiltinAssets = pruneBuiltinCheck ? pruneBuiltinCheck.checked : true;
+
+    const taskId = resumeTaskId || `${TASK_PREFIX[TASK_KINDS.CONVERT]}${Date.now()}`;
+    const totalBytes = currentFile.size || 0;
+    // 与宿主拉取路径同形：start 在 try **之外**（start 自身可能因"同 id 已在运行"抛错，
+    // 那时还没进入 try，不会污染 catch 的失败语义）
+    const { signal, onCheckpoint } = taskManager.start(taskId, '转换', { resumable: true, totalBytes });
+    taskControls.showRunning(taskId, { totalBytes });
+    // 断点清单**由调用方自行累积**：Worker abort 时返回值里的 doneEntries 会随 Promise 一起丢
+    // （`worker-client.js:136-143` 直接 reject），故不能依赖它。
+    // 续传时用断点里的清单**播种**，让已完成条目在 `transform` 层命中即跳过。
+    const doneEntries = new Map(
+      resumeCheckpoint?.doneEntries ? Object.entries(resumeCheckpoint.doneEntries) : [],
+    );
+    const maybeCheckpoint = createCheckpointThrottle(onCheckpoint, doneEntries);
+    const trackProgress = attachConversionProgress({ doneEntries, maybeCheckpoint });
+    if (resumeCheckpoint) {
+      logger.info(`续传任务 ${taskId}: 沿用断点 ${doneEntries.size} 条已完成条目`);
+    }
 
     try {
       workbenchBusy = true;
@@ -1576,8 +2008,11 @@ async function main(appRoot) {
           gitMode: getGitMode(),
           keepDevFiles: getKeepDevFiles(),
           pruneBuiltinAssets,
+          signal,                 // 暂停/中止的执行面（Worker 路径经 terminate，见 L1-MR-8）
+          resumeCrcMap: doneEntries, // 命中即跳过（transform 已支持，计 resumedCount）
         },
-        onProgress: (cur, total, name) => {
+        onProgress: (cur, total, name, crc32) => {
+          trackProgress(cur, total, name, crc32);
           const pct = total > 0 ? 5 + Math.round((cur / total) * 90) : 50;
           view.setProgress(pct, `正在转换写入 [${cur}/${total}]: ${name}`);
         },
@@ -1635,6 +2070,9 @@ async function main(appRoot) {
         }
         // 分卷已接管整包（各 part 进待导出区），原始整包不再有任何消费方 → 立即释放
         lastConvertedBlob = null;
+        // 分卷路径同样是一个**正常完成出口** —— 漏掉这两行会让控制条永远停在 running
+        await taskManager.complete(taskId);
+        taskControls.hide();
         return;
       }
 
@@ -1660,16 +2098,42 @@ async function main(appRoot) {
       view.renderReport(report);
 
       view.setProgress(100, `转换完成！产物已进入待导出区: ${outputFilename}`);
-      logger.success(`转换成功: ${outputFilename} (${formatBytes(resultBlob.size)}) —— 可在待导出区下载、选位置导出、存入工作区或写回宿主`);
+      logger.success(`转换成功${resumedNote(report)}: ${outputFilename} (${formatBytes(resultBlob.size)}) —— 可在待导出区下载、选位置导出、存入工作区或写回宿主`);
 
+      await taskManager.complete(taskId);
+      taskControls.hide();
     } catch (err) {
-      view.setProgress(100, `转换出错: ${err.message}`);
-      logger.error('数据包转换出错', err);
+      const rec = taskManager.get(taskId);
+      const { action } = convertExitForAbort({ err, record: rec });
+      if (action === 'paused') {
+        // 「静默」≠「什么都不做」：暂停必须显示暂停态。语义与宿主拉取路径逐字节同构。
+        const total = rec?.checkpoint?.totalEntries || rec?.totalBytes || 0;
+        const done = doneEntries.size;
+        const pct = total > 0 ? Math.min(99, Math.round((done / total) * 100)) : 0;
+        taskControls.showPaused(taskId, { percent: pct, receivedBytes: 0, totalBytes: total });
+        taskControls.setPausedCheckpoint(taskId, rec?.checkpoint ?? null);
+        view.setProgress(pct, '转换已暂停，可从断点继续或丢弃');
+        logger.info(`转换已暂停于 ${done}/${total || '?'} 条已完成条目`);
+      } else if (action === 'aborted') {
+        taskControls.hide();
+        view.setProgress(100, '转换已中止');
+      } else if (action === 'fail') {
+        await taskManager.fail(taskId, true); // keepCheckpoint=true：暂停过的任务失败后仍可续
+        taskControls.hide();
+        view.setProgress(100, `转换出错: ${err.message}`);
+        logger.error('数据包转换出错', err);
+      }
+      // action === 'none'：AbortError 但任务已不在 PAUSED/ABORTED（如已被 complete）⇒ 不做事。
+      // ⚠️ 本分支**绝不**出现在 action 为 paused 时调 fail() 的写法 —— 见 convertExitForAbort 的注释。
     } finally {
       workbenchBusy = false;
       applyActionAvailability();
     }
-  });
+  }
+
+  if (btnConvert) {
+    btnConvert.addEventListener('click', () => { void handleExternalConvert(); });
+  }
 
   // 10. 页面启动时无损恢复工作区状态与初始化文件名预览
   updateFilenamePreview();
@@ -1790,6 +2254,10 @@ export function openConverterModal() {
  * 但这是"当前没炸"而非"不会炸"，判定顺序必须按语义来。
  */
 function bootstrap() {
+  // 只读调试探针最先挂：**两种形态都要有**（插件态的工作台挂在抽屉里、且抽屉默认是关的，
+  // 若把挂载放进 main() 就会让「抽屉未打开」时的探针不可用）
+  mountDebugProbe();
+
   const host = detectHost();
 
   if (host.isPlugin) {

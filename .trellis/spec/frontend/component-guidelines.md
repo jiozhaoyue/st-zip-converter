@@ -9,8 +9,12 @@
 本模块是**发给别人装进酒馆的扩展插件**，因此额外承担「不能弄坏别人酒馆」的责任。三条底线：
 
 - **不用重 UI 框架**：不引入 React / Vue / Svelte，只用原生 DOM 操作。
-- **不留全局命名空间**：模块全部是标准 ESM，`globalThis` 上**不挂任何自定义符号**。
-  （历史教训：09-04 之前的 IIFE 时代曾把调试钩子挂在 `globalThis.__tavernConvert`；该形态与 `tavern-convert-` DOM 前缀**均已删除**，出现即为陈旧描述。）
+- **不留隐式全局命名空间**：模块全部是标准 ESM，`globalThis` 上**不挂任何自定义符号**，
+  **唯一例外**是 `window.__stZipConverterDebug` —— 一个**显式命名、只读、已登记**的自动化探针
+  （2026-09-27 新增，R-19；登记表与新增规矩见 `hook-guidelines.md` 的「全局命名空间」一节）。
+  **除它之外不得再挂任何全局符号**；新增同类接缝必须先走该节的登记流程。
+  （历史教训：09-04 之前的 IIFE 时代曾把调试钩子挂在 `globalThis.__tavernConvert`；该形态与
+  `tavern-convert-` DOM 前缀**均已删除**，出现即为陈旧描述。）
 - **DOM 隔离靠两件事，不靠命名前缀**：
   1. **样式**：所有 CSS 规则作用域化在 `.app-container`（独立态）/ `.st-converter-drawer-app`（插件态）之下（见下方 CSS Scoping Mandate）；
   2. **注入要素**：id 统一为 `st-zip-converter-*`，防重标记用 `dataset.stZipInjected`。
@@ -359,7 +363,13 @@ expect(html).not.toContain('btn-clear-workspace');
 
 所有产物（宿主直出 / 转换生成 / 增量补丁 / 分卷）都先进内存态 `ExportQueue`（`src/ui/export-queue.js`），**不**直接写 IndexedDB、也不自动触发下载：
 
-- `enqueue({ blob, name, targetLayout, origin, ephemeral, autoDownload })`——`ephemeral: true` 的临时产物只在「下载」或「存工作区」时才落库，避免重复存储；
+- `enqueue({ blob, name, targetLayout, origin, ephemeral, autoDownload, taskId })`——`ephemeral: true` 的临时产物只在「下载」或「存工作区」时才落库，避免重复存储；
+  - `taskId`（2026-09-27 新增，可选，默认 `null`）：**产出它的任务 id**。
+    用途只有一个 —— **批量转换的续传失效检测**：`ephemeral` 产物**只在内存**（`this.items`），
+    页面重载或用户移除后即消失，而断点是**持久化**的 ⇒ 续传前必须按 `taskId` 数一遍
+    「这批产物还在不在」，数目不符即**作废断点**（否则会跳过产物已丢失的子项、**静默产出残缺批次**）。
+    实现见 `index.js` 的 `batchResumeVerdict` / `handleBatchConvert`。**加性字段**：非任务产出的条目为 `null`。
+- Queue 是**纯内存**的（`this.items = []`，无持久化）—— 任何「断点持久化 + 依赖内存产物」的组合都必须显式处理这个落差；
 - `stash()` 写入 `files` store 并带上条目的 `origin`，统一工作区列表据此打来源徽标；
 - 分卷产物必须 `origin: 'split-part'` 入队（**不得**直接调 `saveFile`）；
 - `src/ui/split-deliver-modal.js` 是**待清理死代码**：`renderSplitDeliveryModal` 在 `index.js` 里被 import 但**全仓无调用点**，该文件因此持有 `dom-injection-guard:allow-file` 整文件豁免（见 `scripts/dom-injection-guard.js`）。接回或删除前，不要把它当作可用参考实现。

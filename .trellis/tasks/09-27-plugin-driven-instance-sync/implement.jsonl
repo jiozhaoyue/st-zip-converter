@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/guides/instance-e2e-and-data-sync.md", "reason": "本任务的核心依据且是**唯一**的同步规范来源：§1 实例登记（端口是唯一判据）、§2 E2E 只许连 Dev 的守卫契约、§3 四宿主原生导出/导入通道、§3.5 备份导出通道实测形态、§7 覆盖率三口径（照抄会误报）、§9 写入前的链接子树守卫（P-19 的防护）、§11.1 openWorkbench 的真实打开路径与「判可见用 getBoundingClientRect 不用 offsetParent」、§11.2 持久化 profile 的可重跑性纪律、§12.5 PT 的模块读数三条判据"}
+{"file": ".trellis/spec/guides/tavern-datapack-formats.md", "reason": "四平台包布局 / 导入语义 / 转换约定——一步直出（OQ-2）判定与三布局包条目级比对的口径基础；也是「直通 vs 路由」语义差异（spec §11.3 已登记）的来源"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "宿主能力获取决策树与降级契约：产包器据宿主能力决定 selection 是否透传、恢复能力三态如何影响写入目标；ADR「不出现死按钮」原则同样约束产包器的失败路径"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "§60 CSRF Token & User Handle 的受控获取路径、§80 Backup / Restore 端点契约——产包器经宿主原生端点交互时必须沿用同一套端点与同源凭据约定，不得自造"}
+{"file": ".trellis/spec/frontend/dom-write-scope.md", "reason": "宿主 DOM 写入锚点白名单与归因仪器：E2E 报错归因按此判定；产包器驱动插件 UI 时只能操作已登记的锚点，不得依赖未登记的 DOM 结构"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试矩阵、守卫命令与 Zip IO 并发契约：新增 scripts/instance-sync/ 脚本的测试与守卫口径按此执行"}
+{"file": ".trellis/spec/guides/subagent-collaboration.md", "reason": "派发子代理前的来源唯一性与写权限边界——本任务新增脚本与 E2E spec，须确认无重叠写者"}
+{"file": ".trellis/tasks/09-27-instance-sync-and-plugin-hardening/prd.md", "reason": "父任务 PR-1 共享契约（产包口径契约 / 搬运契约 / R-20 实例版本前置 / 只连 Dev / 零凭据入库）与 PR-2 集成验收——子任务 A 的验收在父级还有一层，契约不得只按本子任务理解"}
+{"file": ".trellis/tasks/09-27-plugin-driven-instance-sync/design.md", "reason": "本任务技术设计：D1.2 产包器九步契约、D1.3 端口纪律的三条继承精神、D1.4 R-20 硬门禁、D3 顺序铁律（备份先于写入）、D4.1 写入前三道守卫、D5 判据、D6 可重跑性的 mtime 快照配对"}

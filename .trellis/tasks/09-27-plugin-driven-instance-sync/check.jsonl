@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/guides/instance-e2e-and-data-sync.md", "reason": "核查：E2E 是否仍只连 {8001,8003,8899}（Real 端口出现即抛错）；写入是否走宿主原生通道而非裸拷贝；覆盖率判定是否用了正确的口径（§7 三条口径照抄会误报）；链接子树守卫是否生效；PT 是否用了模块读数判据而非路径比对"}
+{"file": ".trellis/spec/guides/tavern-datapack-formats.md", "reason": "核查：三布局包的布局判据、类目计数基线、一步直出（OQ-2）的条目级比对结论是否与包布局规范一致；差异项是否显式登记而非静默剔除"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核查前端质量门：npm test 零回退、静态守卫 exit 0、禁止模式清单（本任务 src/** 零改动，须证明未被牵连）"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "核查脚本与 IO 质量门：测试矩阵、Zip IO 并发契约、禁止模式——新增 produce-via-plugin.cjs 与 E2E spec 的合规面"}
+{"file": ".trellis/spec/guides/subagent-collaboration.md", "reason": "核查：子代理产物的来源唯一性与写权限边界，确认无跨任务污染与重复写者"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "核查产包器的宿主能力判定是否走决策树（未在业务层推导）、降级路径是否完整、失败时是否留下死按钮"}

@@ -29,6 +29,7 @@ export function stashBatchCapability(selectedIds, isHostAvailable = false) {
   const n = selectedIds ? selectedIds.size : 0;
   return {
     canLoad: n === 1,               // 载入为源：单选语义
+    canBatchConvert: n > 0,         // 批量转换：多选才有意义，但单选也允许（等价于转这一个）
     canDownload: n > 0,
     canRestore: n > 0 && isHostAvailable,
     canDelete: n > 0,
@@ -116,6 +117,9 @@ function openRowMenu(anchor, actions) {
  * @param {function(object): void} params.onLoadFile (fileRecord) => void
  * @param {function(): void} [params.onListChanged]
  * @param {function(object): void} [params.onRestoreToHost]
+ * @param {function(Array<object>): void} [params.onBatchConvert] (fileRecords[]) => void
+ *   批量转换入口：把选中的源包逐个转换为当前目标格式。
+ *   **未注入时不渲染该按钮**（与 onRestoreToHost 同形的可选接缝，保持本组件可脱离宿主单测）。
  */
 export async function renderStashList({
   containerEl,
@@ -125,6 +129,7 @@ export async function renderStashList({
   onLoadFile,
   onListChanged,
   onRestoreToHost,
+  onBatchConvert,
   confirmFn = null,
 }) {
   if (!containerEl) return;
@@ -176,6 +181,22 @@ export async function renderStashList({
       const full = await getFile(firstId);
       if (full && typeof onLoadFile === 'function') onLoadFile(full);
     }));
+    // 批量转换：把选中的源包**逐个**转换为当前目标格式（R-16 / U-7 的入口）
+    if (typeof onBatchConvert === 'function') {
+      batchBarEl.appendChild(mkBtn(
+        '<i class="fa-solid fa-bolt"></i> 批量转换',
+        '把选中的源包逐个转换为当前目标格式',
+        cap.canBatchConvert,
+        async () => {
+          const records = [];
+          for (const id of selected) {
+            const full = await getFile(id);
+            if (full?.blob) records.push(full);
+          }
+          if (records.length > 0) onBatchConvert(records);
+        },
+      ));
+    }
     batchBarEl.appendChild(mkBtn('<i class="fa-solid fa-download"></i> 下载', '', cap.canDownload, async () => {
       for (const id of selected) {
         triggerDownload(await getFile(id));

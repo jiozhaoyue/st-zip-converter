@@ -112,9 +112,13 @@ export class ExportQueue {
    * @param {string} [item.origin] ORIGINS 枚举，默认 converted
    * @param {boolean} [item.ephemeral=true] 临时产物（不入库直到 stash/下载）
    * @param {boolean} [item.autoDownload=false] 入队即下载
+   * @param {string|null} [item.taskId=null] 产出它的任务 id —— 批量转换的**跨重载失效检测**依赖它：
+   *   断点说「前 k 个子项已完成」，但 `ephemeral` 产物只在内存、页面重载后即消失
+   *   ⇒ 续传前必须核对「这批产物还在不在」（见 `index.js` 的 `handleBatchConvert`）。
+   *   **加性字段**：既有消费者只读自己认识的字段，null 表示"非任务产出"。
    */
-  enqueue({ blob, name, targetLayout = '', origin = ORIGINS.CONVERTED, ephemeral = true, autoDownload = false }) {
-    const item = { id: `eq_${Date.now()}_${++seq}`, name, blob, targetLayout, origin, ephemeral, autoDownload, storedId: null };
+  enqueue({ blob, name, targetLayout = '', origin = ORIGINS.CONVERTED, ephemeral = true, autoDownload = false, taskId = null }) {
+    const item = { id: `eq_${Date.now()}_${++seq}`, name, blob, targetLayout, origin, ephemeral, autoDownload, storedId: null, taskId };
     this.items.push(item);
     if (autoDownload) {
       triggerBlobDownload(blob, name);

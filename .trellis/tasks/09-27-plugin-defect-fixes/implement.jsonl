@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "R-16 的核心依据：§89 已明文写着「长任务（宿主拉取 / 转换 / 写回）由 src/core/task-manager.js 管理」——本任务是让实现追平该规格；§107 的「共享 Worker + AbortSignal 陷阱」是 L1-MR-8 的原始教训（terminate 后必须置空，漏掉则此后每次转换永久静默挂死）；§115 的 rAF 合帧纪律约束新增进度回调"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "R-19 的直接依据：§108「无全局命名空间（替代旧的 globalThis 调试钩子）」末尾明文允许「新增显式命名的接缝并在本节登记」，@121 的登记义务是本任务必须履行的一步；§60 CSRF/Handle 的受控路径是「出口不得泄漏敏感项」的判据来源；§130 Forbidden 条目禁的是旧 IIFE 的 globalThis.__tavernConvert，须与本步新增的只读探针区分"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "R-16 分派骨架的依据：TASK_KINDS / taskKindOf 的动机正是「同一模式重复 3+ 次」——加转换会变成第二个 if，第三路径再加一个；本任务要求把 startsWith 前缀判断收敛到唯一判据，不得在别处再写一份"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门槛与守卫命令：测试基线零回退、五条静态守卫、转义层契约、禁止模式、单一模板源——收口验收按此执行"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试矩阵与 Zip IO 并发契约：fixtures/gen.js 的改动面与测试基线在此有约束（§13 Testing Matrix / §96 Zip IO Concurrency Mandate）"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "R-19 的三态语义与降级口径：宿主能力获取决策树、不出现死按钮原则——restoreCapability 的 unknown/available/unsupported 语义须与之一致，探测时机不得改动（design.md D4 已划为不做）"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "分层边界：src/core/ 禁止 DOM 依赖——taskKindOf 与分派表必须放 index.js（根控制器）而非 core/，本任务的第一条硬约束"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "§358「Export Queue Pattern」把 enqueue 的签名与「ephemeral 产物只在下载/存工作区时落库」的契约写进了规格——R-16 批量续传要加一个可选 taskId 字段，该处必须同步更新；同时批量的失效检测依赖「队列是纯内存」这一事实，判据口径须与该节一致"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "R-16 的接线跨 index.js（控制器）/ src/core/（状态机与执行体）两层：判据与渲染不得回流进纯逻辑层，接缝设计按此核对"}
+{"file": ".trellis/tasks/09-27-plugin-defect-fixes/design.md", "reason": "本任务技术设计：D0.2b 的「onEntryDone 在 Worker 路径永不触发」是本次设计复核新增的致命约束，D1.2 的节流与收尾语义表、D1.5 的测试清单是实现的直接依据"}

@@ -1,0 +1,29 @@
+{
+  "id": "instance-sync-and-plugin-hardening",
+  "name": "instance-sync-and-plugin-hardening",
+  "title": "实例数据一致性与插件加固",
+  "description": "父任务：把「插件产包 → 脚本搬运 → 各实例一致」做成可重跑闭环（含备份），并修复插件已知缺陷",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "jiozhaoyue",
+  "assignee": "jiozhaoyue",
+  "createdAt": "2026-09-27",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-27-plugin-driven-instance-sync",
+    "09-27-plugin-defect-fixes"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
