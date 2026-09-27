@@ -273,8 +273,19 @@ export const zipIo = {
         if (written.has(name)) return;
         written.add(name);
         const entryLevel = levelFor(name);
-        noteStore(name, data.byteLength ?? data.length ?? 0);
-        const bytes = new Uint8Array(data);
+        /**
+         * 字符串必须先编码。
+         *
+         * ⚠️ **实测踩过**（2026-09-27，本任务新增测试首轮即转红）：`new Uint8Array('abc')`
+         * **不报错**，长度是 **0** —— 字符串被当成「无 length 的类数组」⇒ 写出一个**空条目**。
+         * 后果是「包看着完整、条目名也在，内容却是空的」，且调用方与日志都无从察觉。
+         * 生产路径（`transform.js` 的 `encodeJson` / `encodeText`）传的都是 Uint8Array，
+         * 所以此前没暴露；这里显式收口，免得下一个调用方踩同一个坑。
+         */
+        const bytes = typeof data === 'string'
+          ? new TextEncoder().encode(data)
+          : new Uint8Array(data);
+        noteStore(name, bytes.byteLength);
         const isFirst = claimFirst();
         return enqueue((async () => {
           try {

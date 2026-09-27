@@ -116,12 +116,12 @@ async function getHandle() {
 | --- | --- |
 | **显式命名** | `window.__stZipConverterDebug` |
 | **挂载点** | `index.js` 的 `mountDebugProbe()`，由 `bootstrap()` **最先**调用（两种形态都挂：插件态的工作台在抽屉里且抽屉默认为关，放进 `main()` 会让「抽屉未打开」时探针不可用） |
-| **成员** | 仅 `getRestoreProbe()`（数据来自 `src/ui/host-bridge.js` 的同名导出，遵 `L0-9`：平台差异唯一落点） |
+| **成员** | `getRestoreProbe()`（数据来自 `src/ui/host-bridge.js` 的同名导出，遵 `L0-9`：平台差异唯一落点）与 `getChatStoreProbe()`（数据来自 `src/ui/chat-store-bridge.js`，2026-09-27 追加，见 `chat-store-seam.md`） |
 | **只读契约** | 命名空间对象 `Object.freeze`；`getRestoreProbe()` **每次返回新的 `Object.freeze` 快照** ⇒ 调用方改不动 `capability`，**E2E 无法伪造状态**（防伪能力来自快照冻结，不是命名空间冻结） |
 | **不覆盖** | 挂载前查 `Object.prototype.hasOwnProperty.call(window, KEY)`，**已占用则不覆盖并 `logger.warn`**（宿主或别的扩展可能同名；静默覆盖会悄悄弄坏别人的对象） |
 | **不泄漏** | 只暴露能力枚举（`unknown`/`available`/`unsupported`）与原因文案（形如 `/api/users/restore → 404、…`，两项都是源码里的静态常量）；**不含** CSRF token / user handle / 文件系统路径 |
 | **无 window 环境** | `typeof window === 'undefined'` 时静默跳过（Node / Worker 环境不抛） |
-| **测试** | `test/restore-probe.test.js`（7 项：初始态 / 探测后 unsupported / 冻结 / 快照非共享 / 挂载 / 已占用不覆盖 / 无 window 跳过） |
+| **测试** | `test/restore-probe.test.js`（7 项：初始态 / 探测后 unsupported / 冻结 / 快照非共享 / 挂载 / 已占用不覆盖 / 无 window 跳过）；`getChatStoreProbe()` 的出口契约由 `test/chat-store-bridge.test.js` 覆盖（含「探针字段白名单 + 不泄漏 token/handle」一条） |
 
 **新增这类接缝的规矩**（本节是唯一登记处）：
 

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/node-zip-writer-pitfalls.md", "reason": "注入条目要复用 zipIo 写包：内联既有内存/背压/顺序坑"}
+{"file": ".trellis/spec/frontend/host-capabilities.md", "reason": "宿主能力探测+特性检测+静默降级的既有契约"}

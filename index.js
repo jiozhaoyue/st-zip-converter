@@ -38,6 +38,8 @@ import { ExportQueue, renderExportQueue } from './src/ui/export-queue.js';
 import { initTaskControls } from './src/ui/task-controls.js';
 import { createCheckpointAdapter } from './src/storage/authority-store.js';
 import { renderUsageDashboard } from './src/ui/usage-dashboard.js';
+import { injectLibraryChatsIntoSource, importRestoredChatsIntoLibrary } from './src/ui/chat-store-inject.js';
+import { getChatStoreProbe } from './src/ui/chat-store-bridge.js';
 import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE, namedBlob } from './src/core/filename-template.js';
 import {
   detectHost,
@@ -367,6 +369,7 @@ export function mountDebugProbe() {
   }
   window[DEBUG_KEY] = Object.freeze({
     getRestoreProbe,
+    getChatStoreProbe,
   });
 }
 
@@ -1467,7 +1470,7 @@ async function main(appRoot) {
       // 统一源形态：OPFS 句柄 → File（zip.js 原生消费 File，零内存拷贝）
       const rawBackupIsOpfs = rawBackup && rawBackup.kind === 'opfs';
       opfsName = rawBackupIsOpfs ? rawBackup.name : null;
-      const rawBackupBlob = rawBackupIsOpfs
+      let rawBackupBlob = rawBackupIsOpfs
         ? await opfsHandleToFile(rawBackup.handle)
         : rawBackup;
 
@@ -1475,6 +1478,31 @@ async function main(appRoot) {
       if (rawBackupIsOpfs) {
         opfsCleanupId = taskId;
         opfsCleanupName = opfsName;
+      }
+
+      // ===== 聊天库补齐（纯数据库模式适配）=====
+      // 纯库模式下磁盘**没有** jsonl（存量入库后源文件被删、只在导出时生成），
+      // 备份包的 chats/ 因此是空的 ⇒ 不打补丁就会**静默丢掉全部聊天记录**。
+      // 必须在下方「统一文件树」扫描**之前**完成：否则用户在树上勾选时根本看不到这些聊天。
+      // 未装聊天库 / 未提供接入 API ⇒ 一个字节不动、一行日志不打（默认路径零变化，L0-11）。
+      try {
+        const injected = await injectLibraryChatsIntoSource(rawBackupBlob, {
+          selection: getSelectionState(),
+          includeBackups: includeBackupsCheck ? includeBackupsCheck.checked : false,
+          compressionLevel: compressionSelect ? parseInt(compressionSelect.value, 10) : 5,
+          signal,
+          onProgress: (done, total) => {
+            view.setProgress(38, `正在并入聊天库中的聊天记录 (${done}/${total})...`);
+          },
+        });
+        if (injected.injected > 0) {
+          rawBackupBlob = injected.source;
+          view.setProgress(38, `已并入 ${injected.injected} 条库中聊天，正在扫描文件树...`);
+        }
+      } catch (err) {
+        // 暂停/中止要原样上抛（由既有 AbortError 分支处理）；其余异常一律降级继续
+        if (err?.name === 'AbortError') throw err;
+        logger.warn(`聊天库补齐过程异常（${err.message}）⇒ 用原源包继续`);
       }
 
       // ===== 统一文件树：先扫描后拉取（阶段2 等待用户确认勾选）=====
@@ -1780,6 +1808,16 @@ async function main(appRoot) {
           if (res && res.nothingRestored) {
             throw new Error('宿主未写入任何条目（该类目可能不被宿主接受）');
           }
+          // 纯库模式适配：还原只把 jsonl 写到磁盘，而纯库**读库不读盘** ⇒ 这里把聊天录入库。
+          // 入库失败**不得**把「恢复」判成失败（文件确实写进去了），故单独兜住。
+          try {
+            const imported = await importRestoredChatsIntoLibrary(target.blob);
+            if (imported.imported > 0) {
+              logger.success(`本项聊天已录入库：${imported.imported} 条`);
+            }
+          } catch (importErr) {
+            logger.warn(`聊天入库失败（${importErr.message}）——还原本身已成功，不影响其余项`);
+          }
           return res;
         } catch (err) {
           // 宿主根本没这个能力：后续每一项都会同样失败，立即停批（避免刷出 N 条相同失败）
@@ -1872,6 +1910,15 @@ async function main(appRoot) {
         } else {
           view.setProgress(100, `恭喜！数据包已成功恢复写入到当前酒馆用户！`);
           logger.success(`恢复完成！宿主酒馆数据已更新。`);
+          // 纯库模式适配：把包里的聊天录入库（否则纯库读库不读盘 ⇒ 用户看不到它们）
+          try {
+            const imported = await importRestoredChatsIntoLibrary(fileToRestore.blob);
+            if (imported.imported > 0) {
+              view.setProgress(100, `恢复完成，并已录入 ${imported.imported} 条聊天到聊天库`);
+            }
+          } catch (importErr) {
+            logger.warn(`聊天入库失败（${importErr.message}）——还原本身已成功`);
+          }
         }
       } catch (err) {
         if (err?.name === 'AbortError') {

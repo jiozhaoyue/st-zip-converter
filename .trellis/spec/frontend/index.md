@@ -22,6 +22,7 @@
 | [Host Capabilities](./host-capabilities.md) | 宿主能力获取决策树、原生弹窗适配器契约（**含"宿主无 alert，信息提示用 `Popup.show.text`"**）、降级反例构造法、现存能力面表、**UI 控件合宪性（死控件取证）** | 就绪（2026-09-26 增补信息提示） |
 | [DOM Write Scope](./dom-write-scope.md) | **宿主 DOM 写入作用域**：锚点白名单（穷举）、`check:dom-scope` 守卫、运行期归因仪器与实测读数、仪器自身的坑、跨宿主安装落点 | 就绪（2026-09-26 新建） |
 | [Hook Guidelines](./hook-guidelines.md) | 宿主生命周期接入、备份/恢复端点、CSRF、全局命名空间（**仅 1 个已登记的只读探针**） | 就绪（2026-09-27 刷新） |
+| [Chat Store Seam](./chat-store-seam.md) | **纯库模式（聊天收进数据库、磁盘无 jsonl）的跨插件接缝**：`ChatFilesysApi` v1 契约、消费侧降级阶梯、绑定判据与易错点、增强包为何在源包层做、未做到项 | 就绪（2026-09-27 新建；**供给侧尚未实现**） |
 | [State Management](./state-management.md) | 内存 Blob 生命周期、TaskManager 断点续传、rAF 合帧 | 就绪 |
 | [Quality Guidelines](./quality-guidelines.md) | 验证矩阵、守卫命令、转义层契约、10 条禁止模式、纯逻辑可单测约定 | 就绪（2026-09-26 刷新） |
 | [Type Safety](./type-safety.md) | JSDoc 契约、运行时目标守卫、manifest 校验 | 就绪 |
