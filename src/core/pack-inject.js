@@ -114,9 +114,12 @@ function validateLibraryChat(chat) {
   if (!chat || typeof chat !== 'object') return { ok: false, reason: 'invalid' };
   const fileName = chat.fileName ?? chat.file_name ?? chat.name;
   if (typeof fileName !== 'string' || !fileName.trim()) return { ok: false, reason: 'invalid' };
-  if (!/\.jsonl$/i.test(fileName.trim())) return { ok: false, reason: 'invalid' };
-  if (isUnderHiddenContainer(fileName)) return { ok: false, reason: 'hidden' };
-  return { ok: true, fileName: fileName.trim() };
+  // 归一掉包裹用的空白与**前导斜杠**：否则 `chats/` + `/Abs.jsonl` 会拼出 `chats//Abs.jsonl`
+  // （多一个空目录段，宿主侧路径语义会变）
+  const cleaned = fileName.trim().replace(/^[/\\]+/, '');
+  if (!/\.jsonl$/i.test(cleaned)) return { ok: false, reason: 'invalid' };
+  if (isUnderHiddenContainer(cleaned)) return { ok: false, reason: 'hidden' };
+  return { ok: true, fileName: cleaned };
 }
 
 /**

@@ -246,27 +246,34 @@ export async function exportLibraryToPack({
   }
   logger.info(`聊天库导出：${describePlan(plan)}`);
 
-  const entries = [];
+  // 边读边写：把整库先读进内存再打包，会在 GB 级库上炸 —— 一条一条来，峰值只有单条聊天那么大
   const failed = [];
+  let written = 0;
+  const writer = await io.createWriter(undefined, { level: compressionLevel });
+  await writer.add('settings.json', '{}'); // 最小 ST 摊平源包的布局锚点（ST 判据之一）
   for (const item of plan.inject) {
-    if (signal?.aborted) return { ok: false, blob: null, count: 0, failed, reason: 'aborted' };
+    if (signal?.aborted) {
+      try { await writer.abort?.(); } catch { /* 收尾失败不改变结论 */ }
+      return { ok: false, blob: null, count: written, failed, reason: 'aborted' };
+    }
     // eslint-disable-next-line no-await-in-loop —— 逐条串行是刻意的（单条可能很大，且要能随时中止）
     const read = await readLibraryChatAsJsonl(item.ref, { signal });
-    if (read.ok) entries.push({ name: item.hubPath, data: read.text });
-    else failed.push({ fileName: item.fileName, reason: read.reason });
+    if (read.ok) {
+      await writer.add(item.hubPath, read.text);
+      written += 1;
+      onProgress?.(written, plan.inject.length);
+    } else {
+      failed.push({ fileName: item.fileName, reason: read.reason });
+    }
   }
-  if (entries.length === 0) {
+  if (written === 0) {
+    try { await writer.abort?.(); } catch { /* 已在失败路径 */ }
     return {
       ok: false, blob: null, count: 0, failed,
       reason: `全部 ${plan.inject.length} 条导出失败（首因：${failed[0]?.reason}）`,
     };
   }
-  onProgress?.(entries.length, plan.inject.length);
 
-  // 最小 ST 摊平源包：`settings.json` 只为让布局识别认得出（ST 判据之一）
-  const writer = await io.createWriter(undefined, { level: compressionLevel });
-  await writer.add('settings.json', '{}');
-  for (const e of entries) await writer.add(e.name, e.data);
   const dest = await writer.close();
   const baseBlob = await dest.getData();
 
@@ -276,9 +283,9 @@ export async function exportLibraryToPack({
     options: { compressionLevel, selection },
   });
 
-  logger.success(`聊天库导出完成：${entries.length} 条聊天 → ${target.toUpperCase()} 目标包`
+  logger.success(`聊天库导出完成：${written} 条聊天 → ${target.toUpperCase()} 目标包`
     + (failed.length ? `（另有 ${failed.length} 条导出失败）` : ''));
-  return { ok: true, blob: resultBlob, count: entries.length, failed, reason: '' };
+  return { ok: true, blob: resultBlob, count: written, failed, reason: '' };
 }
 
 /** 从包里挑出「该入库的聊天条目」的名字（排除备份特征与隐藏容器） */
@@ -345,17 +352,21 @@ export async function importRestoredChatsIntoLibrary(zipBlob, {
       return result;
     }
 
-    const items = [];
+    // 逐条「读一条 → 入一条」：整包读进内存会在 GB 级包上炸（恢复的包可能就是那么大）
+    let done = 0;
     for (const item of picked) {
       if (signal?.aborted) { result.skipped = 'aborted'; return result; }
-      // eslint-disable-next-line no-await-in-loop —— 逐条读是刻意的：单条可能很大
+      // eslint-disable-next-line no-await-in-loop —— 逐条是刻意的：单条可能很大，且要能随时中止
       const bytes = await item.read();
-      items.push({ fileName: item.fileName, jsonl: new TextDecoder('utf-8').decode(bytes) });
+      const one = await importChatsToLibrary(
+        [{ fileName: item.fileName, jsonl: new TextDecoder('utf-8').decode(bytes) }],
+        { signal },
+      );
+      result.imported += one.imported;
+      result.failed.push(...one.failed);
+      done += 1;
+      onProgress?.(done, picked.length, item.fileName);
     }
-
-    const imported = await importChatsToLibrary(items, { signal, onProgress });
-    result.imported = imported.imported;
-    result.failed = imported.failed;
     return result;
   } finally {
     try { await reader.close(); } catch { /* 关闭失败不改变结论 */ }
