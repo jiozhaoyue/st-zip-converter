@@ -1936,3 +1936,98 @@ ChatFilesys 弹窗影响）；4.3 的「连续两轮」用它最稳。
 **Session 34 至此收尾**：`npm test` 581 通过 / 0 失败 · `npm run e2e:web` 334/334 ·
 dev-st 冒烟 36/36 · dev-luker 矩阵 91×2 全绿 · PT 18/18 · library-inject 2×21/21 ·
 五条静态守卫全 0 · 工作区干净、47 次提交全部推送。
+
+### 十三、07:2x 终检（Session 34 收尾）
+
+最后一轮双向终检（都是最快的那两条，用来确认收尾时两侧仍可用）：
+
+| 检查 | 读数 |
+| --- | --- |
+| 实例侧 
+> st-zip-converter@0.1.0 e2e
+> node e2e/run.cjs --only guard
+
+E2E 运行器：1 个 spec（--only guard）
+端口守卫白名单：8001 / 8003 / 8899
+
+── guard：端口守卫与 Real 拒绝（负例优先） ─────────────────────────────────
+  [OK]   Dev 白名单 = {8001,8003,8899} — 8001/8003/8899
+  [OK]   白名单里**不含**任何 Real 端口 — 8002/8004
+  [OK]   Real 端口 = {8002,8004}
+  [OK]   8000 被列为禁止端口（L0-16）
+  [OK]   Real ST :8002 被拒且点名 Real — 拒绝启动：端口 8002 是 **Real 实例** 端口，疑似误连真实数据。自动化只允许连 Dev（L1-MF-10 红线，误
+  [OK]   Real Luker :8004 被拒且点名 Real — 拒绝启动：端口 8004 是 **Real 实例** 端口，疑似误连真实数据。自动化只允许连 Dev（L1-MF-10 红线，误
+  [OK]   空字符串被拒 — 目标 URL 未提供：拒绝静默兜底（tavern-browser-automation + L1-MF-10）。请显式传 --u
+  [OK]   undefined 被拒 — 目标 URL 未提供：拒绝静默兜底（tavern-browser-automation + L1-MF-10）。请显式传 --u
+  [OK]   纯空白被拒 — 目标 URL 未提供：拒绝静默兜底（tavern-browser-automation + L1-MF-10）。请显式传 --u
+  [OK]   未写端口的 URL 被拒 — 目标 URL 未显式写端口（https://127.0.0.1/）：默认端口会按协议落到 80/443，等于目标不明 —— 拒绝
+  [OK]   8000（出厂默认段）被拒 — 拒绝启动：端口 8000 属酒馆出厂默认段，禁止绑定或请求（L0-16）。
+  [OK]   非白名单端口 5173 被拒 — 拒绝启动：端口 5173 不在 Dev 白名单 8001 / 8003 / 8899（tavern-browser-automa
+  [OK]   不可解析的 URL 被拒 — 目标 URL 无法解析：not a url at all
+  [OK]   Dev 8001 放行
+  [OK]   Dev 8003 放行
+  [OK]   Dev 8899 放行
+  [OK]   openInstance 对 Real 端口在启动浏览器前抛错 — 拒绝启动：端口 8002 是 **Real 实例** 端口，疑似误连真实数据。自动化只允许连 Dev（L1-MF-10 红线，误
+
+──────────────────────────────────────────────────────────────
+断言 17 项：通过 17 / 失败 0
+E2E 全绿 | **17 / 17** 全绿（端口守卫与 Real 拒绝负例） |
+| 独立形态 
+> st-zip-converter@0.1.0 e2e:web
+> node e2e/standalone/run.cjs --only controls
+
+⚠ dist/ 比源码旧 —— 构建产物可能不是当前代码（读数不可解释）
+· 重新构建...
+
+> st-zip-converter@0.1.0 build
+> vite build --base=./
+
+[36mvite v7.3.6 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32m✓[39m 45 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32massets/__vite-browser-external-9wXp6ZBx.js  [39m[1m[2m  0.03 kB[22m[1m[22m
+[2mdist/[22m[32mindex.html                                  [39m[1m[2m  1.76 kB[22m[1m[22m[2m │ gzip:   1.28 kB[22m
+[2mdist/[22m[32massets/fa-v4compatibility-aR9vOKaP.woff2    [39m[1m[2m  4.79 kB[22m[1m[22m
+[2mdist/[22m[32massets/fa-regular-400-OOsPf1xj.woff2        [39m[1m[2m 25.45 kB[22m[1m[22m
+[2mdist/[22m[32massets/fa-brands-400-C99Yv4gD.woff2         [39m[1m[2m117.37 kB[22m[1m[22m
+[2mdist/[22m[32massets/fa-solid-900-DAI24fNt.woff2          [39m[1m[2m156.50 kB[22m[1m[22m
+[2mdist/[22m[32massets/converter-worker-erFUXr1f.js         [39m[1m[2m179.70 kB[22m[1m[22m
+[2mdist/[22m[35massets/index-C5KPTg91.css                   [39m[1m[2m162.90 kB[22m[1m[22m[2m │ gzip:  31.97 kB[22m
+[2mdist/[22m[36massets/__vite-browser-external-BIHI7g3E.js  [39m[1m[2m  0.03 kB[22m[1m[22m[2m │ gzip:   0.05 kB[22m
+[2mdist/[22m[36massets/index-CWubws2T.js                    [39m[1m[2m340.68 kB[22m[1m[22m[2m │ gzip: 130.51 kB[22m
+[32m✓ built in 1.35s[39m
+独立形态 E2E：1 个 spec
+构建产物站点：http://127.0.0.1:4173/st-zip-converter/（云子路径形态）
+源码树站点：http://127.0.0.1:4173/src-tree/（未打包 ESM，供直接 import 真实模块）
+端口：4173（L0-16 登记段；占用即退出，不自动换端口）
+
+── 控件边界：类目三键 / 模板非法值 / 分卷输入非法值 ─────────────────────────
+  [OK]   K1 工作台就绪
+  [OK]   K2 计划就绪
+  [OK]   K3 有可勾选的类目（读数非空） — actual=10 应 >= 3
+  [OK]   K4 「全不选」后**所有**可勾选类目都未勾选 — actual=0 expected=0
+  [OK]   K5 「反选」把未勾选的全部勾上（与「全不选」状态互补） — actual=10 expected=10
+  [OK]   K6 「全选」后全部勾选 — actual=10 expected=10
+  [OK]   K7 空模板**确实写进输入框**（回读确认） — via=evaluate
+  [OK]   K8 空模板时预览**仍非空**（回退到默认命名，而不是显示空/崩掉） — 预览=fixture-st-to-l-2026-09-28.zip
+  [OK]   K9 含未闭合花括号的模板写进去了（回读确认）
+  [OK]   K10 非法模板下预览非空且仍是 .zip 名（未知占位符按字面/默认处理） — 预览=a{未闭合-b.zip
+  [OK]   K11 非法模板下产出的名字仍是**可用的 .zip 名** — 产物名=a{未闭合-b.zip
+  [OK]   K12 负数分卷阈值写进去了（回读确认） — via=fill
+  [OK]   K13 负数阈值 ⇒ **不分卷**（产出一份，而不是按负数切出怪结果） — ["a{未闭合-b.zip","a{未闭合-b.zip"]
+  [OK]   K14 超大阈值写进去了（回读确认） — via=fill
+  [OK]   K15 阈值远大于包体积 ⇒ **不分卷**（仍是一份） — ["a{未闭合-b.zip","a{未闭合-b.zip","a{未闭合-b.zip"]
+  [OK]   K16 全流程零未捕获页面异常 — actual=0 expected=0
+
+────────────────────────────────────────────────────────────
+分项读数（每个 spec：总数 / 通过 / 失败）：
+  控件边界：类目三键 / 模板非法值 / 分卷输入非法值   16 项 /  16 通过
+断言 16 项：通过 16 / 失败 0
+独立形态 E2E 全绿 | **16 / 16** 全绿（类目三键 / 模板非法值 / 分卷输入非法值） |
+| 独立形态全量（07:23 端到端复验，非算术） | **337 / 337** 全绿 |
+| 单测 | **581 通过 / 0 失败** |
+| 终态 | 工作区 0 个未提交、、今晚 **54 次提交**全部推送 |
+
+Session 34 收尾完成。
