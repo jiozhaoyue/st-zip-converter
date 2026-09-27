@@ -127,7 +127,7 @@ globalThis.ChatFilesysApi = Object.freeze({
 | 单测 | `npm test` = **60 文件 / 573 passed / 2 skipped / 0 failed**（基线 56/522/2） |
 | 静态守卫 | 五条 `exit=0` |
 | 消费侧**真浏览器**验证 | `e2e/standalone/specs-src/chat-store-module.e2e.cjs`（17 项，源码树挂载直驱真实模块 + 桩供给方）+ `specs/library-export.e2e.cjs`（13 项，真按钮真点击）—— 合计 30 项，全绿 |
-| 独立形态总读数 | `npm run e2e:web` = **183 断言 / 183 通过 / 0 失败** |
+| 独立形态总读数 | `npm run e2e:web` = **327 断言 / 327 通过 / 0 失败**（17 个 spec，2026-09-28 06:0x 复核） |
 | 判别力对照 | 不注入桩 ⇒ 补齐消失（M14/M15）；无库 ⇒ 按钮不可见（E3） |
 
 ## 残留（如实登记，勿当成已做）
