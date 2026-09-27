@@ -239,6 +239,47 @@ async function readLogText(page) {
 }
 
 /**
+ * 给数字输入框填值，并**校验真的写进去了**。
+ *
+ * ⚠️ **`page.fill` 会静默失败**（2026-09-27 实测）：宿主 ST 的 splash / 弹窗
+ * （`<dialog open>` 内含 `#loader.splash-screen`）未关闭时，`document.activeElement`
+ * 就是那个 `DIALOG` ⇒ Playwright 的 `fill`（focus + insertText）**不报错但一个字符都没写进去**；
+ * 而同一状态下 `page.click` / `pressSequentially` 会**超时**（被弹窗拦截指针事件）。
+ *
+ * 后果极隐蔽：M-9 的「1 MB 阈值」没写进去 ⇒ 分卷退化为**单包** ⇒ 三条断言红，
+ * 而现场完全看不出异常（元素可见、`disabled=false`、`readOnly=false`、`value` 读作空串）——
+ * 我们两轮都先怀疑「分卷逻辑坏了 / 负载导致超时」，最后靠
+ * `document.activeElement.tagName === 'DIALOG'` 才定位到。
+ *
+ * 做法：先 `fill`，**校验取值**；不生效则退回**程序化赋值 + 派发 `input`/`change`**
+ * （插件在点击时才读 `input.value`，对该行为等价），并**把走过的路径返回**给调用方落进证据，
+ * 不静默降级。
+ *
+ * @returns {Promise<'fill'|'evaluate'|'failed'>}
+ */
+async function fillNumber(page, selector, value) {
+  const readValue = () => page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    return el ? el.value : null;
+  }, selector);
+
+  await page.fill(selector, value).catch(() => {});
+  for (let i = 0; i < 6; i += 1) {
+    if ((await readValue()) === value) return 'fill';
+    await page.waitForTimeout(150);
+  }
+
+  await page.evaluate(({ sel, v }) => {
+    const el = document.querySelector(sel);
+    if (!el) return;
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, { sel: selector, v: value });
+  return (await readValue()) === value ? 'evaluate' : 'failed';
+}
+
+/**
  * 清空插件日志面板（**先展开再点**，理由同 `readLogText`：折叠态按钮不可点）。
  *
  * 用途：给同一会话里前后两段流程的日志**分段**，避免后一段的断言匹配到前一段的残留行
@@ -978,7 +1019,11 @@ module.exports = {
 
     await page.selectOption('#target-select', 'st');
     await page.waitForTimeout(600);
-    await page.fill('#split-input', '1');   // 1 MB 阈值 ⇒ ~6 MB 应切出多份
+    // 1 MB 阈值 ⇒ ~6 MB 应切出多份。**必须用 fillNumber**：宿主 splash 未关时
+    // `page.fill` 会静默不写入（实测把分卷退化成单包，三条断言假红）
+    const splitFill = await fillNumber(page, '#split-input', '1');
+    t.ok('M-9 分卷阈值 1 已真实写入输入框（fill 静默失败时退回程序化赋值）',
+      splitFill !== 'failed', `写入路径=${splitFill}`);
     await page.waitForTimeout(600);
 
     const qBeforeSplit = (await queueNames()).length;
@@ -1087,7 +1132,11 @@ module.exports = {
     t.ok('M-7b 大包计划已产出（确实换了源包）', pausePlanned, (await readPlanBar(page)).bar);
 
     await page.selectOption('#target-select', 'st');
-    await page.fill('#split-input', '0');  // 关掉分卷：本段只验续传，不混入分卷语义
+    // 关掉分卷：本段只验续传，不混入分卷语义。**必须校验写入**（见 fillNumber 注释）——
+    // 若静默失败而上一段留下的 `1` 仍在，续传段就会被分卷语义污染
+    const splitOffForPause = await fillNumber(page, '#split-input', '0');
+    t.ok('M-7b 分卷阈值已置 0（关分卷，避免污染续传语义）', splitOffForPause !== 'failed',
+      `写入路径=${splitOffForPause}`);
     await page.waitForTimeout(400);
 
     await page.click('#btn-convert');
@@ -1145,6 +1194,12 @@ module.exports = {
     if (resumedMatch) {
       t.ok('M-7b 跳过条数 > 0', Number(resumedMatch[1]) > 0, `N=${resumedMatch[1]}`);
     }
+    // 单包完成出口的文案必须带**真实数字**：原先读的是 `report.totals.written`，
+    // 而该字段**从来不存在**（`src/core/report.js:157`）⇒ 用户看到「共写入 undefined 个文件」。
+    // 这条断言把「字段名写错」钉在用户可见面上（2026-09-27 修复，提交 a39799b）。
+    t.ok('M-7b 成功日志的「共写入 N 个文件」是数字、不是 undefined',
+      /共写入\s*\d+\s*个文件/.test(logText) && !/undefined/.test(logText),
+      `undefined 出现次数=${(logText.match(/undefined/g) || []).length}`);
 
     // ============ M-10 批量转换：入口可达 + 暂停续传（U-7 / R-16 批量的验收面）============
     // 取证（本仓 2026-09-27）：`grep -rn runBatchConversion` ⇒ 只有**定义** + 3 处注释/测试注释，
@@ -1225,7 +1280,9 @@ module.exports = {
       batchBtn.ok && batchBtn.visible && batchBtn.disabled === false, JSON.stringify(batchBtn));
 
     await page.selectOption('#target-select', 'st');
-    await page.fill('#split-input', '0');
+    const splitOffForBatch = await fillNumber(page, '#split-input', '0');
+    t.ok('M-10 分卷阈值已置 0（批量段只验续传语义）', splitOffForBatch !== 'failed',
+      `写入路径=${splitOffForBatch}`);
     await page.waitForTimeout(400);
 
     t.log('  · M-10 点击「批量转换」...');
@@ -1312,8 +1369,15 @@ module.exports = {
     t.ok('M-10b 日志里**零失败行**（整批没有子项抛错）', batchFailLines.length === 0,
       `失败行=${JSON.stringify(batchFailLines.slice(0, 2))}`);
 
-    const successLines = batchLogText.match(/数据包转换成功！共写入 \d+ 个文件/g) || [];
-    t.ok('M-10b 每子项各一条成功日志（计数 == 2，且写入数为具体数字而非 undefined）',
-      successLines.length === 2, `成功行=${successLines.length} 条：${JSON.stringify(successLines)}`);
+    // 批量**逐子项**的成功行形态是 `[i/n] 数据包转换成功…`（`index.js:837`）——
+    // ⚠️ 与单包路径的「数据包转换成功！共写入 N 个文件」（`index.js:2110`）**不是同一句**，
+    // 断言必须照批量那句写（本行曾按单包那句写 ⇒ 恒假，当场改掉）。
+    const batchOk1 = /\[1\/2\] 数据包转换成功/.test(batchLogText);
+    const batchOk2 = /\[2\/2\] 数据包转换成功/.test(batchLogText);
+    t.ok('M-10b 两个子项各有成功行（[1/2] 与 [2/2]）', batchOk1 && batchOk2,
+      `[1/2]=${batchOk1} [2/2]=${batchOk2}`);
+    t.ok('M-10b 日志不含 undefined（字段名写错会在用户可见文案里露出来）',
+      !/undefined/.test(batchLogText),
+      `undefined 出现次数=${(batchLogText.match(/undefined/g) || []).length}`);
   },
 };
