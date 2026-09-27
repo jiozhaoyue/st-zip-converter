@@ -24,6 +24,37 @@ function isPluginRef(value) {
 }
 
 /**
+ * **诊断**：把页面上拦路的 `<dialog>` 报出来（不改动任何东西）。
+ *
+ * 为什么需要：宿主/第三方插件的**模态弹窗会拦截全页指针事件**，于是 Playwright 的点按会
+ * 一直重试到超时，报错长这样（而且看起来毫无头绪）：
+ * ```
+ * - element is visible, enabled and stable
+ * - <dialog open class="popup …">…</dialog> intercepts pointer events
+ * ```
+ * 2026-09-28 实测两次：dev-st 的矩阵就是被 **ChatFilesys 的「入库提醒」弹窗**
+ * （`chatfilesys-ip-mute-key` / `chatfilesys-ip-mute-all`）拦住的 —— 而 dev-luker 因为
+ * 它的 `import_prompt.never = true`（已静音）从不发生。**同一份代码，一个宿主绿一个红。**
+ *
+ * 处置：**只看不碰**（用例可能有自己的弹窗断言，自动关掉会破坏它们），
+ * 但把 id 与文案打出来，让"红灯来自别人"这件事**一眼可判**。
+ */
+async function reportBlockingPopups(page, instanceId) {
+  try {
+    const popups = await page.evaluate(() => Array.from(document.querySelectorAll('dialog[open]'))
+      .map((d) => ({
+        cls: d.className,
+        ids: Array.from(d.querySelectorAll('[id]')).map((e) => e.id).slice(0, 6),
+        text: (d.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 120),
+      })));
+    for (const p of popups) {
+      process.stdout.write(`  · ⚠ ${instanceId}: 页面存在打开的 <dialog>（会拦截指针事件）`
+        + ` cls=${p.cls} ids=${JSON.stringify(p.ids)} text=${JSON.stringify(p.text)}\n`);
+    }
+  } catch { /* 诊断失败不影响任何判定 */ }
+}
+
+/**
  * 打开一个实例并挂上采集器。
  * @param {import('./instances.cjs').Instance} inst
  * @returns {Promise<{page: import('playwright').Page, ctx: object, rec: object, close: Function, goto: Function}>}
@@ -113,6 +144,7 @@ async function openInstance(inst) {
         process.stdout.write(`  · ⚠ ${inst.id}: 宿主 splash（#loader / 「正在初始化…」）90 s 内未关闭`
           + ' —— 后续点击可能被它拦截（规范 §11.7 宿主冷启动窗口）\n');
       }
+      await reportBlockingPopups(page, inst.id);
       return page;
     },
     async close() {
