@@ -86,9 +86,33 @@ async function openInstance(inst) {
     instanceId: inst.id,
     instance: inst,
     playwright: version,
-    /** 打开实例首页并等 DOM 就绪 */
+    /**
+     * 打开实例首页并等 DOM 就绪，随后**等宿主的 splash 关掉**。
+     *
+     * ⚠️ 为什么必须等 splash（2026-09-28 实测两次复现）：
+     * 宿主初始化期间有一条 `<dialog open class="popup …">`（内含 `#loader`，文案「正在初始化…」）
+     * **拦截全页指针事件** ⇒ Playwright 的点按会一直重试到超时，报错长这样：
+     * ```
+     * - element is visible, enabled and stable
+     * - <dialog open class="popup popup--animation-fast">…</dialog> intercepts pointer events
+     * ```
+     * 这不是"按钮不可用"，而是**宿主还没初始化完**（本仓规范 §11.7「宿主冷启动窗口」同类）。
+     * 在高负载机器上它可能持续几十秒，于是矩阵会在任意一次点击上失败、且**看起来毫无头绪**。
+     *
+     * 处置：有界等待 splash 消失；超时**只告警不失败**（真有初始化故障时，让 spec 自己的
+     * 就绪断言去如实报错，而不是在这里变成一句"超时"）。
+     */
     async goto() {
       await page.goto(inst.url, { waitUntil: 'domcontentloaded' });
+      try {
+        await page.waitForFunction(() => {
+          const ds = Array.from(document.querySelectorAll('dialog[open]'));
+          return !ds.some((d) => d.querySelector('#loader') || /正在初始化/.test(d.textContent || ''));
+        }, null, { timeout: 90_000 });
+      } catch {
+        process.stdout.write(`  · ⚠ ${inst.id}: 宿主 splash（#loader / 「正在初始化…」）90 s 内未关闭`
+          + ' —— 后续点击可能被它拦截（规范 §11.7 宿主冷启动窗口）\n');
+      }
       return page;
     },
     async close() {
