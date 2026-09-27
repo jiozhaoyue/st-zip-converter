@@ -178,6 +178,8 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 | `specs/workbench.e2e.cjs` | dist | 形态判定（`独立 Web 模式`）、形态差异可见契约（无「从宿主拉取」/ 无「写回宿主」行按钮）、**子路径挂载**、计划预览、**包选择预设**（精简/完整）、转换闭环（上传→转换→**下载并解包核对**）、转换后报告读数、零报错 |
 | `specs/split.e2e.cjs` | dist | 阈值真写进输入框（回读校验）、**真的切成多份**（≥2 且序号从 1 连续）、分卷产物是合法 zip |
 | `specs-src/chat-store-module.e2e.cjs` | src-tree | 聊天库适配消费侧全链路（真模块 / 真 Blob / 真转换 / 桩供给方）+ **判别力对照**（无桩 ⇒ 补齐消失） |
+| `specs/stash.e2e.cjs` | dist | **暂存区流转**：喂第二个包**只入库不换源**（把那个静默的坑钉死）· 「载入为源」切源 · 行内「⋯」删除（含原生确认弹窗须显式 accept） |
+| `specs/batch.e2e.cjs` | dist | **批量转换**：多选 → 批量条可见性 · 逐个转换产出**两个按源包区分的产物名** · 两份产物都解包核对 · 报告面板语义（最后一个子项的） |
 | `specs/library-export.e2e.cjs` | dist | **从聊天库导出**：无库时按钮不可见（默认路径零变化）/ 有库时真实点击 → 产物解包核对（聊天入库内容、隐藏容器过滤、目标落位） |
 | `specs/flows.e2e.cjs` | dist | **文件名模板**（回读确认 + 预览求值 + 产物名真的按模板生成）+ **存工作区**（落库 `origin`/`role`、跨重载语义：临时产物清空而库内记录仍在） |
 | `specs/pause-resume.e2e.cjs` | dist | 转换的暂停/续传（无需实例）—— 含 **§4.6 那处已知缺陷**的取证与 `KNOWN-DEFECT` 锁 |
@@ -194,8 +196,8 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 > 首版就是这么错的（66 MB 用例量出 12 MB 包的耗时，读数"308 MB/s"一眼假）。
 > 现每次测量另开一个浏览器上下文（`measureFresh`）。
 
-当前断言总数：**188 项**（2026-09-28 实测全绿：workbench 42 · targets 51 · flows 16 ·
-chat-store-module 17 · pause-resume 16 · perf 17 · library-export 13 · split 10 · file-protocol 6）。
+当前断言总数：**221 项**（2026-09-28 实测全绿：workbench 42 · targets 51 · batch 18 · perf 17 ·
+chat-store-module 17 · flows 16 · pause-resume 16 · stash 15 · library-export 13 · split 10 · file-protocol 6）。
 
 未覆盖（登记，勿当成已覆盖）：`file://` 双击形态、插件模态态、Authority 增强层降级、
 多页签并发、超大批次（GB 级）、**宿主拉取路径的注入接线**（需真拉 1.5 GB 实例数据，代价过高）。
