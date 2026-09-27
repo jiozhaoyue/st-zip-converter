@@ -128,21 +128,29 @@ async function downloadNthRow(page, n, dir, fileName) {
   return target;
 }
 
-/** 用本仓 zipIo 把 zip 读成 `{ names, contents }`（contents: Map<名, Buffer>） */
+/**
+ * 用本仓 zipIo 把 zip 读成 `{ names, contents, methods }`
+ * （contents: Map<名, Buffer>；methods: Map<名, 压缩方法号> —— 0 = Store, 8 = Deflate）
+ *
+ * `methods` 是**确定性**判据的来源：想验「已压缩扩展名走了 Store 直存」时，
+ * 比对耗时是不可靠的（机器噪声），比对压缩方法号才是判据。
+ */
 async function readZip(zipPath) {
   const zipIo = await loadZipIo();
   const reader = await zipIo.openReader(zipPath);
   const names = [];
   const contents = new Map();
+  const methods = new Map();
   try {
     for await (const e of reader.entries()) {
       names.push(e.fileName);
       contents.set(e.fileName, Buffer.from(await e.read()));
+      methods.set(e.fileName, e.compressionMethod);
     }
   } finally {
     await reader.close();
   }
-  return { names, contents };
+  return { names, contents, methods };
 }
 
 /** 现场造一个有确定内容的 zip（夹具不够用时用） */
