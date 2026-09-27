@@ -152,7 +152,7 @@ async function main() {
     port: args.port,
     mounts: [
       { prefix: args.prefix, root: DIST },
-      { prefix: SRC_PREFIX, root: REPO_ROOT },
+      { prefix: SRC_PREFIX, root: REPO_ROOT, publicDir: path.join(REPO_ROOT, 'public') },
     ],
   });
   const distUrl = server.mounts.find((m) => m.prefix === args.prefix).url;

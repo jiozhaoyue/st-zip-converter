@@ -60,8 +60,11 @@ function isDenied(rel) {
 /**
  * 启动静态服务器。
  * @param {object} options
- * @param {Array<{prefix: string, root: string}>} [options.mounts]
- *   挂载表；前缀最长者优先匹配。默认 `[{prefix:'/', root: cwd}]`
+ * @param {Array<{prefix: string, root: string, publicDir?: string}>} [options.mounts]
+ *   挂载表；前缀最长者优先匹配。`publicDir` 存在时按 **Vite dev server 的语义**处理：
+ *   在 `root` 下找不到的路径回退到 `publicDir`（Vite 把 `public/` 挂在站点根）。
+ *   这条回退是必需的 —— 否则「源码树挂载」下 `index.html` 里那条指向 `public/` 产物的
+ *   相对引用会 404（而同一份产物在构建后的 `dist/` 里是被摊平到根的）。
  * @param {string} [options.root] 单挂载点的简写（等价于 mounts = [{prefix: options.prefix, root}])
  * @param {string} [options.prefix='/']
  * @param {number} [options.port]
@@ -71,6 +74,7 @@ function startStaticServer({ mounts, root, prefix = '/', port = DEFAULT_PORT } =
   const list = (mounts || [{ prefix, root }]).map((m) => ({
     prefix: normalizePrefix(m.prefix),
     root: path.resolve(m.root),
+    publicDir: m.publicDir ? path.resolve(m.publicDir) : null,
   })).sort((a, b) => b.prefix.length - a.prefix.length); // 最长前缀优先
 
   for (const m of list) {
@@ -114,6 +118,19 @@ function startStaticServer({ mounts, root, prefix = '/', port = DEFAULT_PORT } =
       return;
     }
     fs.readFile(target, (err, buf) => {
+      if (err && mount.publicDir) {
+        // Vite dev server 语义：root 下没有 ⇒ 回退到 public/（挂在站点根）
+        const viaPublic = path.join(mount.publicDir, rel);
+        return fs.readFile(viaPublic, (err2, buf2) => {
+          if (err2) { record(404); res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(`not found: ${rel}`); return; }
+          record(200);
+          res.writeHead(200, {
+            'Content-Type': MIME[path.extname(viaPublic).toLowerCase()] || 'application/octet-stream',
+            'Cache-Control': 'no-store',
+          });
+          res.end(buf2);
+        });
+      }
       if (err) {
         record(404);
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });

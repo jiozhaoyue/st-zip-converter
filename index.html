@@ -22,6 +22,13 @@
     禁止在本文件重新添加业务 id —— scripts/single-template-source.js 守卫会拦截。
   -->
   <div class="app-container app-standalone" id="app"></div>
+  <!--
+    经典脚本（**非 module**）：只为 `file://` 双击形态给一句「该怎么办」的说明。
+    模块脚本在 file:// 下必然被 CORS 拒 ⇒ 没有它就只剩白屏。HTTP(S) 形态下它立即返回、
+    一个字节都不动（否则就成了第二份工作台 UI，违反单一模板源铁律）。
+    实测与边界登记见 e2e/standalone/specs/file-protocol.e2e.cjs。
+  -->
+  <script src="./file-protocol-notice.js"></script>
   <script type="module" src="./index.js"></script>
 </body>
 </html>
