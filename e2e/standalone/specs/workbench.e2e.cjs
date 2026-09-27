@@ -15,87 +15,20 @@
  */
 
 const fs = require('fs');
-const path = require('path');
+const common = require('../lib/common.cjs');
 
 /** 与静态服务器同一前缀（run.cjs 会把它作为 baseUrl 传进来） */
 let BASE = '';
 let FIXTURE_DIR = '';
 
-let fixturesPromise = null;
-
-/** 现场生成夹具（`fixtures/gen.js` 的 generateAll；进程内缓存） */
-function ensureFixtures() {
-  if (!fixturesPromise) {
-    const genUrl = require('url').pathToFileURL(path.resolve(__dirname, '../../../fixtures/gen.js')).href;
-    fixturesPromise = import(genUrl).then((m) => m.generateAll(FIXTURE_DIR));
-  }
-  return fixturesPromise;
-}
-
-/** 读一个类目卡片的读数（`.cat-badge` 形如 `3 项 · 1.2 KB`；勾选框即「是否纳入」） */
-async function readCategory(page, key) {
-  return page.evaluate((catKey) => {
-    const card = document.querySelector(`.category-card[data-category="${catKey}"]`);
-    if (!card) return { present: false, count: null, checked: null, badge: '' };
-    const badge = card.querySelector('.cat-badge');
-    const box = card.querySelector('input[type="checkbox"]');
-    const text = badge ? badge.textContent.trim() : '';
-    const m = text.match(/(\d+)/);
-    return {
-      present: true,
-      count: m ? Number(m[1]) : null,
-      checked: box ? Boolean(box.checked) : null,
-      badge: text,
-    };
-  }, key);
-}
-
-/** 读一个计数读数（形如 `#count-chars`，属**转换后报告**面板） */
-async function readCount(page, id) {
-  return page.evaluate((elId) => {
-    const el = document.getElementById(elId);
-    if (!el) return null;
-    const n = Number(String(el.textContent).replace(/[^\d.-]/g, ''));
-    return Number.isFinite(n) ? n : null;
-  }, id);
-}
-
-/** 等计划摘要条出现且文本非空（有界等待，L1-MR-7） */
-async function waitForPlan(page, timeout = 40_000) {
-  try {
-    await page.waitForFunction(() => {
-      const bar = document.getElementById('plan-summary-bar');
-      const est = document.getElementById('output-estimate-text');
-      const visible = bar && getComputedStyle(bar).display !== 'none';
-      const text = (est ? est.textContent : '').trim();
-      return Boolean(visible) && text.length > 0;
-    }, null, { timeout });
-    return true;
-  } catch { return false; }
-}
-
-/** 等待导出区出现至少 n 行 */
-async function waitForQueue(page, n = 1, timeout = 90_000) {
-  try {
-    await page.waitForFunction((want) => document.querySelectorAll('.eq-name').length >= want,
-      n, { timeout });
-    return await page.$$eval('.eq-name', (els) => els.map((e) => e.textContent.trim()));
-  } catch { return null; }
-}
-
-/** 用本仓 zipIo 解包产物，返回条目名列表（证明产物真的是合法 zip） */
-async function readProductNames(zipPath) {
-  const { zipIo } = await import(require('url').pathToFileURL(
-    path.resolve(__dirname, '../../../src/core/zip-io.js')).href);
-  const reader = await zipIo.openReader(zipPath);
-  const names = [];
-  try {
-    for await (const e of reader.entries()) names.push(e.fileName);
-  } finally {
-    await reader.close();
-  }
-  return names;
-}
+// 三个 spec 共用的实现在 `../lib/common.cjs`（此处只留短名，避免各写一份拷贝）
+const ensureFixtures = () => common.ensureFixtures(FIXTURE_DIR);
+const readCategory = common.readCategory;
+/** 转换后报告的计数（`#count-*`）——**不是**计划阶段的类目卡片读数 */
+const readCount = common.readReportCount;
+const waitForPlan = common.waitForPlan;
+const waitForQueue = common.waitForQueue;
+const readProductNames = async (zipPath) => (await common.readZip(zipPath)).names;
 
 module.exports = {
   name: '独立 Web 形态：云部署子路径 / 转换闭环 / 包选择预设',
@@ -246,12 +179,7 @@ module.exports = {
     t.eq('D3 独立形态下产物行**没有**「写回宿主」按钮', restoreBtns, 0);
 
     // 下载并解包核对（只验「队列里有行」会把空包判成通过）
-    const outPath = path.join(FIXTURE_DIR, 'standalone-product.zip');
-    const download = await Promise.all([
-      page.waitForEvent('download', { timeout: 60_000 }),
-      page.click('.btn-archive-action.download'),
-    ]).then(([d]) => d);
-    await download.saveAs(outPath);
+    const outPath = await common.downloadFirstRow(page, FIXTURE_DIR, 'standalone-product.zip');
     t.ok('D4 产物下载成功且非空', fs.existsSync(outPath) && fs.statSync(outPath).size > 0,
       `size=${fs.existsSync(outPath) ? fs.statSync(outPath).size : 'N/A'}`);
 

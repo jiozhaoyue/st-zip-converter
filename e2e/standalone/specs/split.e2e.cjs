@@ -15,74 +15,34 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const common = require('../lib/common.cjs');
 
 let FIXTURE_DIR = '';
 
 /** 放大夹具：SHA-256 计数器模式（不可压缩、确定性 —— LCG 低位周期短会被压掉，见矩阵 spec） */
-function ensureLargeFixture() {
+async function ensureLargeFixture() {
   const out = path.join(FIXTURE_DIR, 'fixture-web-split-st.zip');
   if (fs.existsSync(out)) return out;
 
   const CHUNK = 1024 * 1024;
   const FILES = 3;
-  return (async () => {
-    const { zipIo } = await import(require('url').pathToFileURL(
-      path.resolve(__dirname, '../../../src/core/zip-io.js')).href);
-    const writer = await zipIo.createWriter(out);
-    await writer.add('characters/Fixture Character.png', Buffer.from('89504e470d0a1a0a', 'hex'));
-    for (let i = 1; i <= FILES; i += 1) {
-      const parts = [];
-      for (let ctr = 0; parts.length * 32 < CHUNK; ctr += 1) {
-        parts.push(crypto.createHash('sha256').update(`web-split:${i}:${ctr}`).digest());
-      }
-      // 首行是合法聊天头，其余为高熵正文（转换器按行处理，内容不必是真实聊天）
-      const head = Buffer.from(`${JSON.stringify({ user_name: 'You', character_name: 'Fixture' })}\n`, 'utf8');
-      await writer.add(`chats/Fixture/bulk-${i}.jsonl`, Buffer.concat([head, ...parts]));
+  const entries = [['characters/Fixture Character.png', Buffer.from('89504e470d0a1a0a', 'hex')]];
+  for (let i = 1; i <= FILES; i += 1) {
+    const parts = [];
+    for (let ctr = 0; parts.length * 32 < CHUNK; ctr += 1) {
+      parts.push(crypto.createHash('sha256').update(`web-split:${i}:${ctr}`).digest());
     }
-    await writer.close();
-    return out;
-  })();
-}
-
-async function fillNumber(page, selector, value) {
-  const readValue = () => page.evaluate((sel) => {
-    const el = document.querySelector(sel);
-    return el ? el.value : null;
-  }, selector);
-  await page.fill(selector, String(value)).catch(() => {});
-  for (let i = 0; i < 6; i += 1) {
-    if ((await readValue()) === String(value)) return 'fill';
-    await page.waitForTimeout(150);
+    // 首行是合法聊天头，其余为高熵正文（转换器按行处理，内容不必是真实聊天）
+    const head = Buffer.from(`${JSON.stringify({ user_name: 'You', character_name: 'Fixture' })}\n`, 'utf8');
+    entries.push([`chats/Fixture/bulk-${i}.jsonl`, Buffer.concat([head, ...parts])]);
   }
-  await page.evaluate(({ sel, v }) => {
-    const el = document.querySelector(sel);
-    if (!el) return;
-    el.value = v;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }, { sel: selector, v: String(value) });
-  return (await readValue()) === String(value) ? 'evaluate' : 'failed';
+  return common.buildZip(out, entries);
 }
 
-async function waitForPlan(page, timeout = 60_000) {
-  try {
-    await page.waitForFunction(() => {
-      const bar = document.getElementById('plan-summary-bar');
-      const est = document.getElementById('output-estimate-text');
-      return Boolean(bar) && getComputedStyle(bar).display !== 'none'
-        && Boolean(est) && est.textContent.trim().length > 0;
-    }, null, { timeout });
-    return true;
-  } catch { return false; }
-}
-
-async function waitForQueueCount(page, n, timeout = 120_000) {
-  try {
-    await page.waitForFunction((want) => document.querySelectorAll('.eq-name').length >= want,
-      n, { timeout });
-    return await page.$$eval('.eq-name', (els) => els.map((e) => e.textContent.trim()));
-  } catch { return null; }
-}
+// 与另两个 spec 共用实现（`../lib/common.cjs`）
+const fillNumber = common.fillNumber;
+const waitForPlan = common.waitForPlan;
+const waitForQueueCount = common.waitForQueue;
 
 module.exports = {
   name: '独立 Web 形态：智能分卷（阈值真的生效 / 产物真的多份）',
@@ -128,18 +88,10 @@ module.exports = {
       parts.length > 0 && parts.every((v, i) => v === i + 1), JSON.stringify(parts));
 
     // 抽验第一份是**合法 zip**（只数队列行会把空壳判成通过）
-    const first = path.join(FIXTURE_DIR, 'web-split-part1.zip');
-    const dl = await Promise.all([
-      page.waitForEvent('download', { timeout: 60_000 }),
-      page.click('.btn-archive-action.download'),
-    ]).then(([d]) => d);
-    await dl.saveAs(first);
-    const { zipIo } = await import(require('url').pathToFileURL(
-      path.resolve(__dirname, '../../../src/core/zip-io.js')).href);
-    const reader = await zipIo.openReader(first);
-    let entries = 0;
-    try { for await (const _e of reader.entries()) entries += 1; } finally { await reader.close(); }
-    t.ge('G9 分卷产物是合法 zip 且条目数 > 0', entries, 1, `entries=${entries}`);
+    const first = await common.downloadFirstRow(page, FIXTURE_DIR, 'web-split-part1.zip');
+    const product = await common.readZip(first);
+    t.ge('G9 分卷产物是合法 zip 且条目数 > 0', product.names.length, 1,
+      `entries=${product.names.length}`);
 
     t.eq('G10 全流程零页面异常', rec.pageErrors.length, 0, JSON.stringify(rec.pageErrors.slice(0, 2)));
   },
