@@ -239,6 +239,26 @@ async function readLogText(page) {
 }
 
 /**
+ * 清空插件日志面板（**先展开再点**，理由同 `readLogText`：折叠态按钮不可点）。
+ *
+ * 用途：给同一会话里前后两段流程的日志**分段**，避免后一段的断言匹配到前一段的残留行
+ * （2026-09-27 实测过一次假绿：M-10b 的「沿用断点跳过」匹配到了 M-7b 留在同一面板里的旧行，
+ * 而那一轮批量其实**整批零产物**）。`#btn-clear-log` 无确认弹窗（`log-console.js:234`）。
+ */
+async function clearLog(page) {
+  await page.evaluate(() => {
+    const body = document.getElementById('log-console-body');
+    if (body && getComputedStyle(body).display === 'none') {
+      const btn = document.getElementById('btn-toggle-log');
+      if (btn) btn.click();
+    }
+  });
+  await page.waitForTimeout(200);
+  await page.click('#btn-clear-log');
+  await page.waitForTimeout(300);
+}
+
+/**
  * 按**真实用户路径**打开插件工作台，并确认它真的可见。
  *
  * 路径：
@@ -1209,6 +1229,11 @@ module.exports = {
     await page.waitForTimeout(400);
 
     t.log('  · M-10 点击「批量转换」...');
+    // ⚠️ **先清空日志**（2026-09-27 修假绿）：日志面板是**同一个会话共用的**，
+    //    M-7b 的「沿用断点跳过 N 项」会一直留在里面 ⇒ 下面 ④ 的续传断言会**匹配到 M-7b 的旧行**
+    //    —— 实测该断言在「批量整批零产物」时依然报绿（典型假绿）。
+    //    `#btn-clear-log` 无确认弹窗（`log-console.js:234`），是真实用户动作。
+    await clearLog(page);
     const qBeforeBatch = (await queueNames()).length;
     await page.click('#stash-batch-bar button:has-text("批量转换")');
 
@@ -1271,13 +1296,24 @@ module.exports = {
       `实际新增 ${batchNew} 份：${JSON.stringify(qAfterBatch.slice(qBeforeBatch))}`);
 
     // ④ 续传命中同样可观测（第 1 个子项在暂停前已完成的条目被跳过）
+    //    ⚠️ 日志已在点「批量转换」前清空 ⇒ 这里读到的**只可能是本批次的日志**。
     const batchLogText = await readLogText(page);
     const batchResumedMatch = /沿用断点跳过\s*(\d+)\s*项/.exec(batchLogText);
     t.log(`  · M-10b 日志尾部：${JSON.stringify(batchLogText.slice(-240))}`);
     t.ok('M-10b 批次续传**真的跳过了条目**（日志含「沿用断点跳过 N 项」）',
       Boolean(batchResumedMatch), `日志尾部=${JSON.stringify(batchLogText.slice(-240))}`);
-    t.ok('M-10b 批量成功日志出现两次（两个子项各一次）',
-      (batchLogText.match(/批量转换|数据包转换成功/g) || []).length >= 2,
-      `匹配数=${(batchLogText.match(/批量转换|数据包转换成功/g) || []).length}`);
+
+    // ⑤ **失败必须为零**（新增，2026-09-27）：这一条直接盯住本次抓到的那类静默整批失败 ——
+    //    实测当时整批两个子项都抛
+    //    `Cannot set property name of #<File> which has only a getter`，
+    //    而旧断言因为正则 `/批量转换|数据包转换成功/` 把「批量转换**失败**」也算作匹配
+    //    ⇒ **报绿**。现在按成功行逐条计数，并单独断言零失败行。
+    const batchFailLines = batchLogText.match(/批量转换失败|转换失败/g) || [];
+    t.ok('M-10b 日志里**零失败行**（整批没有子项抛错）', batchFailLines.length === 0,
+      `失败行=${JSON.stringify(batchFailLines.slice(0, 2))}`);
+
+    const successLines = batchLogText.match(/数据包转换成功！共写入 \d+ 个文件/g) || [];
+    t.ok('M-10b 每子项各一条成功日志（计数 == 2，且写入数为具体数字而非 undefined）',
+      successLines.length === 2, `成功行=${successLines.length} 条：${JSON.stringify(successLines)}`);
   },
 };
