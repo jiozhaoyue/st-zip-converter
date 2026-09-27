@@ -66,8 +66,17 @@
 - [ ] **6.3** 【**阻塞：供给侧未实现**】真机（Dev 实例）：AC-7 打包含库中聊天 / AC-8 还原入库 / AC-9 删掉接缝 ⇒ 断言转红
       ⚠️ 需临时把 Dev Luker 切纯库；**切换前后记读数、结束复原**；避开并发 E2E 窗口
 - [x] **6.4** 已**如实登记**（不得用文件路径绿冒充）：契约待办写进 `spec/frontend/chat-store-seam.md` §5
-- [ ] **6.5** 【替代验证】用**桩供给方**在真实浏览器里跑消费侧全链路（`page.addInitScript` 注入
-      `ChatFilesysApi` 桩 → 真实转换 → 解包核对「源包优先 + 补齐缺失」），并做一次**判别力证明**（不注入桩 ⇒ 转红）
+- [x] **6.6** 【新增方向：**从聊天库导出**】纯库模式下只有库、没有源包时的出口：
+      `exportLibraryToPack()`（造最小 ST 摊平源包 → 走同一条转换管线）+ 动作行按钮
+      （`computeActionAvailability` 统一求值，**只在检测到库时可见**）+ 守卫消费点登记；
+      守护用例 `specs/library-export.e2e.cjs`（13 项，无库/有库两态对照，验到产物内容）
+- [x] **6.5** 【替代验证·已完成】用**桩供给方**在真实浏览器里跑消费侧全链路
+      —— `e2e/standalone/specs-src/chat-store-module.e2e.cjs`（17 项，源码树挂载直驱真实模块）
+      与 `e2e/standalone/specs/library-export.e2e.cjs`（13 项，真按钮真点击）；
+      且原句中的（`page.addInitScript` 注入
+      「注入 `ChatFilesysApi` 桩 → 真实转换 → 解包核对『源包优先 + 补齐缺失』」已覆盖；
+      **判别力证明**由两条独立对照承担：源码树 spec 的 M14/M15（不注入桩 ⇒ 补齐消失）与
+      library-export 的 E3（无库 ⇒ 按钮不可见）
 
 ## 7 收口
 

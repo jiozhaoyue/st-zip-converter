@@ -57,8 +57,16 @@
 
 - [x] **6.1** 规范落 `.trellis/spec/guides/standalone-web-and-cloud-e2e.md`（自包含；含四条「红灯来自断言自己」）
 - [x] **6.2** 索引：`guides/index.md` 增一行
-- [ ] **6.3** 残留登记：`file://` 双击形态、插件模态态、Authority 降级、GB 级批次 —— **均未覆盖**
-- [ ] **6.4** 提交（**显式 pathspec**）并推送
+- [x] **6.3** 残留登记：插件模态态、Authority 降级、GB 级批次 —— **仍未覆盖**；
+      `file://` 双击形态**已覆盖**（`specs/file-protocol.e2e.cjs` 边界登记 + 那层提示）
+- [x] **6.5** 【追加覆盖，PRD 后补】`targets`（四目标兼容矩阵 + 扩展模式两态 + 包选择两态）、
+      `flows`（文件名模板 / 存工作区落库与跨重载）、`pause-resume`（转换暂停→续传）、
+      `library-export`（从聊天库导出）、`file-protocol`（双击边界）
+- [x] **6.6** 【追加修复】独立形态去 CDN 外链（Font Awesome 本地副本），三条硬断言守护
+- [x] **6.7** 【追加取证】🔴 暂停→续传后产物**缺条目**（静默数据损失）—— 机理与两种修法
+      写进 `spec/frontend/…` 之外的 `guides/standalone-web-and-cloud-e2e.md` §4.6
+      （不是本任务造成的，也不在本任务范围内擅自改；已用 `KNOWN-DEFECT` 锁住形态）
+- [x] **6.4** 提交（**显式 pathspec**）并推送（5 个提交：2b9f04b…43a3bd2 之外的本任务部分）
 
 ## 回滚
 

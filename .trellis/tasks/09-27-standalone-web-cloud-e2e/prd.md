@@ -59,10 +59,28 @@
 | **AC-7** | 全流程零页面异常 / 零控制台错误 / 零失败请求 |
 | **AC-8** | `npm test` 零回退（新增目录不被 vitest 收集） |
 
-## 交付读数（2026-09-27 23:2x 实测）
+## 交付读数（2026-09-28 实测）
 
-- `npm run e2e:web`：**断言 52 项 / 通过 52 / 失败 0**
-  （`split` 13 项：5 分卷、序号 1..5 连续、首卷合法 zip；`workbench` 39 项）
-- 机器当时处于高负载（另一会话 18 个 chrome 在跑）：全量 `npm test` 在默认并发下
-  出现 13 条 **5s 超时型**失败（单跑即过，属资源争抢）；`--maxWorkers=2` 复跑
-  **60 文件 / 573 passed / 2 skipped / 0 failed** ⇒ 零回退成立，并记录该环境事实。
+| 项 | 读数 |
+| --- | --- |
+| `npm run e2e:web -- --rebuild` | **183 断言 / 183 通过 / 0 失败**（8 个 spec） |
+| spec 构成 | `workbench` 42 · `targets` 51 · `chat-store-module` 17 · `pause-resume` 16 · `flows` 16 · `library-export` 13 · `perf` 12 · `split` 10 · `file-protocol` 6 |
+| 判别力证明 | ① 构建脚本 `--base=./` → `--base=/` ⇒ workbench **10 条转红**；② 移走 `webfonts/` 并 `--rebuild` ⇒ **6 条转红**（含 A7/A8 与 2 条 4xx）；③ 不注入桩 ⇒ 聊天库补齐**消失**（M14/M15） |
+| `npm test` | **60 文件 / 573 passed / 2 skipped / 0 failed**（默认并发下先出现 13 条 5s 超时型失败，全为资源争抢；机器 idle 仅 3.3%、并发会话 18 个 chrome；`--maxWorkers=2` 复跑全绿） |
+| 静态守卫 | 五条 `exit=0` |
+
+## 由本任务发现并顺手修掉的缺口
+
+1. **独立形态的 Font Awesome 走 CDN 外链**（`index.html`）。由本 spec 的「跨源请求」信息项
+   读数发现 ⇒ 违反用户级 `nocdn`，且离线/云部署下全部图标失效。已改 `src/vendor/fontawesome/`
+   本地副本（`L1-MR-11` 惯例），跨源读数 **2 → 0**，并把它从「信息项」升级为
+   **三条硬断言**（A6 图标元素非空 / A7 字族已加载 / A8 `::before` 命中 FA）。
+2. **运行器的构建新鲜度判据看不见「删了源码文件」**（只看 mtime）⇒ 首轮判别力实验跑了旧
+   `dist/`，**无效实验**。新增 `--rebuild` 强制重建。
+
+## 阻塞（非本任务可解）
+
+- **实例侧验证不可做**：另一会话的 `e2e/run.cjs` 进程自 2026-09-27 22:20 起挂死（CPU 两小时
+  只涨 8s），期间 dev-st 页面停在 `Initializing…`（`#send_form` 在、但初始化不完成），
+  smoke 读数呈现「panel/drawer/menu 全 false 且零本插件报错」——**这是实例被拖住的形态，
+  不是产品结论**，故不作任何判定。待其释放后再跑实例侧矩阵。
