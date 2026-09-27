@@ -204,8 +204,8 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 > 首版就是这么错的（66 MB 用例量出 12 MB 包的耗时，读数"308 MB/s"一眼假）。
 > 现每次测量另开一个浏览器上下文（`measureFresh`）。
 
-当前断言总数：**327 项**（2026-09-28 实测全绿）：
-`targets` 59 · `workbench` 42 · `pause-resume` 21 · `perf` 21 · `misc` 19 · `batch` 18 · `chat-store-module` 17 · `controls` 16 · `flows` 16 · `exclude` 15 · `stash` 15 · `detail-list` 14 · `concurrency` 13 · `library-export` 13 · `action-filter` 12 · `split` 10 · `file-protocol` 6。
+当前断言总数：**334 项**（运行器结尾会打印**分项读数**：每个 spec 的总数/通过/失败 —— 引读数时用它，不要手抄）（2026-09-28 实测全绿）：
+`targets` 66 · `workbench` 42 · `pause-resume` 21 · `perf` 21 · `misc` 19 · `batch` 18 · `chat-store-module` 17 · `controls` 16 · `flows` 16 · `exclude` 15 · `stash` 15 · `detail-list` 14 · `concurrency` 13 · `library-export` 13 · `action-filter` 12 · `split` 10 · `file-protocol` 6。
 
 未覆盖（登记，勿当成已覆盖 —— `file://` 双击形态与多页签并发**已在 2026-09-28 补上**）：
 **插件模态态**（只覆盖了抽屉态与独立态）· **Authority 增强层降级**（独立形态下 SDK 缺席，

@@ -55,14 +55,32 @@ function parseArgs(argv) {
   return out;
 }
 
-const state = { total: 0, passed: 0, failed: 0, failures: [] };
+const state = { total: 0, passed: 0, failed: 0, failures: [], perSpec: [] };
+/** 当前 spec 名（`ok()` 用它记账，产出结尾的**分项汇总** —— 读数不必再从输出里手抄） */
+let currentSpec = '';
+function specTally() {
+  if (!currentSpec) return null;
+  let t = state.perSpec.find((x) => x.name === currentSpec);
+  if (!t) { t = { name: currentSpec, total: 0, passed: 0, failed: 0 }; state.perSpec.push(t); }
+  return t;
+}
 const log = (m) => process.stdout.write(`${m}\n`);
 
 function ok(label, cond, extra = '') {
   state.total += 1;
+  const tally = specTally();
+  if (tally) tally.total += 1;
   const suffix = extra ? ` — ${extra}` : '';
-  if (cond) { state.passed += 1; log(`  [OK]   ${label}${suffix}`); }
-  else { state.failed += 1; state.failures.push(label); log(`  [FAIL] ${label}${suffix}`); }
+  if (cond) {
+    state.passed += 1;
+    if (tally) tally.passed += 1;
+    log(`  [OK]   ${label}${suffix}`);
+  } else {
+    state.failed += 1;
+    if (tally) tally.failed += 1;
+    state.failures.push(label);
+    log(`  [FAIL] ${label}${suffix}`);
+  }
   return Boolean(cond);
 }
 
@@ -171,6 +189,7 @@ async function main() {
       const baseUrl = kind === 'src' ? srcUrl : distUrl;
       const label = `${spec.name || path.basename(file).replace(/\.e2e\.cjs$/, '')}`
         + (kind === 'src' ? '〔源码树〕' : '');
+      currentSpec = label;
       log(`── ${label} ${'─'.repeat(Math.max(0, 52 - label.length))}`);
       const h = await openSite(baseUrl);
       try {
@@ -199,6 +218,15 @@ async function main() {
   }
 
   log('─'.repeat(60));
+  if (state.perSpec.length) {
+    log('分项读数（每个 spec：总数 / 通过 / 失败）：');
+    const width = Math.max(...state.perSpec.map((x) => x.name.length));
+    for (const x of state.perSpec) {
+      log(`  ${x.name.padEnd(width)}  ${String(x.total).padStart(3)} 项 / `
+        + `${String(x.passed).padStart(3)} 通过`
+        + (x.failed ? ` / ${String(x.failed).padStart(2)} 失败  ←` : ''));
+    }
+  }
   log(`断言 ${state.total} 项：通过 ${state.passed} / 失败 ${state.failed}`);
   if (state.failed) {
     log('失败项：');
