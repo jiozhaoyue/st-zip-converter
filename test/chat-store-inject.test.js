@@ -5,7 +5,7 @@ import path from 'node:path';
 import { zipIo } from '../src/core/zip-io.js';
 import { __resetChatStoreStateForTest } from '../src/ui/chat-store-bridge.js';
 import {
-  importRestoredChatsIntoLibrary, injectLibraryChatsIntoSource,
+  exportLibraryToPack, importRestoredChatsIntoLibrary, injectLibraryChatsIntoSource,
 } from '../src/ui/chat-store-inject.js';
 
 /**
@@ -199,5 +199,104 @@ describe('chat-store-inject · 导入侧入库', () => {
     const res = await importRestoredChatsIntoLibrary(src);
     expect(res.skipped).toBe('no-chat-store');
     expect(res.imported).toBe(0);
+  });
+});
+
+
+/**
+ * 「从聊天库导出」的单测（E2E 另有 `specs/library-export.e2e.cjs` 走真按钮；这里只测编排语义）
+ *
+ * 为什么要单测：E2E 慢且依赖浏览器；而这条编排有若干**只有靠注入才测得到**的分支
+ * （库索引失败 / 类目关断 / 全条导出失败 / 只给 list 不给 export）。
+ */
+describe('chat-store-inject · 从聊天库导出（exportLibraryToPack）', () => {
+  it('成功路径：库里的聊天进产物，且落位在 chats/ 下（含角色子目录）', async () => {
+    installApi({ chats: [{ fileName: 'Solo.jsonl' }, { fileName: 'Char/双人.jsonl' }] });
+    const res = await exportLibraryToPack({ target: 'st', compressionLevel: 0 });
+    expect(res.ok).toBe(true);
+    expect(res.count).toBe(2);
+    const reader = await zipIo.openReader(res.blob);
+    const names = [];
+    const texts = new Map();
+    for await (const e of reader.entries()) {
+      names.push(e.fileName);
+      texts.set(e.fileName, Buffer.from(await e.read()).toString('utf8'));
+    }
+    await reader.close();
+    expect(names).toContain('chats/Solo.jsonl');
+    expect(names).toContain('chats/Char/双人.jsonl');
+    // 内容来自供给方（`installApi` 的默认 exportChat 返回 `{"chat":"<fileName>"}`）
+    expect(texts.get('chats/Solo.jsonl')).toContain('"chat":"Solo.jsonl"');
+    // 隐藏容器即便出现在索引里也不得进产物
+    expect(names.some((n) => n.includes('__cfsys__'))).toBe(false);
+  });
+
+  it('未装聊天库 ⇒ ok:false + 可读原因（不抛）', async () => {
+    const res = await exportLibraryToPack({ target: 'st' });
+    expect(res).toMatchObject({ ok: false, count: 0 });
+    expect(res.reason).toContain('未检测到聊天库');
+  });
+
+  it('只给 list 不给 export ⇒ 明确说明缺哪个能力', async () => {
+    globalThis[KEY] = Object.freeze({
+      apiVersion: 1,
+      capabilities: { list: true, export: false, import: false },
+      mode: () => 'pure',
+      listChats: async () => [{ fileName: 'A.jsonl' }],
+    });
+    const res = await exportLibraryToPack({ target: 'st' });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toContain('export');
+  });
+
+  it('库索引失败 ⇒ 降级为可读原因（不抛）', async () => {
+    installApi({ overrides: { listChats: async () => { throw new Error('库离线'); } } });
+    const res = await exportLibraryToPack({ target: 'st' });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toContain('库离线');
+  });
+
+  it('聊天类目关断 ⇒ 不导出（尊重用户选择）', async () => {
+    let exported = 0;
+    installApi({ overrides: { exportChat: async () => { exported += 1; return 'x\n'; } } });
+    const res = await exportLibraryToPack({ target: 'st', selection: { chats: false } });
+    expect(res.ok).toBe(false);
+    expect(exported).toBe(0);
+  });
+
+  it('全部条目导出失败 ⇒ ok:false 且**不产出空壳包**', async () => {
+    installApi({ overrides: { exportChat: async () => '' } });
+    const res = await exportLibraryToPack({ target: 'st' });
+    expect(res.ok).toBe(false);
+    expect(res.blob).toBeNull();
+    expect(res.failed.length).toBeGreaterThan(0);
+  });
+
+  it('部分失败仍产出包，并如实记下失败条目', async () => {
+    installApi({
+      chats: [{ fileName: 'OK.jsonl' }, { fileName: '坏.jsonl' }],
+      overrides: {
+        exportChat: async ({ fileName }) => {
+          if (fileName === '坏.jsonl') throw new Error('该条损坏');
+          return '{"a":1}\n';
+        },
+      },
+    });
+    const res = await exportLibraryToPack({ target: 'st', compressionLevel: 0 });
+    expect(res.ok).toBe(true);
+    expect(res.count).toBe(1);
+    expect(res.failed).toEqual([{ fileName: '坏.jsonl', reason: '该条损坏' }]);
+  });
+
+  it('signal 已中止 ⇒ 立即返回 aborted，不读任何一条', async () => {
+    let exported = 0;
+    installApi({ overrides: { exportChat: async () => { exported += 1; return 'x\n'; } } });
+    const c = new AbortController();
+    c.abort();
+    const res = await exportLibraryToPack({ target: 'st', signal: c.signal });
+    expect(res.ok).toBe(false);
+    // 中止发生在**读索引**这一步 ⇒ 归一后如实报出「索引不可用 + 原因」
+    expect(res.reason).toContain('aborted');
+    expect(exported).toBe(0);
   });
 });
