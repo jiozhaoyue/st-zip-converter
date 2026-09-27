@@ -37,6 +37,39 @@ export function formatDate(d = new Date()) {
 }
 
 /**
+ * 给 blob 一个**可读的名字**，且**不改动原对象**。
+ *
+ * ⚠️ **为什么不能写 `blob.name = name`**（2026-09-27 实测事故）：
+ * `File.prototype.name` 是**只读**属性 —— 浏览器里是「只有 getter 的访问器」
+ * （运行时原话：`Cannot set property name of #<File> which has only a getter`），
+ * Node 里是不可写数据属性；而 **ES 模块代码恒为严格模式** ⇒ 对 `File` 赋值 `name`
+ * **直接抛 `TypeError`**（非严格模式下只会静默失败，所以极易被忽略）。
+ * 而 IndexedDB 里存的源包 blob **就是 `File`**（`saveFile({blob})` 原样入库，
+ * 取回仍是 File）⇒ 原先三处 `xxx.name = record.name` 在运行期全炸：
+ *   ① 批量转换的子项（`index.js` 的 `convertItem`）—— 实测每个子项都以
+ *      `批量转换失败 [id]: Cannot set property name …` 告终，整批零产物；
+ *   ② 暂存区「载入为源」；③ 工作区状态恢复（页面重载后静默失效）。
+ *
+ * 做法：名字**已经对**（`File` 自带同名）⇒ **原样返回**，零拷贝、零行为变化；
+ * 否则用 `new File([blob], name)` 包一层（Blob 分片按引用共享，**不复制数据**）。
+ *
+ * @param {Blob|File|null} blob
+ * @param {string} [name] 期望的名字；缺省则保留 blob 自带的名字，再缺省用 `datapack.zip`
+ * @returns {Blob|File|null}
+ */
+export function namedBlob(blob, name) {
+  if (!blob) return blob;
+  const want = name || blob.name || 'datapack.zip';
+  if (typeof blob.name === 'string' && blob.name === want) return blob;
+  try {
+    return new File([blob], want, { type: blob.type });
+  } catch {
+    // 无 File 构造器的环境 ⇒ 退化为原 blob：宁可少一个名字，也不打断转换主路径
+    return blob;
+  }
+}
+
+/**
  * 根据模板与上下文参数生成合法安全的 zip 导出文件名
  * @param {string} template 用户输入或默认模板
  * @param {object} context

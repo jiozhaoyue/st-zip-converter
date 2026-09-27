@@ -38,7 +38,7 @@ import { ExportQueue, renderExportQueue } from './src/ui/export-queue.js';
 import { initTaskControls } from './src/ui/task-controls.js';
 import { createCheckpointAdapter } from './src/storage/authority-store.js';
 import { renderUsageDashboard } from './src/ui/usage-dashboard.js';
-import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE } from './src/core/filename-template.js';
+import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE, namedBlob } from './src/core/filename-template.js';
 import {
   detectHost,
   verifyHostPlatform,
@@ -775,8 +775,9 @@ async function main(appRoot) {
             logger.warn(`[${i + 1}/${totalCount}] 源包已不在工作区，跳过: ${itemId}`);
             return;
           }
-          const currentBlob = full.blob;
-          currentBlob.name = full.name;
+          // ⚠️ 不能写 `currentBlob.name = full.name`：blob 是 `File` 时 `name` 只读，
+          // 严格模式下直接抛 TypeError ⇒ 每个子项都失败、整批零产物（实测，见 namedBlob 注释）
+          const currentBlob = namedBlob(full.blob, full.name);
 
           const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
           const outputFilename = resolveFilename(template, {
@@ -883,8 +884,8 @@ async function main(appRoot) {
       confirmFn: confirmDialog,
       onLoadFile: async (fileRecord) => {
         if (!fileRecord || !fileRecord.blob) return;
-        currentFile = fileRecord.blob;
-        currentFile.name = fileRecord.name;
+        // ⚠️ 同上：`File.name` 只读 ⇒ 不能赋值（见 `namedBlob` 注释）
+        currentFile = namedBlob(fileRecord.blob, fileRecord.name);
         currentFileId = fileRecord.id;
         currentFileHandle = fileRecord.handle || 'default-user';
 
@@ -2105,8 +2106,14 @@ async function main(appRoot) {
         return;
       }
 
-      view.setProgress(100, `转换成功！共写入 ${report.totals.written} 项，已丢弃/过滤 ${report.totals.dropped + (report.totals.filtered || 0)} 项`);
-      logger.success(`数据包转换成功！共写入 ${report.totals.written} 个文件`);
+      // ⚠️ 原先写的是 `report.totals.written` —— 该字段**从来不存在**
+      // （`src/core/report.js:157` 的 totals 只有 copied / dropped / droppedBytes /
+      //  filtered / synthesized / resumed / warnings）⇒ 用户看到的进度条与日志恒为
+      // 「共写入 **undefined** 项 / 个文件」（2026-09-27 实测，E2E 日志里抓到的原文）。
+      // 「写入」= 直通复制（copied）+ 合成（synthesized）两类实际写出的条目。
+      const writtenTotal = report.totals.copied + report.totals.synthesized;
+      view.setProgress(100, `转换成功！共写入 ${writtenTotal} 项，已丢弃/过滤 ${report.totals.dropped + (report.totals.filtered || 0)} 项`);
+      logger.success(`数据包转换成功！共写入 ${writtenTotal} 个文件`);
 
       // 暂存转换产物到 IndexedDB
       const outputFilename = resolveFilename(template, {
@@ -2176,8 +2183,10 @@ async function main(appRoot) {
       if (savedState && savedState.fileId) {
         const fileRecord = await getFile(savedState.fileId);
         if (fileRecord && fileRecord.blob) {
-          currentFile = fileRecord.blob;
-          currentFile.name = fileRecord.name;
+          // ⚠️ 同上：`File.name` 只读 ⇒ 不能赋值（见 `namedBlob` 注释）。
+          // 原先这句一抛，整个「工作区状态恢复」就在 catch 里静默夭折
+          // （源包/目标/压缩等级/模板全都恢复不了，页面看着像"忘了上次的状态"）
+          currentFile = namedBlob(fileRecord.blob, fileRecord.name);
           currentFileId = fileRecord.id;
           currentFileHandle = fileRecord.handle || 'default-user';
 
