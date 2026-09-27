@@ -81,8 +81,10 @@
 ## 7 收口
 
 - [x] **7.1** 规范落库（自包含，内联读数与 `file:line`）
-- [ ] **7.2** `git status --short` 复核：无计划外文件；`git diff --staged --name-only` **恰等于**本次集合
-- [ ] **7.3** 提交（**显式 pathspec**，L0-7(2)）并 `git push origin`
+- [x] **7.2** `git status --short` 复核：无计划外文件（每次提交前都用 `git diff --staged --name-only` 对过集合）
+- [x] **7.3** 提交（**显式 pathspec**）并 `git push origin` —— 本任务共 6 个提交：
+      `2b9f04b`（消费侧适配）· `83b7e03`（自查三修）· `c16e65a`（导出补单测）·
+      `43a3bd2`（从聊天库导出）· `1e26191`（file:// 提示 + 续传缺陷取证）· `c652d8d`（任务收口文档）
 - [ ] **7.4** 残留登记：供给侧实现待办、真机验证缺口、`group chats/` 分支未取证项
 
 ## 回滚点
