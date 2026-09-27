@@ -5,6 +5,7 @@ import {
 } from '../core/pack-inject.js';
 import { isBackupChatOrSnapshot } from '../core/inspect.js';
 import { augmentZip } from '../core/zip-augment.js';
+import { runConversionTask } from '../core/worker-client.js';
 import {
   importChatsToLibrary, listLibraryChats, probeChatStore, readLibraryChatAsJsonl,
 } from './chat-store-bridge.js';
@@ -188,6 +189,96 @@ export async function injectLibraryChatsIntoSource(source, {
   logger.success(`已把 ${entries.length} 条库中聊天补入源包（落点 ${route}）`
     + (base.failed.length ? `；另有 ${base.failed.length} 条导出失败` : ''));
   return base;
+}
+
+/**
+ * 从**聊天库**直接产出一个数据包（不需要源包）—— 纯库模式下的「导出聊天记录」。
+ *
+ * 为什么需要它：纯库模式里磁盘上没有 jsonl，用户想「把我的聊天拷出来」时，
+ * 宿主拉取会连整份用户数据一起拉（GB 级），而这里只要**库里的聊天**这一件事。
+ *
+ * 做法（复用既有管线，不另造一套转换）：造一个**最小 ST 摊平源包**
+ * （注入的聊天 + `settings.json` 骨架，后者用于让 `detectFromReader` 认出布局），
+ * 然后交给 `runConversionTask` 走**与普通转换完全相同**的那条路 —— 于是目标落位、
+ * 类目过滤、压缩策略、Worker 并发全部免费继承。
+ *
+ * 与「打包时并入」的分工：那条补的是**已有包**缺的聊天；这条是**只有库**时的出口。
+ *
+ * @param {object} [options]
+ * @param {string} [options.target='st'] 目标平台
+ * @param {Record<string, boolean>|null} [options.selection] 类目选择（`chats === false` ⇒ 不导出）
+ * @param {number} [options.compressionLevel=5]
+ * @param {AbortSignal} [options.signal]
+ * @param {function(number, number): void} [options.onProgress]
+ * @param {object} [options.io=zipIo]
+ * @returns {Promise<{ok: boolean, blob: Blob|null, count: number, failed: Array<{fileName: string, reason: string}>, reason: string}>}
+ */
+export async function exportLibraryToPack({
+  target = 'st',
+  selection = null,
+  compressionLevel = 5,
+  signal,
+  onProgress,
+  io = zipIo,
+} = {}) {
+  const probe = probeChatStore();
+  if (!probe.present) {
+    return { ok: false, blob: null, count: 0, failed: [], reason: '未检测到聊天库' };
+  }
+  if (!probe.canList || !probe.canExport) {
+    return {
+      ok: false, blob: null, count: 0, failed: [],
+      reason: !probe.canList ? '聊天库未提供索引能力(list)' : '聊天库未提供导出能力(export)',
+    };
+  }
+
+  const listed = await listLibraryChats({ signal });
+  if (!listed.ok) {
+    return { ok: false, blob: null, count: 0, failed: [], reason: `库索引不可用：${listed.reason}` };
+  }
+
+  // 空源包 ⇒ 库里每一条都是「缺失项」，于是复用同一套判定（含类目关断、隐藏容器、备份特征）
+  const plan = planInjection({ libraryChats: listed.chats, sourceChatNames: [], selection });
+  if (plan.inject.length === 0) {
+    return {
+      ok: false, blob: null, count: 0, failed: [], reason: '库中没有可导出的聊天（或聊天类目已关闭）',
+    };
+  }
+  logger.info(`聊天库导出：${describePlan(plan)}`);
+
+  const entries = [];
+  const failed = [];
+  for (const item of plan.inject) {
+    if (signal?.aborted) return { ok: false, blob: null, count: 0, failed, reason: 'aborted' };
+    // eslint-disable-next-line no-await-in-loop —— 逐条串行是刻意的（单条可能很大，且要能随时中止）
+    const read = await readLibraryChatAsJsonl(item.ref, { signal });
+    if (read.ok) entries.push({ name: item.hubPath, data: read.text });
+    else failed.push({ fileName: item.fileName, reason: read.reason });
+  }
+  if (entries.length === 0) {
+    return {
+      ok: false, blob: null, count: 0, failed,
+      reason: `全部 ${plan.inject.length} 条导出失败（首因：${failed[0]?.reason}）`,
+    };
+  }
+  onProgress?.(entries.length, plan.inject.length);
+
+  // 最小 ST 摊平源包：`settings.json` 只为让布局识别认得出（ST 判据之一）
+  const writer = await io.createWriter(undefined, { level: compressionLevel });
+  await writer.add('settings.json', '{}');
+  for (const e of entries) await writer.add(e.name, e.data);
+  const dest = await writer.close();
+  const baseBlob = await dest.getData();
+
+  const { resultBlob } = await runConversionTask({
+    source: baseBlob,
+    target,
+    options: { compressionLevel, selection },
+  });
+
+  logger.success(`聊天库导出完成：${entries.length} 条聊天 → ${target.toUpperCase()} 目标包`
+    + (failed.length ? `（另有 ${failed.length} 条导出失败）` : ''));
+  return { ok: true, blob: resultBlob, count: entries.length, failed, reason: '' };
 }
 
 /** 从包里挑出「该入库的聊天条目」的名字（排除备份特征与隐藏容器） */

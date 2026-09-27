@@ -259,6 +259,11 @@ export function getWorkbenchHtml({ isModal = false, isDrawer = false, isStandalo
         <button type="button" class="menu_button menu_button_icon flex1" id="btn-host-fetch" style="display: none;">
           <i class="fa-solid fa-server"></i> <span>从宿主拉取</span>
         </button>
+        <!-- 纯库模式（聊天被收进数据库、磁盘无 jsonl）下的「把聊天导出来」——
+             仅在检测到聊天库且其提供导出能力时可见（可用性由 computeActionAvailability 统一求值）。 -->
+        <button type="button" class="menu_button menu_button_icon flex1" id="btn-library-export" style="display: none;" disabled>
+          <i class="fa-solid fa-database"></i> <span>从聊天库导出</span>
+        </button>
         <button type="button" class="menu_button menu_button_icon flex1 btn-accent" id="btn-convert" disabled>
           <i class="fa-solid fa-play"></i> <span>开始转换</span>
         </button>

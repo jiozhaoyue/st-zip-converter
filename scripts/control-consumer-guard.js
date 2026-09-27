@@ -79,6 +79,7 @@ export const CONTROL_CONSUMERS = Object.freeze({
 
   // ── 动作按钮（E 区）──
   'btn-host-fetch': 'index.js — click 从宿主拉取数据包',
+  'btn-library-export': 'index.js handleLibraryExport() — click 把聊天库里的聊天导成一个数据包（纯库模式的导出出口；无库时该按钮不可见）',
   'btn-convert': 'index.js — click 开始转换',
 
   // ── 任务控制 ──

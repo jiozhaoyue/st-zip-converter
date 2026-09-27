@@ -115,8 +115,8 @@ Worker 消息协议四处（且 seam 在**主线程**上，Worker 拿不到）�
 | `src/core/pack-inject.js` | 纯决策：`planInjection()` / `collectSourceChatFileNames()` / `normalizeChatFileName()` |
 | `src/core/zip-augment.js` | 纯 IO：`augmentZip()`，**空注入列表 ⇒ 原样返回 source 引用**（零 IO） |
 | `src/ui/chat-store-bridge.js` | 唯一外部接触面：`probeChatStore()` / `listLibraryChats()` / `readLibraryChatAsJsonl()` / `importChatsToLibrary()` / `getChatStoreProbe()` |
-| `src/ui/chat-store-inject.js` | 编排：`injectLibraryChatsIntoSource()`（打包前）/ `importRestoredChatsIntoLibrary()`（还原后） |
-| `index.js` | 接线：宿主拉取在**文件树扫描之前**注入；还原在**成功分支之后**入库 |
+| `src/ui/chat-store-inject.js` | 编排：`injectLibraryChatsIntoSource()`（打包前并入）/ `exportLibraryToPack()`（**只有库、没有源包**时的导出出口）/ `importRestoredChatsIntoLibrary()`（还原后入库） |
+| `index.js` | 接线：宿主拉取在**文件树扫描之前**注入；还原在**成功分支之后**入库；「从聊天库导出」按钮的可用性由 `computeActionAvailability` 统一求值（**只在检测到库时才可见**） |
 
 **注入必须在文件树扫描之前**：否则用户在树上勾选时根本看不到这些聊天，
 而它们又会被打进包里——「我确认的东西」与「我拿到的东西」不一致。
@@ -125,6 +125,21 @@ Worker 消息协议四处（且 seam 在**主线程**上，Worker 拿不到）�
 （能力位 + 计数 + 原因文案；**不含** token / handle / 文件路径），形态沿用 R-19。
 
 ---
+
+## 4.5 三个方向（同一条接缝的三种用法）
+
+| 方向 | 入口 | 触发点 | 说明 |
+| --- | --- | --- | --- |
+| **并入**（补已有包缺的） | `injectLibraryChatsIntoSource()` | 宿主拉取，**在文件树扫描之前** | 包是主体，库用来补缺 |
+| **导出**（只有库时的出口） | `exportLibraryToPack()` | 工作台的「从聊天库导出」按钮 | 造一个**最小 ST 摊平源包**（注入的聊天 + `settings.json` 骨架）再走**同一条转换管线** ⇒ 目标落位/类目过滤/压缩策略/Worker 并发全部免费继承。不拉整份用户数据，只要库里的聊天 |
+| **入库**（还原后别丢） | `importRestoredChatsIntoLibrary()` | 还原成功分支之后 | 纯库**读库不读盘**，不录库等于用户看不到 |
+
+「导出」有意**不接 TaskManager**：它是一次性的短操作（逐条取库 + 一次转换），没有断点续传语义
+可谈；接了反而要为一堆用不上的状态机维护暂停/丢弃分支。忙时拒绝重入、失败给可读原因即可。
+
+按钮可用性走既有的 `computeActionAvailability`（**只在检测到库时才可见**）⇒ 绝大多数用户
+看不到这个按钮，默认路径零变化；`check:control-consumer` 守卫要求声明消费点，已在
+`scripts/control-consumer-guard.js` 登记。
 
 ## 5 未做到 / 待办（**不要当成已实现**）
 

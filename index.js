@@ -38,8 +38,8 @@ import { ExportQueue, renderExportQueue } from './src/ui/export-queue.js';
 import { initTaskControls } from './src/ui/task-controls.js';
 import { createCheckpointAdapter } from './src/storage/authority-store.js';
 import { renderUsageDashboard } from './src/ui/usage-dashboard.js';
-import { injectLibraryChatsIntoSource, importRestoredChatsIntoLibrary } from './src/ui/chat-store-inject.js';
-import { getChatStoreProbe } from './src/ui/chat-store-bridge.js';
+import { exportLibraryToPack, injectLibraryChatsIntoSource, importRestoredChatsIntoLibrary } from './src/ui/chat-store-inject.js';
+import { getChatStoreProbe, probeChatStore } from './src/ui/chat-store-bridge.js';
 import { resolveFilename, previewFilename, DEFAULT_FILENAME_TEMPLATE, namedBlob } from './src/core/filename-template.js';
 import {
   detectHost,
@@ -428,6 +428,12 @@ async function main(appRoot) {
         visible: s.isHost && s.hasArtifact,
         enabled: !s.isTaskRunning && !s.isRestoreInFlight && !s.isRestoreUnsupported,
       },
+      // 纯库模式下的「从聊天库导出」：**只在检测到聊天库时才出现**（默认路径零变化）。
+      // 探测是同步零副作用的（契约 S-3），故可放进每次可用性求值。
+      libraryExport: {
+        visible: s.chatStore.present,
+        enabled: s.chatStore.canList && s.chatStore.canExport && !s.isTaskRunning,
+      },
     };
   }
 
@@ -440,6 +446,7 @@ async function main(appRoot) {
       isTaskRunning: workbenchBusy,
       isRestoreInFlight: isRestoreInFlight(),
       isRestoreUnsupported: isRestoreUnsupported(),
+      chatStore: probeChatStore(),
     };
   }
 
@@ -458,6 +465,10 @@ async function main(appRoot) {
     apply(document.getElementById('btn-convert'), a.convert);
     apply(document.getElementById('btn-host-fetch'), a.fetch);
     apply(document.getElementById('btn-restore-luker'), a.restore);
+    apply(document.getElementById('btn-library-export'), a.libraryExport);
+    // 有库但能力不足时，把原因挂在按钮上（禁用而不是静默隐藏，用户可知为何不可用）
+    const libBtn = document.getElementById('btn-library-export');
+    if (libBtn) libBtn.title = collectActionState().chatStore.reason || '';
     // 宿主无恢复能力时把原因显式挂在按钮上（禁用而不是静默隐藏，用户可知为何不可用）
     const restoreBtn = document.getElementById('btn-restore-luker');
     if (restoreBtn) restoreBtn.title = isRestoreUnsupported() ? getRestoreUnsupportedReason() : '';
@@ -1726,6 +1737,91 @@ async function main(appRoot) {
   const btnHostFetch = document.getElementById('btn-host-fetch');
   if (btnHostFetch) {
     btnHostFetch.addEventListener('click', () => handleHostExport());
+  }
+
+  /**
+   * 「从聊天库导出」——纯库模式（聊天被收进数据库、磁盘上没有 jsonl）下的导出出口。
+   *
+   * 与「打包时并入」的分工：那条补的是**已有源包**缺的聊天；这条是**只有库**时的出口
+   * （不拉整份用户数据，只要库里的聊天）。
+   *
+   * 有意**不接 TaskManager**：这是一次性的短操作（逐条取库 + 一次转换），
+   * 没有断点续传语义可谈；接了反而要为一堆用不上的状态机维护暂停/丢弃分支。
+   * 故只在忙时拒绝重入、失败时给出可读原因。
+   */
+  async function handleLibraryExport() {
+    if (workbenchBusy) {
+      void alertDialog('已有任务正在进行，请等它结束或先暂停/中止它再试。');
+      return;
+    }
+    const probe = probeChatStore();
+    if (!probe.present) {
+      void alertDialog('未检测到聊天库插件（如 ChatFilesys 的纯数据库模式），无法从库导出聊天。');
+      return;
+    }
+    if (!probe.canList || !probe.canExport) {
+      void alertDialog(`聊天库（模式 ${probe.mode}）${probe.reason || '未提供索引/导出能力'}，无法从库导出聊天。`);
+      return;
+    }
+
+    const btn = document.getElementById('btn-library-export');
+    try {
+      workbenchBusy = true;
+      if (btn) btn.disabled = true;
+      applyActionAvailability();
+      view.setProgress(5, '正在读取聊天库索引...');
+      logger.info(`开始从聊天库导出（模式 ${probe.mode}）...`);
+
+      const target = resolveTarget(targetSelect.value);
+      const result = await exportLibraryToPack({
+        target,
+        selection: getSelectionState(),
+        compressionLevel: compressionSelect ? parseInt(compressionSelect.value, 10) : 5,
+        onProgress: (done, total) => {
+          view.setProgress(30, `正在从库中导出聊天 (${done}/${total})...`);
+        },
+      });
+
+      if (!result.ok) {
+        view.setProgress(100, `从聊天库导出失败：${result.reason}`);
+        logger.warn(`从聊天库导出失败：${result.reason}`);
+        void alertDialog(`从聊天库导出失败：${result.reason}`);
+        return;
+      }
+
+      const template = filenameTemplateInput?.value || DEFAULT_FILENAME_TEMPLATE;
+      const name = resolveFilename(template, {
+        sourceName: 'chat-library',
+        target,
+        handle: currentHostHandle || 'default-user',
+      });
+      exportQueue.enqueue({
+        name,
+        blob: result.blob,
+        targetLayout: target,
+        // 复用 'converted'：它确实是一次转换的产物（新造 origin 要同步改类目/染色/落库语义多处）
+        origin: 'converted',
+        ephemeral: true,
+      });
+      refreshExportQueueUI();
+      view.setProgress(100, `已从聊天库导出 ${result.count} 条聊天`);
+      logger.success(`从聊天库导出完成：${result.count} 条聊天 → ${name}`
+        + (result.failed.length ? `（另有 ${result.failed.length} 条导出失败）` : ''));
+    } catch (err) {
+      view.setProgress(100, `从聊天库导出出错：${err.message}`);
+      logger.error('从聊天库导出过程发生错误', err);
+      void alertDialog(`从聊天库导出出错：${err.message}`);
+    } finally {
+      workbenchBusy = false;
+      if (btn) btn.disabled = false;
+      applyActionAvailability();
+    }
+  }
+
+  const btnLibraryExport = document.getElementById('btn-library-export');
+  if (btnLibraryExport) {
+    btnLibraryExport.addEventListener('click', () => { void handleLibraryExport(); });
+    applyActionAvailability(); // 立即求值一次：有库才显示（无库的默认路径零变化）
   }
 
   // 7. 还原确认模态弹窗逻辑
