@@ -135,9 +135,15 @@ globalThis.ChatFilesysApi = Object.freeze({
 1. **供给侧未实现**（阻塞 AC-7/8/9）：`ST-chatfilesys-rebuild` 本轮**正被另一会话通宵开发**
    （近 1 小时内仍在改 `index.js` / `core/errors.js` / `e2e/`），故**完全不碰**。
    落地方案与验收清单已写成可照做的文档：`research/provider-side-patch-guide.md`。
-2. **宿主拉取路径的注入接线未在真机验**：它需要真拉一遍 Dev 实例的 1.5 GB 用户数据；
-   本轮实例环境还被并发会话的挂死进程占着（见下）。**模块与链路已验**（源码树直驱真实模块），
-   **按钮→拉取→注入** 这一段只做了代码级核对。
+2. ~~宿主拉取路径的注入接线未在真机验~~ **已验通**（2026-09-28 04:3x）：
+   `e2e/specs/library-inject.e2e.cjs` 在 **dev-luker** 上两档都全绿（各 21 项）——
+   - **快档**（只勾 `characters`，chats 未勾）：路径被走到（探针 `lastListCount=3` + 桩 `listChats` 被调）、
+     **正确地不注入**（尊重用户选择）、日志说明原因（`类目关断 3`）；
+   - **重档**（`SZC_HEAVY_HOSTPULL=1`，勾上 chats ⇒ 真注入）：
+     日志「**已把 2 条库中聊天补入源包**」、探针 `lastExportOk=2 / lastExportFailed=0`、
+     导出的正是那两条桩聊天（隐藏容器条目被过滤）。
+   ⇒ 「按钮 → 拉取 → 注入 → 补进包」这条链路在**真实宿主**上成立。
+   仍未做：接真供给方（ChatFilesys）的端到端 —— 依赖供给侧实现（见残留 1）。
 3. **群聊落点未取证**：`isGroup` 依据库索引，本机没有群聊样本验证 `group chats/` 落位。
 4. **`*.bak.jsonl` 形态不在既有备份判据内**（`isBackupChatOrSnapshot` 只认 `*.bak`），
    本任务**未擅自扩展**（它同时服务既有备份过滤），仅登记。
