@@ -22,6 +22,7 @@
  *   node e2e/standalone/run.cjs --only workbench    # 只跑名字含 workbench 的
  *   node e2e/standalone/run.cjs --prefix /           # 挂根路径（对照子路径形态）
  *   node e2e/standalone/run.cjs --no-build           # 用现有 dist（会做新鲜度告警）
+ *   node e2e/standalone/run.cjs --rebuild            # 强制重建（mtime 判据看不见「删了源码文件」）
  *
  * 纪律：端口显式登记（默认 4173，L0-16），被占用即报错退出，**不自动换端口**。
  */
@@ -43,12 +44,13 @@ const FIXTURE_DIR = path.join(REPO_ROOT, 'test-results', 'fixtures-web');
 const SRC_PREFIX = '/src-tree/';
 
 function parseArgs(argv) {
-  const out = { only: '', prefix: '/st-zip-converter/', port: DEFAULT_PORT, build: true };
+  const out = { only: '', prefix: '/st-zip-converter/', port: DEFAULT_PORT, build: true, rebuild: false };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--only') out.only = argv[++i] || '';
     else if (argv[i] === '--prefix') out.prefix = argv[++i] || '/';
     else if (argv[i] === '--port') out.port = Number(argv[++i]) || DEFAULT_PORT;
     else if (argv[i] === '--no-build') out.build = false;
+    else if (argv[i] === '--rebuild') out.rebuild = true;
   }
   return out;
 }
@@ -96,15 +98,17 @@ function newestSourceMtime() {
   return newest;
 }
 
-function ensureBuild() {
+function ensureBuild(force) {
   const distIndex = path.join(DIST, 'index.html');
-  if (!fs.existsSync(distIndex)) {
+  if (force) {
+    log('· --rebuild：强制重新构建（**新增/删除源码文件时 mtime 判据看不见，必须用这个**）');
+  } else if (!fs.existsSync(distIndex)) {
     log('· dist/ 不存在，执行构建...');
   } else if (newestSourceMtime() > fs.statSync(distIndex).mtimeMs) {
     log('⚠ dist/ 比源码旧 —— 构建产物可能不是当前代码（读数不可解释）');
     log('· 重新构建...');
   } else {
-    log('· dist/ 是新的，跳过构建');
+    log('· dist/ 是新的，跳过构建（删除过源码文件时该判据**看不见** ⇒ 用 --rebuild）');
     return;
   }
   const res = spawnSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'inherit', shell: true });
@@ -132,7 +136,7 @@ function collectSpecs(only) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
-  if (args.build) ensureBuild();
+  if (args.build) ensureBuild(args.rebuild);
   else if (!fs.existsSync(path.join(DIST, 'index.html'))) {
     log('--no-build 但 dist/index.html 不存在，终止。');
     process.exit(1);

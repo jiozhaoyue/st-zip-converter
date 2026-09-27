@@ -4,7 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>st-zip-converter</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!--
+    Font Awesome 走**本地副本**（`src/vendor/fontawesome/`），不用 CDN：
+    用户级全局规则 nocdn（零外部依赖）；且云/离线部署下 CDN 不可达会让全部图标失效
+    （插件态不受影响 —— 酒馆宿主自带 FA，这个缺口只在独立形态暴露）。
+    跨源请求归零由 `npm run e2e:web` 的信息项读数守护。详见该目录 README。
+  -->
+  <link rel="stylesheet" href="./src/vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>

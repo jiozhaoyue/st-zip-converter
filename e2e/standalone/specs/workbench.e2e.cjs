@@ -60,6 +60,38 @@ module.exports = {
     t.ok('A5 独立形态**不出现**「从宿主拉取」入口（形态差异可见契约）', shell.hasHostFetch === false,
       `hasHostFetch=${shell.hasHostFetch}`);
 
+    // —— 图标字体必须**本地**可用 ——
+    // 「零跨源」本身不足以证明图标能用（图标全没了也是零跨源）。故直接问浏览器：
+    //   ① 那个字族是否**已加载**（`document.fonts.check`）；
+    //   ② 图标元素的 `::before` 是否真的吃到了 FA 字族与图标码位。
+    // 这两条正是「CDN 不可达 ⇒ 全部图标失效」这一失效模式的直接判据。
+    //
+    // ⚠️ 先**显式 await 加载**再问：FA 的 `font-face` 用 `font-display: block`，
+    //    字体是按需懒加载的 —— 就绪后立刻问 `fonts.check()` 会**时真时假**（实测出现过一次假红）。
+    //    `document.fonts.load()` 会强制拉取并 resolve，判据因此是确定的。
+    await page.evaluate(() => Promise.race([
+      document.fonts.load('900 1em "Font Awesome 6 Free"').catch(() => {}),
+      new Promise((r) => setTimeout(r, 5_000)),
+    ]));
+    const icon = await page.evaluate(() => {
+      const el = document.querySelector('i.fa-solid, i.fa-regular, i[class*="fa-"]');
+      if (!el) return { found: false };
+      const before = getComputedStyle(el, '::before');
+      return {
+        found: true,
+        cls: el.className,
+        fontFamily: before.fontFamily,
+        content: before.content,
+        solidLoaded: document.fonts.check('900 1em "Font Awesome 6 Free"'),
+      };
+    });
+    t.ok('A6 页面存在图标元素（读数非空，否则下面两条恒真）', icon.found, JSON.stringify(icon));
+    t.ok('A7 图标字族已**本地加载**（`document.fonts.check` 为真 ⇒ 离线也可用）',
+      icon.solidLoaded === true, JSON.stringify(icon));
+    t.ok('A8 图标元素确实应用了 FA 字族（`::before` 的 font-family 命中）',
+      typeof icon.fontFamily === 'string' && /Font Awesome/i.test(icon.fontFamily),
+      JSON.stringify({ fontFamily: icon.fontFamily, content: icon.content }));
+
     // ============ B 子路径挂载（云形态核心判据） ============
     // ⚠️ 只判**同源**请求：静态服务器只收得到同源请求，跨源（`index.html` 里的
     //    cdnjs Font Awesome）整条走不到这里 —— 那是另一个问题（离线/自包含），
