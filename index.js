@@ -456,7 +456,10 @@ async function main(appRoot) {
    * 提前绑定会踩 TDZ。
    */
   function applyActionAvailability() {
-    const a = computeActionAvailability(collectActionState());
+    // 状态**只收一次**：`collectActionState()` 里含 `probeChatStore()`（会问到外部插件的 `mode()`），
+    // 多调一次就多问外部一次 —— 既无必要，也让「探测零副作用」这条契约被无谓地反复使用。
+    const s = collectActionState();
+    const a = computeActionAvailability(s);
     const apply = (el, spec) => {
       if (!el) return;
       el.style.display = spec.visible ? '' : 'none';
@@ -468,7 +471,7 @@ async function main(appRoot) {
     apply(document.getElementById('btn-library-export'), a.libraryExport);
     // 有库但能力不足时，把原因挂在按钮上（禁用而不是静默隐藏，用户可知为何不可用）
     const libBtn = document.getElementById('btn-library-export');
-    if (libBtn) libBtn.title = collectActionState().chatStore.reason || '';
+    if (libBtn) libBtn.title = s.chatStore.reason || '';
     // 宿主无恢复能力时把原因显式挂在按钮上（禁用而不是静默隐藏，用户可知为何不可用）
     const restoreBtn = document.getElementById('btn-restore-luker');
     if (restoreBtn) restoreBtn.title = isRestoreUnsupported() ? getRestoreUnsupportedReason() : '';

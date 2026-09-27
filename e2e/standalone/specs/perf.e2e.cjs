@@ -66,6 +66,19 @@ async function ensureThroughputFixture() {
   return common.buildZip(out, entries);
 }
 
+/** 可压缩文本夹具（4 MB 全零，命名成 `.json` ⇒ 不进 Store 路由，走 deflate） */
+async function ensureCompressibleTextFixture() {
+  const out = path.join(FIXTURE_DIR, 'perf-compressible-text.zip');
+  if (fs.existsSync(out)) return out;
+  // ⚠️ **必须带布局判据**：`settings.json`（或 `characters/`）是 ST 摊平布局的判别依据之一，
+  //    只放 `worlds/` 会被判成 UNKNOWN ⇒ `convert()` 直接抛「无法识别源包布局」⇒ 队列恒空。
+  //    首版夹具就是这么写的，于是三个等级各白等 300 s 超时（在这条用例里烧掉 15 分钟）。
+  return common.buildZip(out, [
+    ['settings.json', Buffer.from('{"firstRun":false}', 'utf8')],
+    ['worlds/compressible.json', compressibleBytes(4)],
+  ]);
+}
+
 /**
  * 大包夹具（**本仓最大的一次实测**）：~64 MB 不可压缩 × 8 条目。
  *
@@ -222,6 +235,29 @@ module.exports = {
     t.eq('P16 大包条目内容长度正确（不是被截断的半截文件）', anyShort.length, 0,
       JSON.stringify(anyShort));
 
-    t.eq('P17 全流程零未捕获页面异常', rec.pageErrors.length, 0, JSON.stringify(rec.pageErrors.slice(0, 2)));
+    // ============ ⑤ 压缩等级真的接到写入器上（产物体积随等级单调不增）============
+    const textFixture = await ensureCompressibleTextFixture();
+    const levelSizes = {};
+    for (const level of [0, 5, 9]) {
+      // eslint-disable-next-line no-await-in-loop —— 每个等级都要**全新上下文**（一上下文一份源包）
+      const r = await measureFresh(ctx, textFixture, { level, tag: `perf-level-${level}`, timeout: 60_000 });
+      if (!r.ok) { t.ok(`P18 等级 ${level} 转换完成`, false, 'not-ok'); }
+      else {
+        // eslint-disable-next-line no-await-in-loop
+        levelSizes[level] = fs.statSync(r.out).size;
+      }
+    }
+    t.log(`  · 读数：同一份可压缩内容（4 MB 全零 / .json）在各等级下的产物体积 `
+      + `L0=${levelSizes[0]} L5=${levelSizes[5]} L9=${levelSizes[9]}`);
+    t.ok('P18 三个等级都产出了产物（读数非空）',
+      levelSizes[0] > 0 && levelSizes[5] > 0 && levelSizes[9] > 0, JSON.stringify(levelSizes));
+    t.ok('P19 等级 0（存储）**不压缩**：产物体积 ≈ 原体积',
+      levelSizes[0] >= compressibleBytes(4).length, `L0=${levelSizes[0]}`);
+    t.ok('P20 体积随等级**单调不增**（L0 ≥ L5 ≥ L9）—— 证明等级选择真的接到了写入器上',
+      levelSizes[0] >= levelSizes[5] && levelSizes[5] >= levelSizes[9], JSON.stringify(levelSizes));
+    t.ok('P21 高等级**显著更小**（L9 至少比 L0 小一个数量级 —— 不是"看起来接上了")',
+      levelSizes[9] * 10 <= levelSizes[0], `L0=${levelSizes[0]} L9=${levelSizes[9]}`);
+
+    t.eq('P22 全流程零未捕获页面异常', rec.pageErrors.length, 0, JSON.stringify(rec.pageErrors.slice(0, 2)));
   },
 };
