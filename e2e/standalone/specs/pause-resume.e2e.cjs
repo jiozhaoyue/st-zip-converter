@@ -156,6 +156,34 @@ module.exports = {
     t.log('  · 🔴 已知缺陷：暂停→续传后产物缺条目（静默）。机理与修法见本 spec 头部注释与 '
       + '`.trellis/spec/guides/standalone-web-and-cloud-e2e.md` 的 §4.5。');
 
+    // ===== ③ Worker 生命周期回归（L1-MR-8；本仓历史事故 `034b7ab`）=====
+    //
+    // 暂停/丢弃都走 `worker.terminate()`，而**被 terminate 的 Worker 会静默忽略后续 postMessage**
+    // —— 忘了把 `workerInstance` 置空，此后**每一次**转换都会永久挂死（不报错、不动），
+    // 这是本仓排查成本最高的一类缺陷。故这里把「终止过一次之后还能再转」直接钉成断言。
+    await page.selectOption('#target-select', 'st');
+    await page.click('#btn-convert');
+    t.ok('R15 再次点转换后控制条进入 running（新任务确实起来了）',
+      await waitForState(page, '#task-controls', true, 60_000));
+    await page.click('#tc-pause');
+    t.ok('R16 第 N 次任务同样能暂停（状态机不是只能用一次）',
+      await waitForState(page, '#tc-resume', true, 60_000));
+    await page.click('#tc-discard');
+    t.ok('R17 丢弃后控制条隐藏（丢弃出口收尾）',
+      await waitForState(page, '#task-controls', false, 60_000));
+
+    // 关键一步：**丢弃之后**（terminate + 断点已清）再转一次，必须照常出产物
+    const rowsBefore = await page.$$eval('.eq-name', (els) => els.length);
+    await page.click('#btn-convert');
+    const againNames = await common.waitForQueue(page, rowsBefore + 1, 240_000);
+    t.ok('R18【Worker 生命周期】终止过一次之后**还能再转**并出产物（`034b7ab` 回归守护）',
+      Array.isArray(againNames) && againNames.length >= rowsBefore + 1,
+      `前=${rowsBefore} 后=${(againNames || []).length}`);
+    const againOut = await common.downloadNthRow(page, rowsBefore, FIXTURE_DIR, 'after-discard.zip');
+    const againProduct = await common.readZip(againOut);
+    t.ge('R19 又一次转换的产物是合法 zip 且条目齐全（不是空壳）', againProduct.names.length, 1000,
+      `entries=${againProduct.names.length}`);
+
     t.eq('R14 全流程零未捕获页面异常', rec.pageErrors.length, 0, JSON.stringify(rec.pageErrors.slice(0, 2)));
   },
 };
