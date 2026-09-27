@@ -184,8 +184,18 @@ E2E 当下**如实断言缺陷形态**（R12/R13 带 `KNOWN-DEFECT` 标记）：
 | `specs/file-protocol.e2e.cjs` | dist | `file://` 双击形态的**边界登记**（模块被 CORS 拒）+ 那层「可照做的说明」确实出现 |
 | `specs/targets.e2e.cjs` | dist | **四目标兼容矩阵**（ST/L/TT/PT 落位规则，取自 `tavern-datapack-formats.md` 的〔仓内〕条）+ **扩展模式两态**（默认轻量清单 vs 完整）+ **包选择预设两态**（精简 vs 完整，含密钥/世界书/设置的取舍） |
 
-当前断言总数：**183 项**（2026-09-28 实测全绿：workbench 42 · targets 51 · flows 16 ·
-chat-store-module 17 · pause-resume 16 · library-export 13 · perf 12 · split 10 · file-protocol 6）。
+实测读数（2026-09-28，`--only perf`；机器为多会话共享，读数只作参考、不作判定）：
+- 压缩策略**确定性**证据：同一份 4 MB 可压缩内容，`.png/.jpg` 条目压缩方法号 = **0（Store）**、
+  `.txt` = **8（Deflate）**，产物体积 > 8 MB（路由失效时会只剩几十 KB）；
+- 24 MB 不可压缩包：L5 **1.65 s（15.1 MB/s）**、L0 **0.45 s（55.5 MB/s）**；
+- 66 MB 不可压缩包：L5 **2.69 s（24.5 MB/s）**，8 条聊天条目一条不少、内容长度正确。
+> ⚠️ **性能用例必须"一上下文一份源包"**：`#file-input` 只在**尚无源包**时采纳新文件
+> （矩阵 spec 早已记过），同一页面里第二次上传不换源包 ⇒ 量到的还是第一个包。
+> 首版就是这么错的（66 MB 用例量出 12 MB 包的耗时，读数"308 MB/s"一眼假）。
+> 现每次测量另开一个浏览器上下文（`measureFresh`）。
+
+当前断言总数：**188 项**（2026-09-28 实测全绿：workbench 42 · targets 51 · flows 16 ·
+chat-store-module 17 · pause-resume 16 · perf 17 · library-export 13 · split 10 · file-protocol 6）。
 
 未覆盖（登记，勿当成已覆盖）：`file://` 双击形态、插件模态态、Authority 增强层降级、
 多页签并发、超大批次（GB 级）、**宿主拉取路径的注入接线**（需真拉 1.5 GB 实例数据，代价过高）。
