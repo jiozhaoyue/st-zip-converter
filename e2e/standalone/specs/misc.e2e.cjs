@@ -96,6 +96,34 @@ module.exports = {
     const collapsed = await readLogPanel(page);
     t.ok('N14 再点一次折叠回去（切换语义）', collapsed.expanded === false, JSON.stringify(collapsed));
 
+    // ============ ②b 「清空日志」按钮（真实用户动作，此前未覆盖）============
+    // 先保证面板是展开的（折叠态本来就不追加行）
+    await page.evaluate(() => {
+      const body = document.getElementById('log-console-body');
+      if (body && getComputedStyle(body).display === 'none') {
+        document.getElementById('btn-toggle-log')?.click();
+      }
+    });
+    await page.waitForTimeout(300);
+    const beforeClear = await readLogPanel(page);
+    t.ok('N14b 清空前日志面板有行（前置门：否则"清空"无从验证）', beforeClear.rows > 0,
+      JSON.stringify(beforeClear));
+
+    const clearBtn = await page.evaluate(() => {
+      const btn = document.getElementById('btn-clear-log');
+      if (!btn) return { present: false };
+      const r = btn.getBoundingClientRect();
+      return { present: true, visible: r.width > 0 && r.height > 0, title: btn.title || '' };
+    });
+    t.ok('N14c 「清空日志」按钮存在且可见', clearBtn.present && clearBtn.visible,
+      JSON.stringify(clearBtn));
+    await page.click('#btn-clear-log');
+    await page.waitForTimeout(400);
+    const afterClear = await readLogPanel(page);
+    t.ok('N14d 点「清空」后日志被清空（行数归零或只剩占位 —— 不是"点了没反应"）',
+      afterClear.rows <= 1 && afterClear.rows < beforeClear.rows,
+      `清空前=${beforeClear.rows} 清空后=${afterClear.rows}`);
+
     // ============ ③ 进度读数收尾 ============
     await page.selectOption('#target-select', 'st');
     // ⚠️ 队列里**已经有**清单那一行 ⇒ `waitForQueue(1)` 会立刻返回（等于没等）。

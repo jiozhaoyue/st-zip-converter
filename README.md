@@ -204,7 +204,7 @@ npm start
 
 ```bash
 npm test                 # 单测：60 个文件 / 581 项（纯逻辑层 100% 可测：无 DOM 依赖）
-npm run e2e:web          # 独立 Web / 云部署形态：334 项断言 / 17 个 spec（**不需要实例**）
+npm run e2e:web          # 独立 Web / 云部署形态：337 项断言 / 17 个 spec（**不需要实例**）
 npm run e2e              # 实例侧：冒烟 + 功能矩阵（需要 Dev 实例在跑）
 npm run check:css-scope check:dom-injection check:template-source \
         check:dom-scope check:control-consumer      # 五条静态守卫
