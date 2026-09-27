@@ -83,6 +83,29 @@ async function waitForQueue(page, n = 1, timeout = 120_000) {
   } catch { return null; }
 }
 
+/**
+ * 读插件日志面板的全文（**先展开再读**）。
+ *
+ * ⚠️ **必须展开**：`src/ui/log-console.js` 在面板折叠时直接 return，**不往
+ * `#log-stream-container` 追加任何行**，于是折叠态读到的是初始占位符
+ * （实测把它误判成「续传没有跳过条目」的**假红**，而真实日志一条不少）。
+ * 展开本身就是真实用户动作，故这里点一下 `#btn-toggle-log`。
+ */
+async function readLogText(page) {
+  await page.evaluate(() => {
+    const body = document.getElementById('log-console-body');
+    if (body && getComputedStyle(body).display === 'none') {
+      const btn = document.getElementById('btn-toggle-log');
+      if (btn) btn.click();
+    }
+  });
+  await page.waitForTimeout(300);
+  return page.evaluate(() => {
+    const el = document.getElementById('log-stream-container');
+    return el ? el.textContent : '';
+  });
+}
+
 /** 数字输入框填值并**回读校验**，失败退回程序化赋值 */
 async function fillNumber(page, selector, value) {
   const want = String(value);
@@ -171,6 +194,7 @@ module.exports = {
   readReportCount,
   waitForQueue,
   fillNumber,
+  readLogText,
   downloadFirstRow,
   downloadNthRow,
   readZip,
