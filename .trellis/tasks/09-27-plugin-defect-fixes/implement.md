@@ -239,10 +239,30 @@
       另覆盖「name 相似但不是 `AbortError`（如 `'Aborted'`）⇒ fail，不得靠字符串匹配蒙混」*
 - [x] **3.3.4** **判别力证明**：把 3.3.3 的 `fail()` 改回去 → 转红 → 恢复 → 绿；读数入 `research/`
       —— *实测：去掉 `AbortError` 特判 ⇒ **3 项转红**；恢复后全绿。读数入 `research/r16-resume-and-batch.json`*
-- [ ] **3.3.5** E2E：矩阵 M-7 从「控制条初态隐藏」升级为**真实 pause → resume 续传**，
+- [x] **3.3.5** E2E：矩阵 M-7 从「控制条初态隐藏」升级为**真实 pause → resume 续传**，
       断言 `resumedCount > 0` 可观测、控制条状态机 `running→paused→running`
-- [ ] **3.3.6** E2E 连续**两轮**全绿（可重跑性；沿用 spec §11.2 的清初态纪律：
+      —— *实测（dev-st，绿轮读数）：控制条可见 → 点暂停后出现「继续」→ 续传跑完回到隐藏；
+      日志 `数据包转换成功！共写入 17 个文件` + `转换成功（沿用断点跳过 **129** 项）: …`；
+      断言 `M-7b 跳过条数 > 0 — N=129`。**真浏览器（Worker 路径）**，非主线程降级路径*
+- [x] **3.3.6** E2E 连续**两轮**全绿（可重跑性；沿用 spec §11.2 的清初态纪律：
       动 `workspace` store 的 `active_session` 后**重载页面**，**不删 `files` store**）
+      —— *实测：`_e2e-B2.txt` 与 `_e2e-C.txt` **连续两轮**均
+      `断言 182 项：通过 182 / 失败 0` → `E2E 全绿` → `EXIT=0`（dev-st + dev-luker 各一遍）*
+- [x] **3.3.7** 【执行中发现的**四处 spec 自身缺陷**，前一会话误判为「宿主侧阻塞」】：
+      E2E 在 M-1 即失败（`openWorkbench` 拿不到 `.drawer-opener`），排查一度指向宿主
+      （重启实例 / 全新 profile / reload / 扩展开关 / 宿主源码全线试过，均无效）。
+      实为 spec 四处问题，逐条取证与修法见提交 `2d1615b`；规范落
+      `guides/instance-e2e-and-data-sync.md` §11.1b（**锚点纪律**）与 §11.3（红灯清单 +3 种）：
+      ① **锚点选错**：`.drawer-opener` 的唯一来源是**聊天区的 welcome 系统消息**
+         （`templates/welcome.html:49`），不是魔法棒菜单；聊天区为空（`#chat .mes` = 0）时全页 0 个。
+         改用宿主**静态**的 `#extensions-settings-button > .drawer-toggle`
+         （`index.html:5750` + `script.js:12150` 直接绑定）⇒ 与聊天状态无关，实测即通；
+      ② **陈旧阈值**：M-7b 断言「夹具 > 40 MB」而实现早已改为 1500 × 3 KB ⇒ 正确实现下恒假；
+      ③ **折叠日志读成空**：`log-console.js:262` 折叠时直接 return ⇒ 恒读到「暂无日志记录」，
+         新增 `readLogText()` 先展开再读；
+      ④ **切目标竞态**：`l` 与 `st` 读数模式完全相同 ⇒ 等待立刻返回**陈旧读数**，
+         ST 上恒假、Luker 上侥幸变绿（**同一个 bug 既造假红又造假绿**）；
+         修法：先切读数必然不同的中间态（tt）再切目标值
 
 ## 3.4 批量转换接续传（U-5 授权的范围扩张；`design.md` D1.3）
 
@@ -319,16 +339,89 @@
 - [x] **3.4.14** 单测：**跨子项同名条目不得被误跳过**（两个子项含同名条目 ⇒ 第二个子项不得少条目）
       —— *落地为 `seedEntriesFor` 的「游标不命中 ⇒ 空清单」+「返回新 Map」两组断言；
       夹具用**真实会重名的**条目名（`settings.json` / `a.png`）*
-- [ ] **3.4.15** E2E：多包批量 → 中途 pause → resume ⇒ 已完成子项**不重跑**、产物齐、
+- [x] **3.4.15** E2E：多包批量 → 中途 pause → resume ⇒ 已完成子项**不重跑**、产物齐、
       `resumedCount` 可观测。**若该项在现有 harness 下无法稳定驱动，必须如实报告并登记，
       不得静默略过**（这是 U-5 的验收面）
+      —— *实测（绿轮读数，两实例各一遍）：暂存区按名定位到两个源包 →
+      「批量转换」按钮可见且可用 → 批量期间控制条可见（**已注册 TaskManager，不再是死代码路径**）→
+      第 0 个子项完成（队列 +1）→ 点暂停（`running → paused`）→ 续传跑完 →
+      **`M-10b 整批新增产物 == 2`（已完成子项没有被重跑）**；日志按批次分段后读到
+      `沿用断点跳过 N 项`、**零失败行**、`[1/2]`+`[2/2]` 两条成功行、且不含 `undefined`。
+      ✅ **可稳定驱动**（连续两轮同读数），故**不需要**走"无法驱动即登记"的兜底*
+- [x] **3.4.16** 【执行中发现的**阻塞项**，非夹带】`renderStashList` 崩溃 ⇒ 暂存区恒空：
+      E2E 的 M-10 报「暂存区 0 项」而 IndexedDB 有 25 条 upload 记录 ⇒ 抓页面控制台得
+      `[warning] 刷新工作区 UI 失败: ReferenceError: btns is not defined`。
+      根因：`f9c7cfe`「按钮契约解耦」把行级按钮工厂 `mkBtn` 搬进 `refreshBatchBar`（批量条的
+      4 参签名），**漏删了行级的 `btns` 与 `mkBtn` 两处声明**，而调用点仍在引用 ⇒ 在第一个
+      非当前源条目上抛出 ⇒ 容器在函数末尾 `appendChild(list)` **之前**中断
+      ⇒ 连空态占位都没有；同一处 try/catch 还连带跳过配额条与待导出区的刷新。
+      **为何必须在本任务内修**：U-7 补的「批量转换」入口就渲染在这个函数里
+      ⇒ 不修则 AC-B3b（批量入口可达）**不可满足**，等于 U-7 白做。
+      实做：按 `f9c7cfe^` 原文恢复两处声明（容器 `.archive-buttons`、工厂
+      `(cls, text, title, onClick)`、类 `btn-archive-action <cls>` —— CSS 至今仍给这两个类上样式）；
+      新增 `test/stash-list-render.test.js`（7 项，最小 DOM 桩 + `vi.mock` 数据层，不引 jsdom）。
+      **判别力已实测**：移回缺失态 ⇒ **7 项全红**，报错同形。
+      规范落 `.trellis/spec/frontend/quality-guidelines.md`「范式四：渲染路径必须有守护」
+- [x] **3.4.17** 【执行中发现的**两处运行期缺陷**，都由矩阵抓到，提交 `a39799b`】
+      1. **`blob.name = record.name` 对 `File` 赋值 ⇒ TypeError**。`File.prototype.name` 只读
+         （浏览器：只有 getter 的访问器；Node：不可写数据属性），ES 模块恒严格模式 ⇒ 赋值即抛。
+         而 IndexedDB 里的源包 blob **就是 `File`** ⇒ 三处全炸：**批量子项**（实测每个子项都
+         `批量转换失败 [id]: Cannot set property name …` ⇒ **整批零产物**，正是 AC-B3b 的验收面）、
+         暂存区「载入为源」、**工作区状态恢复**（重载后静默夭折）。
+         修法：`namedBlob(blob, name)` —— 名字已对则原样返回（零拷贝），否则 `new File([blob], name)`。
+         守护 `test/named-blob.test.js`（8 项），含判别力反例（旧写法必须抛）。
+      2. **`report.totals.written` 字段从来不存在**（`report.js:157` 只有 copied/dropped/
+         droppedBytes/filtered/synthesized/resumed/warnings）⇒ 进度条与日志恒显示
+         「共写入 **undefined** 项 / 个文件」。改为 `copied + synthesized`。
+- [x] **3.4.18** 【**假绿**清理】M-10b 两条断言在「整批零产物」时**照绿**：
+      ① 日志面板同一会话共用 ⇒ `沿用断点跳过` 匹配到 **M-7b 的旧行**（修：点批量前 `clearLog`）；
+      ② 正则 `/批量转换|数据包转换成功/` 把「批量转换**失败**」也算匹配（修：按成功行完整形态
+      计数 == 2，并**新增零失败断言**）。提交 `d15737a`。
+      教训同 §3.3.7，已落 `guides/instance-e2e-and-data-sync.md` §11.3。
+- [ ] **3.4.19** 【**运行纪律**】跑矩阵时**不得并发跑重型测试**：本轮 dev-st 的 M-9（分卷）
+      在 240 s 有界窗口内只切出 1 份而**同一轮 dev-luker 同段通过（8 份）**，
+      根因是当时并发跑了 vitest（21:16）造成负载型慢 ⇒ **假红**。
+      落地：矩阵独占跑（见 §11 新增的「跑矩阵时独占机器」纪律）
 
 ## 4 质量门（收口前必须全绿）
 
-- [ ] **4.1** `npm test` 全绿**零回退**（对比 0.2 的基线）
-- [ ] **4.2** 五条静态守卫 `exit=0`；`npm run build` 通过
+- [x] **4.1** `npm test` 全绿**零回退**（对比 0.2 的基线）
+      —— *读数（**隔离验证**）：用 `git worktree add <temp> 4b5511f` 建本提交的独立工作树
+      （`node_modules` 走 junction）、在其中跑 `npx vitest run --testTimeout=30000` ⇒
+      **Test Files 54 passed / 2 skipped；Tests 516 passed / 8 skipped / 0 failed**。
+      基线（§0.2）509 项 ⇒ 本轮 **524 项**（净增 **15** = `stash-list-render` 7 + `named-blob` 8），
+      **零失败 ⇒ 零回退**。
+      ⚠️ **为什么必须隔离跑**：当时**另有会话正在改本仓受跟踪文件**
+      （`index.js` / `src/core/zip-io.js` 的 chat-store 注入，见 P-18）⇒ 就地跑 `npm test`
+      测的是**混合状态**，读数不可信。跳过项 8（就地跑为 2）是 worktree 里缺 `samples/` 等
+      gitignored 素材所致，与代码无关。
+      ⚠️ 默认 5 s 超时下**本机满载**时会出 `Test timed out in 5000ms` 抖动
+      （三次读数 10 / 9 / 13 项红、且每次红的用例集都不同）⇒ 已登记（§5.3 第 7 条）*
+- [x] **4.2** 五条静态守卫 `exit=0`；`npm run build` 通过
+      —— *实测：`check:css-scope` / `check:dom-injection` / `check:template-source` /
+      `check:dom-scope` / `check:control-consumer` 全 `EXIT=0`；`npm run build` `EXIT=0`*
 - [ ] **4.3** `npm run e2e` **exit 0**，且**连续两轮全绿**
-- [ ] **4.4** **R-20 复核**：若本任务改了插件代码 ⇒ 更新 Dev 实例后再跑 4.3，并记录实例版本
+      —— **matrix 部分已达成**：`_e2e-B2.txt` / `_e2e-C.txt` / `_e2e-E-full.txt` 的 matrix 段
+      **连续三轮** `断言 182 项 / 通过 182 / 失败 0`（两实例各一遍）。
+      ⚠️ **全量 `npm run e2e` 的 exit 0 尚未取得**：两次全量读数（`_e2e-D-full` / `_e2e-E-full`）
+      失败项**全部落在 smoke 段**的「插件已挂载」一组（每实例 3 条），而**同一轮的 matrix 段零失败**。
+      已取证为**并发负载**所致（见 4.3b / §11.6）：失败窗口内**另有三个会话**在同机跑
+      `test-browser.js`、`npx vitest`、`ST-shujuku-rebuild` 的 vitest，另有一条 18:45 起就没退出的
+      僵尸 `e2e/run.cjs`。**空载实测插件挂载稳定**（连开 3 次页面，3/3 在 25 s 内挂上，
+      `panel=true / badge=true / 模式=ST 扩展插件`）。
+      ⇒ **本条待用户裁决后收口**（见下），**不得**在未取得干净读数时勾选
+- [ ] **4.3b** **（新增，待裁决）** 全量 E2E 的收口方式，三选一：
+      **(a)** 等其它会话跑完，原地重跑一次全量（最忠实，但要等）；
+      **(b)** 把 `e2e/specs/smoke.e2e.cjs:58` 的挂载等待 20 s → 60 s（与 matrix 的 40 s 对齐，
+      不改变断言内容，只放宽等待窗口），再重跑全量；
+      **(c)** 接受现状：AC-B7 记为「matrix 连续三轮全绿；全量因并发负载无干净读数」，
+      作为残留登记收口（**不把未满足项写成已满足**）
+- [x] **4.4** **R-20 复核**：若本任务改了插件代码 ⇒ 更新 Dev 实例后再跑 4.3，并记录实例版本
+      —— *两个 Dev 实例（`Instance/Dev/SillyTavern` 与 `Instance/Dev/Luker`）的插件目录
+      均已同步到本任务提交；**插件代码的最新提交是 `a39799b`**（`File.name` 只读 +
+      `totals.written` 两处运行期缺陷），实例当时的 HEAD 为 `d15737a`（含 `a39799b`）；
+      其后 `4b5511f` 及本轮文档提交**只动 `e2e/specs/` 与 `.trellis/`** ⇒ 不影响插件代码，
+      故实例无需再次同步即可代表被测版本*
 - [ ] **4.5** `git status --short` 复核：无计划外文件；`test-results/` 未入库
 - [ ] **4.6** 逐条勾选本文件的**全部**复选框（**实时勾选**，不得事后补）
 
@@ -356,6 +449,54 @@
 - [ ] **5.2** 更新对应 spec 索引（若新增文件）
 - [ ] **5.3** 残留登记：R-10 满载超时、§1.1 命中的任何项、§3.4.15 E2E 若无法稳定驱动的登记
       （**批量未接续传已不在残留之列** —— U-5 已把它纳入本任务范围）
+      —— **本轮登记项**（逐条写出，不留"以后再说"）：
+      1. **R-10** `test/real-samples.test.js` 满载超时（既有抖动，与本任务无关，未修）；
+      2. **文档过时·开发端口**：`README.md:74` 写「本地开发服务将在 `http://localhost:5173` 启动」，
+         而 `vite.config.js` 的 `server.port` 实为 **3040**（`strictPort`），且其注释说明
+         **5173 被 env-sync 桌面应用占用、禁止使用** —— README 那一句是**错的**。
+         项目 `CLAUDE.md` 的 `npm run dev` 行同样写 5173。**本轮不改**（属文档维护，非缺陷修复范围）；
+      3. **文档过时·测试计数**：项目 `CLAUDE.md` 写「当前 333 passed / 2 skipped / 39 文件」，
+         实测本轮结束时为 **507 passed / 2 skipped / 54 文件** ⇒ 该行已严重过期；
+      4. **`src/ui/split-deliver-modal.js`** 是**已登记**的死代码（`component-guidelines.md` 记有：
+         `renderSplitDeliveryModal` 被 import 但全仓无调用点，持整文件守卫豁免）—— 维持原状；
+      5. **「写回宿主」不接 `TaskManager`**（用 `src/core/restore-batch.js` 自有状态机）——
+         `state-management.md` 已在句内点明。这是**设计选择**（写回批次由 `.eq-restore-bar` 呈现），
+         不是缺陷；仅**更正**了原句「宿主拉取/转换/写回 由 TaskManager 管理」中「写回」那半句的假事实；
+      6. **`README.md:74` 的「批量转换」承诺现已成立**（U-7 补上入口）—— 不再是"承诺有、入口无"。
+         备注：这条与 R-16 同族，本任务**顺手关掉了它**，故不入残留；
+      7. **`npm test` 在**本机满载**下的 5 s 默认超时抖动**（2026-09-27 实测）：vitest 未配
+         `testTimeout`（仓内无 `vitest.config.js`，`vite.config.js` 亦无 `test` 段）⇒ 用默认 5 s，
+         而 55 个测试文件默认并行 ⇒ 实例 + 浏览器 + 编辑器同时开着时，
+         **每次红的用例集都不一样**（实测三次：10 / 9 / 13 项全红，且都在 `Test timed out in 5000ms`）。
+         **判别实验**：`npx vitest run --testTimeout=30000` ⇒ **514 passed / 2 skipped / 0 failed**，
+         即无真回归。**本轮不修**（属测试基建，非缺陷修复范围），**登记**；
+      8. **`renderStashList` 的 `ReferenceError` 崩溃**：已在**本任务内修复**（见 §3.4.16 / 提交
+         `05b1b9a`）—— 它是 **AC-B3b 的阻塞项**（暂存区恒空 ⇒ U-7 补的「批量转换」入口永不可达），
+         故不计入"夹带"，但**如实登记于此**以说明为何 5.3 的残留清单少了一条已知崩溃；
+      9. **【环境】Dev ST（:8001）的宿主状态不稳**（2026-09-27 实测，四处同源征兆）：
+         ① 聊天区**一条消息都没有**（`#chat .mes` = 0）⇒ 宿主 welcome/welcomePrompt 系统消息
+            未渲染，`.drawer-opener` 全页为 0（这正是 §3.3.7 那处"锚点选错"被暴露出来的背景）；
+         ② 发送表单随之隐藏 ⇒ 魔法棒 `#extensionsMenuButton` 不可点；
+         ③ 控制台反复 `Settings not ready, scheduling another save`，且 **splash 弹窗
+            （`<dialog open>` 内含 `#loader.splash-screen`）长时间不关闭** ⇒
+            `document.activeElement` 停在 `DIALOG` 上，`page.fill` **静默不写入**（见 §3.4.19 与提交 `4b5511f`）；
+         ④ `#stash-list` / `#export-queue-panel` 在该状态下曾整体为空（当时另有 §3.4.16 的崩溃叠加）。
+         **本轮未处置**（属宿主/实例侧，C-3「不改宿主」）；**建议**：跑矩阵前重启 Dev ST，
+         并在 E2E 里对 splash 弹窗的有界等待上做显式判定（本轮只在 `fillNumber` 里做了**回读兜底**）。
+         注：**同一轮 dev-luker 全程正常**，故这是 dev-st 单侧现象，不是插件问题；
+      10. **【环境 + 候选缺陷】Luker 冷启动时插件会"静默不挂载"**（2026-09-27 实测，A3 轮）：
+         重启 Dev Luker 后**第一次**页面加载，Luker 段整套失败 —— `#env-badge` 不存在、
+         `#st_zip_converter_settings` 不存在（`宿主扩展抽屉已打开` 却**是 OK 的**，
+         说明宿主侧正常，是**我们的插件 JS 没跑**）；**同一次运行里的第 2 次加载（reload）即恢复**，
+         下一轮（B2）全程 182 项全绿。
+         机理（读码）：`host-bridge.js:319 detectHost()` 是**一次性判定** ——
+         Luker 分支要求 `globalThis.lukerContext` 是**对象**（源码注释已写明
+         「惰性 getter 在宿主脚本未就绪时可能抛错」）；冷启动时它尚未装好 ⇒ 落到
+         `standalone` ⇒ `bootstrap()` 走独立分支、找不到 `#app` 骨架 ⇒ **只留一行
+         `logger.warn` 后 return** ⇒ 用户看到的是"扩展有时不出现，刷新一下就好"。
+         **本轮不修**（C-6：不夹带；且只在冷启动窗口可复现）—— 但这是**面向真实用户**的
+         静默失效，建议单独开任务处理，最小修法：`bootstrap()` 在"判为独立态但页面无 `#app` 骨架"
+         时有界重试 `detectHost()`（该组合是"宿主未就绪"的强信号，不会误伤真独立态）
 - [ ] **5.4** 提交（**显式 pathspec**，L0-7(2)）：`npm test` 绿后提交并 `git push origin`
 - [ ] **5.5** 在父任务 `prd.md` 的 AC-P1 上回填读数
 

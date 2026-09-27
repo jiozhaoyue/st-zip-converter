@@ -181,6 +181,87 @@ Host Native Dialog Adapter 第 7 节）。
 
 ---
 
+## 缺陷修复的三条测试范式（2026-09-27 · 三个真实缺陷的教训）
+
+> 三条都来自本轮实修，且都对应**测试会放过缺陷**的形态。本仓纪律是
+> 「**先证明判定能抓到违规，再相信它报 0**」——下面每条都带实测的判别力读数。
+
+### 范式一：**静默空操作**必须双向断言（R-17 的教训）
+
+失效形态：`fixtures/gen.js` 的入口守卫因 URL 拼接缺陷（Windows 上 `import.meta.url` 是
+`file:///D:/…` **三斜杠**，模板拼出 `file://D:/…` **两斜杠**）**永不成立** ⇒
+`npm run gen-fixtures` 退出码 **0**、**零输出**、**零产物**。
+
+⇒ **只断言「退出码 0」是抓不到的**。必须**双向**：
+① 作为 CLI 直跑 ⇒ **确实产出**（且 **stdout 有产出行** —— 退出码与产物都要查）；
+② 作为模块 import ⇒ **零副作用**（不写默认目录、不改 `process.exitCode`）。
+两个方向各对应一种改坏方式：守卫过松 ⇒ ② 红；守卫过紧或拼错 ⇒ ① 红。
+
+**实测判别力**：把守卫改回旧写法 ⇒ ①③ **转红**（`expected '' to match /generated fixture-st\.zip/`
+—— stdout 为空，正是原缺陷的「零输出」形态），② 仍绿（该方向旧守卫也满足，因为它永不执行）。
+
+⚠️ ② 的实现细节：测 import 无副作用必须**绕开模块缓存**（`import(url + '?probe=' + Date.now())`），
+否则命中缓存 ⇒ 测的是缓存不是守卫。见 `test/gen-fixtures-cli.test.js`。
+
+### 范式二：**回调契约**要用「假执行体」把不可达路径变成可断言
+
+失效形态：断点落盘挂了 `onEntryDone`，而该回调在 **Worker 路径永不触发**（真浏览器）
+⇒ 功能在浏览器里完全不工作，而 `npm test` 全绿（Vitest 走主线程降级路径）。
+**这类缺陷单测天然抓不到**，因为两条路径的回调面不同。
+
+⇒ 做法：把落盘逻辑抽成**单一入口函数**（`attachConversionProgress`），
+单测**只按不可达那条路径的签名调用它**（只调 `onProgress`），断言副作用仍然发生。
+它断言的是**我们自己的接线契约**，不是真实的 `postMessage` 行为 ⇒ **仍需一条真浏览器 E2E**。
+**两者缺一不可**（详见 `state-management.md` 的「转换路径的断点续传」§1）。
+
+### 范式三：把「最容易写错的分支」抽成**纯函数**，否则它永远测不到
+
+失效形态：`AbortError` 的收尾分派（暂停**绝不**走 `fail()` —— `fail` 会
+`adapter.remove(id)` 清掉刚落盘的断点）内联在 `main()` 的 `catch` 里，
+而 `main()` 需要 DOM ⇒ **单测够不着** ⇒ 这条最要命的规则**没有任何自动化守护**。
+
+⇒ 做法：抽成 `convertExitForAbort({err, record})` → `'fail'|'paused'|'aborted'|'none'`，
+两条 catch（单包与批量）都经它。**判据：一段逻辑「写错了要返工」但「测不到」时，先抽出来。**
+
+**实测判别力**：去掉 `AbortError` 特判 ⇒ **3 项转红**；去掉批量的中止"停" ⇒ 1 项转红；
+去掉批量失效检测 ⇒ 2 项转红；去掉落盘 ⇒ 2 项转红。合计 **8 项转红**，还原后全绿
+（读数落 `.trellis/tasks/09-27-plugin-defect-fixes/research/r16-resume-and-batch.json`）。
+
+### 范式四：**渲染路径必须有守护** —— 纯函数全绿 ≠ 组件能用（2026-09-27 实测）
+
+失效形态：`renderStashList` 在**第一个非当前源条目**上抛
+`ReferenceError: btns is not defined`（`f9c7cfe`「按钮契约解耦」把行级按钮工厂搬进了
+`refreshBatchBar`，却漏删了行级的 `btns` / `mkBtn` 两处声明，而调用点仍在引用它们）。
+后果是**整块暂存区恒空** —— 连「暂无源包」的空态占位都没有，因为抛出发生在
+`containerEl.appendChild(list)`（函数末尾）**之前**；同一处 `try/catch` 还会连带跳过
+配额条与待导出区的刷新。页面里唯一的迹象是一行
+`[warning] 刷新工作区 UI 失败: ReferenceError: btns is not defined`。
+
+**为什么单测全绿**：`test/` 只覆盖了 `filterStashFiles` / `stashBatchCapability` 两个
+**纯函数** —— 而这两个函数**一个字符都没写错**。纯函数测试对「组件接不上线」这类缺陷
+**结构性地无能为力**：缺陷在 DOM 构造顺序里，不在过滤逻辑里。
+
+⇒ **纪律**：`src/ui/` 的每个渲染入口（`renderXxx`）至少要有**一条**「跑通渲染路径」的用例，
+断言的是**渲染不抛错 + 产出的 DOM 契约**，而不是它的纯函数助手。本仓不引 jsdom
+（L1-MR-11），用 `test/stash-list-render.test.js` 的最小 DOM 桩 + `vi.mock` 数据层即可。
+
+**判别力已实测**：把两处声明移回缺失态 ⇒ **7 项全红**，报错正是 `ReferenceError: btns is not defined`
+（与浏览器里那行警告同形）。若要再加一层：断言 DOM 契约（`.archive-name` /
+`.stash-select-box[data-id]` / `.archive-buttons`）而不只是「没抛错」——
+这些类名是 **E2E 与 CSS 共同的依赖面**，改名会同时打断两处，值得钉住。
+
+**另一条同族教训**：这类崩溃**只在浏览器控制台留一行 warning**，
+而 `npm test`、五条静态守卫、`npm run build` **全部照绿**。
+⇒ 排查「UI 空白但无报错」时，**先抓页面控制台**（`page.on('console')` 的
+`warning`/`error` 与 `page.on('pageerror')`），再怀疑 DOM 结构 —— 本次正是这一行警告直接指到了行号。
+
+### 附：写测试时先追问「这个数字量的是什么」
+
+见 `guides/instance-e2e-and-data-sync.md` §7 的口径纪律。本仓已栽 5 次，
+本轮又栽一次**小号版本**：用例名写着 `report.resumedCount > 0`，而
+**`resumedCount` 这个字段全仓从不存在**（真正断言的是 `report.totals.resumed`）
+—— 用例名说错字段 = 假事实（`P-3` 同形）。**字段名也要当场取证，别照抄旧注释。**
+
 ## Pre-Development Checklist
 
 改 `src/ui/`、`index.html` 或 `style.css` 之前：

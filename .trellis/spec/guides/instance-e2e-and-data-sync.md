@@ -242,11 +242,14 @@ cmd //c "dir /AL \"<实例用户数据目录>\""
 删除前先把 `路径 + 字节 + sha256` 落 `research/`。
 意图很明确：**宁可漏删（残留看得见），不可误删**（目标侧常常没有原生备份）。
 
-## 11. 功能矩阵 E2E 的实现纪律（2026-09-26 第五轮实证）
+## 11. 功能矩阵 E2E 的实现纪律（2026-09-26 第五轮实证；2026-09-27 增补 §11.1b / §11.6 / §11.7）
 
-> 本节全部判据都来自 `e2e/specs/matrix.e2e.cjs`（**122 项断言**）与 `e2e/lib/harness.cjs` 的实测。
-> 该 spec 覆盖 M-1…M-9 九条路径；全量 `npm run e2e` = **断言 175 项 / 通过 175 / 失败 0（exit 0）**，
-> 且**连续两轮全绿**。
+> 本节全部判据都来自 `e2e/specs/matrix.e2e.cjs` 与 `e2e/lib/harness.cjs` 的实测。
+> 该 spec 覆盖 **M-1…M-10b**，并在**两个 Dev 实例（dev-st / dev-luker）各跑一遍** ⇒
+> 单轮 = **断言 182 项 / 通过 182 / 失败 0（exit 0）**（2026-09-27 实测：**连续三轮全绿**）。
+> 全量 `npm run e2e`（guard + matrix + smoke）= **断言 235 项**；
+> ⚠️ 其中 **smoke 的"插件已挂载"一组在机器高负载时会超窗**（它只等 20 s，而矩阵等 40 s）
+> —— 见 §11.6 的独占机器纪律；空载实测插件挂载**稳定**（连开 3 次页面，3/3 在 25 s 内挂上）。
 
 ### 11.1 打开插件工作台：必须走真实路径，且「可见」要单独断言
 
@@ -260,17 +263,49 @@ cmd //c "dir /AL \"<实例用户数据目录>\""
 2. **打开路径的文案跨宿主不同**：ST 是「扩展程序」、Luker 是「扩展」
    ⇒ **只能按 class 定位**。
 
-固化为 `openWorkbench()`（`e2e/specs/matrix.e2e.cjs`）：
+固化为 `openWorkbench()` / `openHostExtensionsDrawer()`（`e2e/specs/matrix.e2e.cjs`）：
 
 ```
-点 #extensionsMenuButton
- → 点 .drawer-opener（优先取文字含「扩展」者；**判可见用 getBoundingClientRect，不用 offsetParent**）
- → 有界等待 #rm_extensions_block 的 display 不为 none
- → 展开 #st_zip_converter_settings 的直接子 .inline-drawer-content
- → **有界等待 #target-select 有非零尺寸**（这一步才是「控件真实可用」的判据）
+openHostExtensionsDrawer() —— 打开宿主扩展抽屉，**不依赖聊天区消息**：
+  ① #extensions-settings-button > .drawer-toggle          ← 宿主原生开关，**优先**
+  ② .drawer-opener[data-target=…] → 再点 #<target> > .drawer-toggle（回退；与①语义相同）
+  ③ 任意 [id*=extension].drawer 的 .drawer-toggle          （兜底）
+  → 有界等待该抽屉 .drawer-content 有非零尺寸且 display ≠ none
+openWorkbench() 继续：
+  → 展开 #st_zip_converter_settings 的直接子 .inline-drawer-content
+  → **有界等待 #target-select 有非零尺寸**（这一步才是「控件真实可用」的判据）
 ```
 
-**三个具体的坑**（都实际踩过）：
+### 11.1b 锚点必须锚在宿主**静态 DOM** 上，不得锚在会被消费掉的 UI 上（2026-09-27 实测）
+
+旧版 `openWorkbench` 走「点 `#extensionsMenuButton`（魔法棒）→ 点菜单里带 `.drawer-opener` 的项」。
+2026-09-27 实测该路径**两实例同时失效**：全页 `.drawer-opener` 为 **0**、
+`#extensionsMenuButton` 点不动（Playwright 30 s 超时），而实例端面健康、插件已就绪。
+当时的排查一度判为「宿主侧阻塞（宿主把菜单按钮隐藏了）」，**实际是锚点选错**：
+
+- `.drawer-opener` 的**唯一来源**是宿主**聊天区的系统消息模板**
+  （`templates/welcome.html:49` / `welcomePrompt.html:10`，均带
+  `data-target="extensions-settings-button"`）。它**不属于魔法棒菜单**。
+  聊天区没有这条系统消息时（实测 `#chat .mes` = 0）全页一个都没有。
+  **取证方式**：对实例 `public/scripts/extensions/third-party/` 全目录 grep `drawer-opener`
+  —— 命中项只有**本仓副本自己的**文档与 spec，**没有任何宿主扩展注入它**。
+- 空聊天下宿主的发送表单是隐藏的 ⇒ `#extensionsMenuButton`（`templates/wandButton.html`，
+  由 `addExtensionsButtonAndMenu()` 挂进 `#leftSendForm`）随之**不可点**。
+  于是「重启实例 / 全新 profile / 页面 reload」三种尝试全部无效（当时逐一试过，都无效）。
+- 真正该用的锚点是宿主**静态存在**的 `#extensions-settings-button.drawer`
+  （`public/index.html:5750`）里的 `.drawer-toggle`：实测 **36×32 可见**，
+  且 `public/script.js:12150` 对它**有直接绑定**
+  `$('.drawer-toggle').on('click', doNavbarIconClick)` ⇒ 与聊天状态**完全无关**。
+  （对照：`.drawer-opener` 走的是 `script.js:10935 doDrawerOpenClick`，
+  它做的事就是「取 `data-target` → 找 `#<id> .drawer-toggle` → 点它」——**同一条路，只是多绕一层**。）
+
+**通用纪律**：E2E 的开场锚点要指向**宿主 HTML 里的静态节点 + 原生直接绑定的事件**。
+凡是「由宿主运行时渲染、且可能被消费或替换」的节点 —— 系统消息、一次性引导提示、
+随机 id 的弹层、随会话状态显隐的按钮 —— 都不能当锚点：
+它们会让整个 spec 的失败形态**伪装成「宿主坏了」**，把排查引向宿主源码与实例健康度（本次即如此，
+白查了重启实例、全新 profile、宿主源码、扩展开关四项）。
+
+**三个具体的坑**（都实际踩过；**前两条对任何宿主菜单都成立**，第三条只作用于回退路径）：
 
 | 坑 | 症状 | 正确做法 |
 | --- | --- | --- |
@@ -308,7 +343,7 @@ t.eq('converted 记录增量 == 本轮产物数',
   after.filter(r => r.origin === 'converted').length - baselineConverted, allNames.length);
 ```
 
-### 11.3 断言的判别力：三种「红灯其实来自断言自己」
+### 11.3 断言的判别力：七种「红灯其实来自断言自己」
 
 本仓纪律是「**先证明判定能抓到违规，再相信它报 0**」。反过来同样要守：
 **判错方向的红灯一样要查实** —— 本轮 6 次红灯，回源码/实地取证后**全部**是断言侧问题：
@@ -321,6 +356,10 @@ t.eq('converted 记录增量 == 本轮产物数',
 | 「`.drawer-open` 选择器」 | 见 §11.1 —— **截断的 dump** 制造了不存在的 class |
 | 「`offsetParent !== null` 判可见」 | 见 §11.1 —— fixed 元素恒 `null` |
 | 「恢复入口仅 Luker 显示」 | **照过时注释写断言**：`computeActionAvailability`（`index.js:140`）的当前契约是 **`restore.visible = isHost && hasArtifact`**，与平台无关；`index.js:712` 那句注释描述的是**已被替换掉的旧实现** |
+| 「暂停窗口夹具 > 40 MB」（2026-09-27） | **陈旧阈值**：`ensurePauseFixture` 早已从「48 × 1 MB」改成「1500 × 3 KB」（多条目、少字节，为减持久化 profile 负担）⇒ 该断言在**正确实现下恒假**。**阈值必须与实现的 `minBytes` 同源**，改实现时同步改断言 |
+| 「续传日志含『沿用断点跳过 N 项』」（2026-09-27） | **读了折叠态的 DOM**：`log-console.js:262` 在面板折叠时直接 `return`，不往 `#log-stream-container` 追加任何行（只更新「最新一条」与徽标）⇒ 折叠态读到的永远是占位符「暂无日志记录」。**先展开再读**（`readLogText()` 点 `#btn-toggle-log`，这也是真实用户动作） |
+| 「native == 显式 st」（2026-09-27） | **陈旧读数的竞态 —— 同时制造假红与假绿**：`l` 与 `st` 的读数**模式完全相同**（「直通 7 合成 1 丢弃 4 产物 8」，只有字节数 826.0 B / 870.0 B 不同），而 `selectOption` 后按该模式等待会**立刻返回上一个状态的陈旧读数**。ST 宿主上该断言因此**恒假**；Luker 宿主上却因「陈旧值恰好等于期望值」**侥幸变绿**。**修法**：切目标先经过一个**读数必然不同**的中间态（`tt` ⇒ 路由 7 / 产物 7），落地后再切目标值。**纪律**：`selectOption` + 模式等待只保证「屏幕上出现了这个模式」，**不保证它是新状态算出来的** |
+| 「M-9 分卷产出 > 1 份」（2026-09-27） | **`page.fill` 静默不写入**（最隐蔽的一种）：宿主 ST 的 splash / 弹窗 —— `<dialog open>` 内含 `#loader.splash-screen` —— 未关闭时，`document.activeElement.tagName === 'DIALOG'` ⇒ Playwright 的 `fill`（focus + insertText）**不报错但一个字符都没写进去**；同一状态下 `page.click` / `pressSequentially` 会**超时**（指针事件被弹窗吞掉）。后果：M-9 的「1 MB 阈值」没生效 ⇒ 分卷退化为单包 ⇒ 三条断言红，而现场毫无异常（元素可见、`disabled=false`、`readOnly=false`、`value` 读作空串）。**修法**：`fillNumber()` —— 填完**校验取值**，失效则退回程序化赋值 + 派发 `input`/`change`，并把走过的路径落进断言证据。**纪律**：凡 `fill`／`selectOption` 之类「失败也可能不抛错」的交互，都要**回读一次取值**；这也解释了「同一 spec 一个实例绿、另一个红」的最常见成因 |
 
 **通用纪律**：断言必须以**当前代码路径**为准 ——
 **注释里的历史陈述不是契约**，凭据要从实现取，且要**跑一次负例**证明该断言真的会报红。
@@ -352,12 +391,66 @@ const bytes = (len, seed) => {           // 确定性高熵字节
 ### 11.5 复现命令
 
 ```bash
-npm run e2e                      # 全量：guard + smoke + matrix（**175 项全过、exit 0**）
-node e2e/run.cjs --only matrix   # 只跑功能矩阵（**122 项**；需 :8001 与 :8003 在跑）
+npm run e2e                      # 全量：guard + matrix + smoke（2026-09-27 读数：断言 235 项）
+node e2e/run.cjs --only matrix   # 只跑功能矩阵（**182 项**；需 :8001 与 :8003 在跑，且**先热身**）
 ```
 
-前置：`:8001`（Dev ST）与 `:8003`（Dev Luker）在监听；夹具由 spec **现场生成**到
-`test-results/fixtures/`（`.gitignore` 覆盖，**不入库**）。
+前置：`:8001`（Dev ST）与 `:8003`（Dev Luker）在监听**且已热身**（见 §11.7）；
+夹具由 spec **现场生成**到 `test-results/fixtures/`（`.gitignore` 覆盖，**不入库**）。
+⚠️ 跑之前确认**没有别的会话在同一批实例上跑测试** —— 共用持久化 profile + 共用实例，
+并发会让双方读数都不可信（实测：并发期间 smoke 的挂载断言与 `npm test` 的 5 s 超时同时抖动）。
+
+### 11.6 跑矩阵时**独占机器** —— 负载型假红的唯一来源（2026-09-27 实测）
+
+矩阵有若干**按墙钟计时**的有界窗口（M-9 分卷 240 s、M-7b 暂停窗口、`openWorkbench` 15 s），
+而机器同时跑着两个酒馆实例 + 浏览器 + 编辑器，余量很小。2026-09-27 实测：
+
+- 本轮 dev-st 的 **M-9 只切出 1 份分卷**（应 8 份）⇒ 三条断言红；
+- **同一轮、同一 spec、同一份代码**的 dev-luker 同段**通过（8 份）**；
+- 根因：当时**并发跑了 `npx vitest`**（55 个测试文件默认并行）造成负载尖峰。
+
+**纪律**：
+1. **跑矩阵期间不跑 `npm test` / 构建 / 大批量脚本**（反之亦然）——
+   两者都是 CPU 密集且都有时间敏感的用例，并发只会同时污染两边的读数。
+2. 同理，`npm test` **自身**在本机满载时也会出现 `Test timed out in 5000ms` 抖动
+   （仓内未配 `testTimeout`，默认 5 s）：判别实验是 `npx vitest run --testTimeout=30000`
+   —— 若它全绿，则红的是负载不是代码（2026-09-27 实测：默认超时下 10/9/13 项红，
+   30 s 下 **514 passed / 2 skipped / 0 failed**）。
+3. 出现「只在一个实例上红、另一个实例同段绿」的形态时，**先怀疑负载与陈旧状态**，
+   不要急着去改代码 —— 这是本轮与上一轮各踩一次的同一个坑。
+4. **跨会话同样要独占**（`P-18` 同族，2026-09-27 实测）：本机多个 agent 会话**共用**这两个实例
+   与**同一个持久化 profile**。实测当时另有会话在跑 `test-browser.js` 与 `npx vitest`
+   （还有一条 18:45 启动后就再没退出的僵尸 `e2e/run.cjs`），并发期间：
+   - `npm test` 出 5 s 超时抖动（同一份代码三次读数：10 / 9 / 13 项红，且红的用例集每次不同）；
+   - 全量 e2e 的 **smoke 段**（只等 20 s 挂载窗口）在**两个实例上**同时失败，
+     而同一轮的 **matrix 段**（等 40 s、且先跑）零失败 —— 加载窗口不够 ≠ 功能坏了。
+   **判据**：`matrix` 绿而 `smoke` 的挂载断言红、且**重启实例 + 热身**后单跑即绿 ⇒ 是负载。
+   **纪律**：跑之前用 `Get-CimInstance Win32_Process` 扫一眼有没有别人的 `vitest` / `test-*.js` / `e2e/run.cjs`；
+   拿不到干净读数时，**宁可如实报告"环境碰撞"也不要调宽断言**。
+
+### 11.7 宿主**冷启动窗口**：插件可能根本没挂载（2026-09-27 实测）
+
+**现象**：重启 Dev Luker 后**第一次**页面加载，整套矩阵失败 —— `#env-badge` 不存在、
+`#st_zip_converter_settings` 不存在，而**同一轮里宿主侧的 `#extensions-settings-button > .drawer-toggle`
+点击是 OK 的**（⇒ 宿主正常，是**我们的插件 JS 没跑**）。**同一次运行的第 2 次加载（reload）即恢复**，
+其后一轮 182 项全绿。
+
+**机理**（`src/ui/host-bridge.js:319 detectHost()`）：它是**一次性判定** ——
+Luker 分支要求 `globalThis.lukerContext` 是**对象**（源码注释自己写了
+「lukerContext 惰性 getter 在宿主脚本未就绪时可能抛错」）。冷启动窗口里该 getter 尚未装好
+⇒ 判定落到 `standalone` ⇒ `bootstrap()` 走**独立态分支**、找不到 `#app` 骨架
+⇒ **只留一行 `logger.warn` 后 return** ⇒ 用户观感是「扩展有时不出现，刷新一下就好」。
+
+**纪律（两条，都别省）**：
+
+1. **跑矩阵前先把实例"热身"**：让宿主完整启动并成功加载过一次扩展（一次页面加载即可）再开跑。
+   矩阵自身的第一步虽是 `resetWorkspace`（含 reload），但**它救不了"这次加载压根没挂载"**。
+2. **「插件没挂载」与「插件挂了但 UI 不对」要能区分**：前者是宿主/加载期问题，后者才是插件问题。
+   判据：看宿主侧的 `#extensions-settings-button` 在不在 —— **它在而 `#env-badge` 不在 ⇒ 加载期问题**。
+
+⚠️ 这条同时是一个**候选产品缺陷**（面向真实用户的静默失效，不只是测试问题）：
+`bootstrap()` 在「判为独立态但页面无 `#app` 骨架」这一组合下有界重试 `detectHost()` 即可修
+（该组合是「宿主未就绪」的强信号，不会误伤真独立态）。**本任务按 C-6 只登记未修**。
 
 ## 12. PT（PureTavern）导入通道 —— **页面内 fetch 补丁**与四个坑（2026-09-26 实证）
 

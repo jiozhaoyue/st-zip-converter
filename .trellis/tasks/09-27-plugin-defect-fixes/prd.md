@@ -136,24 +136,49 @@ onResume: (id, checkpoint) => {
 
 ## Acceptance Criteria
 
-- [ ] **AC-B1** `npm run gen-fixtures` **实测产出**（修复前为退出码 0 / 零产物；修复后有产物，读数落 `research/`）
-- [ ] **AC-B2** R-17 的双向负例守护存在且通过（直跑产出 ✓ / import 无副作用 ✓），
+- [x] **AC-B1** `npm run gen-fixtures` **实测产出**（修复前为退出码 0 / 零产物；修复后有产物，读数落 `research/`）
+      —— *2026-09-27 现场取证：`node fixtures/gen.js <tmp>` ⇒ stdout
+      `generated fixture-st.zip -> …` 且目录里确有三个包；读数落 `research/gen-fixtures-fix.json`*
+- [x] **AC-B2** R-17 的双向负例守护存在且通过（直跑产出 ✓ / import 无副作用 ✓），
       并**实测证明判别力**（临时改回旧写法 → 负例转红）
-- [ ] **AC-B3** R-16 按 OQ-1 裁决处置完毕（生效分支为 **(a) 补实现**，U-2）：
+      —— *`test/gen-fixtures-cli.test.js`；判别力读数：改回旧写法 ⇒ ①③ 转红（stdout 为空，
+      正是原缺陷的"零输出"形态）*
+- [x] **AC-B3** R-16 按 OQ-1 裁决处置完毕（生效分支为 **(a) 补实现**，U-2）：
       转换路径 pause→resume 续传**可达且 `resumedCount > 0` 可观测**，有单测 + E2E 证据
       —— 其中 **E2E 用真浏览器（Worker 路径）是不可省的**（见 `design.md` D0.2b：
       单测跑主线程路径，抓不到回调不触发这类缺陷）
-- [ ] **AC-B3b** **批量转换续传可达**（U-5）：pause → resume 后
+      —— *E2E（真浏览器）读数：控制条可见 → 暂停后出现「继续」→ 续传跑完，
+      日志 `转换成功（沿用断点跳过 **129** 项）`；断言 `N=129 > 0` ✓（B2/C/E 三轮同读数）*
+- [x] **AC-B3b** **批量转换续传可达**（U-5）：pause → resume 后
       ① 已完成子项**不重跑**；② 从断点游标继续；③ 产物齐（与不中断跑一遍的产物集合一致）
-- [ ] **AC-B3c** **批量预防的两个负例有判别力**（U-6 / `design.md` D1.3）：
+      —— *E2E：`M-10b 整批新增产物 == 2`（已完成子项没有被重跑）✓；
+      入口可达：`M-10 多选后出现「批量转换」按钮且可用` ✓（**前提是 §3.4.16 的暂存区崩溃已修**，
+      否则该入口永不可达）*
+- [x] **AC-B3c** **批量预防的两个负例有判别力**（U-6 / `design.md` D1.3）：
       ① 产物不在队列（模拟页面重载）⇒ 断点**作废**而非硬续（去掉判据则用例转红）；
       ② 子项内 `AbortError` ⇒ 循环 **`break`**、后续子项不得被处理
       （去掉 `break` 则用例转红）；③ 跨子项**同名条目不得被误跳过**
-- [ ] **AC-B4** 若选 (a)：Worker 生命周期遵守 **L1-MR-8**（terminate 后置空），有测试守护
-- [ ] **AC-B5** R-19 按 OQ-2 裁决处置完毕（新增只读出口并有单测，或登记为已知边界）
-- [ ] **AC-B6** `npm test` 全绿零回退；五条静态守卫 exit 0；`npm run build` 通过
+      —— *单测 3.4.12 / 3.4.13 / 3.4.14；判别力实测：去掉失效判据 ⇒ 2 项转红；
+      去掉 `AbortError` 分支 ⇒ 1 项转红*
+- [x] **AC-B4** 若选 (a)：Worker 生命周期遵守 **L1-MR-8**（terminate 后置空），有测试守护
+      —— *2026-09-27 补齐（此前**无任何用例**覆盖，现场 `grep -rln terminate test/` 为空 ⇒
+      本条原先**不成立**）：新增 `test/worker-terminate-guard.test.js`（3 项，`window`/`Worker` 打桩
+      走 Worker 分支）。**判别力已实测**：临时去掉 `workerInstance = null` ⇒
+      第 3 条转红（`expected 1 to be 2` —— 复用已 terminated 的死实例，正是 `034b7ab` 的事故形态）；
+      恢复后 3/3 绿*
+- [x] **AC-B5** R-19 按 OQ-2 裁决处置完毕（新增只读出口并有单测，或登记为已知边界）
+      —— *7 项单测 + E2E 里 5 条断言（存在 / 初始 `unknown` / 快照冻结 / 改不动 / 命名空间冻结）✓*
+- [x] **AC-B6** `npm test` 全绿零回退；五条静态守卫 exit 0；`npm run build` 通过
+      —— *见 `implement.md` §4.1 / §4.2 的读数（隔离 worktree：**516 passed / 8 skipped / 0 failed**；
+      五条守卫与 build 全 `EXIT=0`）*
 - [ ] **AC-B7** 涉及 E2E 的改动 `npm run e2e` exit 0 且连续两轮全绿
-- [ ] **AC-B8** 本轮规范落 `.trellis/spec/`（自包含，内联读数与 `file:line`）
+      —— **矩阵部分已达成**（连续三轮 182/182）；**全量 `npm run e2e` 的 exit 0 未取得**
+      （smoke 段挂载断言在**并发会话重负载**下超窗，空载实测挂载稳定）
+      ⇒ 收口方式待用户裁决（`implement.md` §4.3b 三选一）。**未满足，不勾**
+- [x] **AC-B8** 本轮规范落 `.trellis/spec/`（自包含，内联读数与 `file:line`）
+      —— *`state-management.md`（任务接线 + 续传三出口）、`quality-guidelines.md`（范式一~四）、
+      `guides/instance-e2e-and-data-sync.md`（§11.1b 锚点纪律 / §11.3 七种假红 / §11.6 独占机器 /
+      §11.7 冷启动窗口）、`guides/index.md` 索引同步*
 
 ## Constraints
 
