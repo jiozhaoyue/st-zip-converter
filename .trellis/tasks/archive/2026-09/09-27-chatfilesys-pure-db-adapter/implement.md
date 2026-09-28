@@ -65,6 +65,10 @@
 - [x] **6.2** 五条静态守卫 `exit=0`；`npm run build` 通过（由 `npm run e2e:web` 的构建段实测）
 - [ ] **6.3** 【**阻塞：供给侧未实现**】真机（Dev 实例）：AC-7 打包含库中聊天 / AC-8 还原入库 / AC-9 删掉接缝 ⇒ 断言转红
       ⚠️ 需临时把 Dev Luker 切纯库；**切换前后记读数、结束复原**；避开并发 E2E 窗口
+      —— **2026-09-29 复核：仍阻塞，如实保持未勾**。阻塞物在**供给侧仓**（`My-repo/ST-chatfilesys-rebuild`
+      未实现 `ChatFilesysApi` 接缝），**不在本仓可控范围**；本仓消费侧已用**桩供给方**在真实浏览器
+      验通全链路（§6.5：30 项全绿）并备有可照做的落地方案（`research/provider-side-patch-guide.md`）。
+      判据未取得真机读数前**不勾**（`prd.md` 明文：「不得用『文件路径绿』冒充」）。
 - [x] **6.4** 已**如实登记**（不得用文件路径绿冒充）：契约待办写进 `spec/frontend/chat-store-seam.md` §5
 - [x] **6.6** 【新增方向：**从聊天库导出**】纯库模式下只有库、没有源包时的出口：
       `exportLibraryToPack()`（造最小 ST 摊平源包 → 走同一条转换管线）+ 动作行按钮
@@ -85,8 +89,25 @@
 - [x] **7.3** 提交（**显式 pathspec**）并 `git push origin` —— 本任务共 6 个提交：
       `2b9f04b`（消费侧适配）· `83b7e03`（自查三修）· `c16e65a`（导出补单测）·
       `43a3bd2`（从聊天库导出）· `1e26191`（file:// 提示 + 续传缺陷取证）· `c652d8d`（任务收口文档）
-- [ ] **7.4** 残留登记：供给侧实现待办、真机验证缺口、`group chats/` 分支未取证项
+- [x] **7.4** 残留登记：供给侧实现待办、真机验证缺口、`group chats/` 分支未取证项
+      —— *已逐条落 `prd.md` 的「残留」节（5 条）：① 供给侧未实现（阻塞 AC-7/8/9，附
+      `research/provider-side-patch-guide.md` 可照做文档）；② 宿主拉取注入接线**已验通**
+      （`e2e/specs/library-inject.e2e.cjs` dev-luker 两档各 21 项全绿）；③ `group chats/` 落点未取证
+      （本机无群聊样本）；④ `*.bak.jsonl` 形态不在既有备份判据内（未擅自扩展）；⑤ 实例侧环境阻塞已解除
+      （Dev 插件更新到 `61ce2f5`，dev-st 冒烟 36/36 全绿）*
 
 ## 回滚点
 
 - 回滚 = 删 `pack-inject.js` / `zip-augment.js` / `chat-store-bridge.js` + 还原 `index.js` 接线。
+
+## 收口记录（2026-09-29，Session 36 补）
+
+- **AC 对照**（`prd.md` AC 表）：**AC-1 ~ AC-6 ✓**（单测与消费侧回归，总读数 573 passed / 0 failed）；
+  **AC-7 / AC-8 / AC-9 未达成 —— 阻塞于供给侧仓未实现接缝**，按 prd 明文「如实登记为阻塞，
+  不得用文件路径绿冒充」处理，**保持不勾**。消费侧已用**桩供给方**在真实浏览器验通全链路（§6.5，30 项全绿）。
+- **收口复验**（2026-09-29 现场重跑）：`npx vitest run --maxWorkers=2` ⇒
+  **64 文件 / 610 passed / 2 skipped / 0 failed，exit 0**（本任务收口时 573 项，其后由
+  `09-28-convert-true-incremental-resume` 净增 37 项守护；**零回退**）。
+- **解除阻塞的前置**：供给侧仓 `ST-chatfilesys-rebuild` 实现 `ChatFilesysApi` v1 接缝
+  （落地方案见 `research/provider-side-patch-guide.md`），届时本任务可开**后续任务**补 AC-7/8/9。
+- **本任务为独立任务，无父任务**；归档即为交付。
