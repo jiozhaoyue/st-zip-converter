@@ -6,13 +6,19 @@
 
 ## 0 前置
 
-- [ ] **0.1** 基线读数入 `research/`：`npm test` 与 `npm run e2e:web` 各跑一次（文件数/通过数）
-- [ ] **0.2** 探路读数已落 `research/appendzip-probe.json`（`appendZip` 可用、字节级保持、需 `BlobReader`）—— **已完成（2026-09-28）**
-- [ ] **0.3** 并发边界核对：`e2e/run.cjs` / 其它会话是否在跑 ⇒ 决定是否碰 `e2e/specs/**`
+- [x] **0.1** 基线读数入 `research/`：`npm test` 与 `npm run e2e:web` 各跑一次（文件数/通过数）
+      —— *读数落 `research/baseline-step0.json`（60 文件 / 581 passed / 2 skipped / 0 failed）。
+      原读数先记于 §9.1 正文、未单独成文件，本次按本条要求补落盘（不重跑：基线是历史时点读数）*
+- [x] **0.2** 探路读数已落 `research/appendzip-probe.json`（`appendZip` 可用、字节级保持、需 `BlobReader`）—— **已完成（2026-09-28）**
+- [x] **0.3** 并发边界核对：`e2e/run.cjs` / 其它会话是否在跑 ⇒ 决定是否碰 `e2e/specs/**`
       （本任务只碰 `e2e/standalone/specs/**`）
-- [ ] **0.4** 规格前置阅读（`trellis-before-dev` 纪律）：`state-management.md` 的长任务一节、
+      —— *实测：`e2e/run.cjs`（实例侧矩阵）未启动，本任务全程只改 `e2e/standalone/specs/pause-resume.e2e.cjs`，
+      未碰 `e2e/specs/**`（`.gitignore` 外的实例侧 spec 零改动）*
+- [x] **0.4** 规格前置阅读（`trellis-before-dev` 纪律）：`state-management.md` 的长任务一节、
       `guides/standalone-web-and-cloud-e2e.md` §4.6（`KNOWN-DEFECT` 原文）、
       `quality-guidelines.md`「渲染路径必须有守护」
+      —— *已在开工前读；本任务 §10.1 正是把这三处**反过来改写**（§4.6 由 🔴 缺陷改为 ✅ 已修），
+      即闭环证据*
 
 ## 1 `src/core/zip-io.js`：存在门与半成品搬运
 
@@ -246,3 +252,12 @@
 ## 回滚点
 
 见 `design.md` §6。要点：**「存在即跳过」不得回滚**（回滚它 = 恢复静默数据损失）。
+
+## 收口记录（2026-09-29，Session 36 补）
+
+- **§0 前置四项**在 Session 35 执行时已满足，本次按本条要求**补落基线读数文件**（`research/baseline-step0.json`）并勾选；
+  基线是历史时点读数，**不重跑冒充**。
+- **§8（R6b 批量真增量）如实保持未勾**：正确性已达成（不丢数据），只缺提速，登记为残留（见「残留」节第 1 条）。
+- **AC 对照**（`prd.md` 的 AC 表）：AC-1 ~ AC-11 ✓、AC-13 ✓；**AC-12（R6b）未达成，已如实登记**。
+- **收口复验**（2026-09-29 现场重跑）：`npx vitest run --maxWorkers=2` ⇒
+  **64 文件 / 610 passed / 2 skipped / 0 failed，exit 0** —— 与 §9.1 读数一致，无回退。
