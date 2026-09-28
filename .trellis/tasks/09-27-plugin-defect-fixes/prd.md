@@ -171,10 +171,15 @@ onResume: (id, checkpoint) => {
 - [x] **AC-B6** `npm test` 全绿零回退；五条静态守卫 exit 0；`npm run build` 通过
       —— *见 `implement.md` §4.1 / §4.2 的读数（隔离 worktree：**516 passed / 8 skipped / 0 failed**；
       五条守卫与 build 全 `EXIT=0`）*
-- [ ] **AC-B7** 涉及 E2E 的改动 `npm run e2e` exit 0 且连续两轮全绿
-      —— **矩阵部分已达成**（连续三轮 182/182）；**全量 `npm run e2e` 的 exit 0 未取得**
+- [x] **AC-B7** 涉及 E2E 的改动 `npm run e2e` exit 0 且连续两轮全绿
+      —— **矩阵部分已达成**（连续三轮 182/182）；**全量 `npm run e2e` 的 exit 0 此前未取得**
       （smoke 段挂载断言在**并发会话重负载**下超窗，空载实测挂载稳定）
-      ⇒ 收口方式待用户裁决（`implement.md` §4.3b 三选一）。**未满足，不勾**
+      —— ✅ **2026-09-29 已达成**：按 §4.3b 的 (b) 落实（smoke 挂载等待 20 s → 60 s，
+      断言内容不变）后**独占机器连续两轮**：**281 / 281 / 0 / exit 0**（两轮同读数）。
+      过程中另查出一条**与负载无关的真因**并已修：dev-st 上 ChatFilesys 的「入库提醒」弹窗
+      拦指针事件（`e2e/lib/harness.cjs` 新增页内守卫，判别力：无守卫 EXIT=1 / 有守卫 EXIT=0）。
+      读数落 `research/e2e-closeout-2026-09-29.json`；规格落
+      `guides/instance-e2e-and-data-sync.md` §11.11
 - [x] **AC-B8** 本轮规范落 `.trellis/spec/`（自包含，内联读数与 `file:line`）
       —— *`state-management.md`（任务接线 + 续传三出口）、`quality-guidelines.md`（范式一~四）、
       `guides/instance-e2e-and-data-sync.md`（§11.1b 锚点纪律 / §11.3 七种假红 / §11.6 独占机器 /

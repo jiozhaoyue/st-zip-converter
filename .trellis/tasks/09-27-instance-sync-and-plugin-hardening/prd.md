@@ -76,7 +76,7 @@ E2E 基础设施（guard 17 / smoke 36 / matrix 122）入库、PT 通道打通�
 
 ## Acceptance Criteria
 
-- [ ] **AC-P1** 子任务 B（插件缺陷）的 AC 全部达成，`npm test` 全绿**零回退**
+- [x] **AC-P1** 子任务 B（插件缺陷）的 AC 全部达成，`npm test` 全绿**零回退**
       —— **2026-09-27 回填读数**（子任务 `09-27-plugin-defect-fixes`）：
       `npm test` **零回退已达成**（隔离 worktree 跑本提交 `4b5511f` ⇒
       **516 passed / 8 skipped / 0 failed**，基线 509 项 → 524 项，净增 15 项守护）；
@@ -85,6 +85,14 @@ E2E 基础设施（guard 17 / smoke 36 / matrix 122）入库、PT 通道打通�
       每轮 182/182），但**全量 `npm run e2e` 的 exit 0 未取得**（smoke 段挂载断言在
       **其它三个会话并发跑重型测试**时超窗；空载实测挂载稳定）
       ⇒ 收口方式待用户裁决（子任务 `implement.md` §4.3b 列了三选一）
+      —— ✅ **2026-09-29 收口**（子任务 `09-27-plugin-defect-fixes` 已归档）：
+      **AC-B1 ~ B8 全部达成** —— B7 按 §4.3b 的 (b) 落实（smoke 挂载等待 20 s → 60 s，
+      断言不变）后**独占机器连续两轮 `npm run e2e` = 281 / 281 / 0 / exit 0**；
+      过程中另查出并修掉一条**与负载无关的真因**（dev-st 上 ChatFilesys「入库提醒」弹窗拦指针事件，
+      `e2e/lib/harness.cjs` 新增页内守卫，判别力：无守卫 EXIT=1 / 有守卫 EXIT=0）。
+      `npm test` 复跑 **64 文件 / 610 passed / 2 skipped / 0 failed / exit 0**（零回退）。
+      §2.5 判别力证明已补（摘掉 `mountDebugProbe` ⇒ R-19 四条转红 ⇒ 还原 ⇒ 91/91 绿）。
+      读数落 `09-27-plugin-defect-fixes/research/e2e-closeout-2026-09-29.json`
 - [ ] **AC-P2** 子任务 A（同步/备份）的 AC 全部达成
 - [ ] **AC-P3** 集成核对：五个可写目标逐目标「覆盖率 + 零删除」读数齐备（PT 用模块读数判据）
 - [ ] **AC-P4** 插件产包**可重跑性**证据：同一源连续两次产包，条目数/体积一致

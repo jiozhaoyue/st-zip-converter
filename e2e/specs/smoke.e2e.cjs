@@ -50,12 +50,17 @@ module.exports = {
     t.ge('index.js 非空', assets['/index.js'].len || 0, 1000);
 
     // —— 2. 等宿主把插件挂上去（watchHostDom 有 200ms 去抖） ——
+    // 等待窗口 20s → 60s（2026-09-29，子任务 B `implement.md` §4.3b 的 (b) 分支，用户裁决 U-3）：
+    //   断言内容**不变**，只放宽等待窗口 —— 20s 在**其它会话并发跑重型测试**时不够
+    //   （实测 smoke 挂载断言超窗，而同一轮 matrix 段零失败；空载实测 25s 内必挂上）。
+    //   与 matrix 的等待窗口同量级，避免「同一能力、两个 spec 两个判据」。
+    // 判别力不受影响：挂载真的失败时，60s 一样会判红（放宽的是等待，不是断言）。
     let mounted = false;
     try {
       await page.waitForFunction(
         (slug) => Boolean(document.getElementById(`${slug}-settings-panel`)
           || document.getElementById(`${slug}-menu-item`)),
-        SLUG, { timeout: 20_000 },
+        SLUG, { timeout: 60_000 },
       );
       mounted = true;
     } catch { mounted = false; }

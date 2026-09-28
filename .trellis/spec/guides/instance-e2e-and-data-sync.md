@@ -242,7 +242,7 @@ cmd //c "dir /AL \"<实例用户数据目录>\""
 删除前先把 `路径 + 字节 + sha256` 落 `research/`。
 意图很明确：**宁可漏删（残留看得见），不可误删**（目标侧常常没有原生备份）。
 
-## 11. 功能矩阵 E2E 的实现纪律（2026-09-26 第五轮实证；2026-09-27 增补 §11.1b / §11.6 / §11.7）
+## 11. 功能矩阵 E2E 的实现纪律（2026-09-26 第五轮实证；2026-09-27 增补 §11.1b / §11.6 / §11.7；2026-09-29 增补 §11.11）
 
 > 本节全部判据都来自 `e2e/specs/matrix.e2e.cjs` 与 `e2e/lib/harness.cjs` 的实测。
 > 该 spec 覆盖 **M-1…M-10b**，并在**两个 Dev 实例（dev-st / dev-luker）各跑一遍** ⇒
@@ -656,3 +656,44 @@ PT 此前**没有任何自动化**（`smoke.e2e.cjs` 的 `requiresInstances` 只
 ```bash
 npm run e2e -- --only matrix --instance dev-luker   # 该实例完整矩阵；实测连续两轮 91/91、断言行集合逐条一致
 ```
+
+### 11.11 第三方插件的**模态弹窗**会拦死指针事件 —— 装页内守卫，别在 goto 后点一次（2026-09-29 实测）
+
+**现象**：dev-st 上矩阵第一次点 `#btn-convert` 就超时，报错是 Playwright 的拦路提示：
+
+```
+- element is visible, enabled and stable
+- <dialog open class="popup popup--animation-fast">…</dialog> intercepts pointer events
+```
+
+看似「按钮不可用」，实为 **ChatFilesys 的「入库提醒」弹窗**（`.chatfilesys-import-prompt`）挡在前面。
+**同一份代码、两个宿主、一绿一红**：dev-luker 不发生（它的 `import_prompt.never = true` 已静音），
+dev-st 发生 ⇒ 只有 dev-st 的矩阵假红。
+
+**三条实测踩点**（三条合起来才解释「为什么第一次修法静默失效」）：
+
+1. `chatfilesys-import-prompt` 是**类名不是 id** —— 按 `getElementById` 找**恒为 null**，守卫静默空过；
+2. 它的按钮是宿主 `.menu_button` 的 **div**，不是 `<button>` —— 只查 `button` 得到**空集**；
+3. 它**不是页面加载时就有**，而是**宿主把聊天载进来之后**才弹（实测 **~18 s**，而宿主 splash 到 ~16 s）
+   ⇒ 「在 `goto()` 之后点一次」的写法必然抓不到。**这是三条里最容易被忽略的一条**。
+
+**落点与形态**（`e2e/lib/harness.cjs` 的 `installChatFilesysPromptGuard(ctx)`，在 `openInstance` 里
+**导航前**装）：`ctx.addInitScript` + 页内 `MutationObserver`（`childList/subtree/attributes(open)`），
+**任何时刻**弹出即点「**不入库**」。零等待 —— 不对每个页面白付超时。
+
+**动作选择的纪律**：只点**语义上不产生副作用**的那一个按钮（此例「不入库」=「这次照常走聊天文件」，
+不写库），且**不勾**「这个聊天不再提醒 / 全部不再提醒」——那会**留下持久设置**，等于偷偷改实例状态。
+复核方式：读宿主 `settings.json` 的 `extension_settings.chatfilesys.import_prompt`，
+应仍为 `{never:false, mutedKeys:[]}`（本次已核）。
+
+**判别力**（不许只报「加完之后绿了」）：**无守卫** ⇒ `matrix@dev-st` `EXIT=1`、「未抛异常」失败；
+**有守卫** ⇒ `EXIT=0`、91/91。
+
+**与 §11.6 / §11.7 的关系**：三者都表现为「点击超时 / 断言莫名其妙红」，但**根因不同**，
+判据也不同 —— §11.6 是**负载**（同段在另一实例绿、单跑即绿）；§11.7 是**插件没挂载**
+（`#env-badge` 等都缺）；**本条是别人的弹窗**（错误文案里直接点名 `intercepts pointer events`）。
+**先看错误文案再归因**，不要一律推给负载。
+
+**将来若有 spec 要断言这条弹窗**：在守卫里加开关，**不要**默认把它关掉；现行 spec 无一断言它
+（已 `grep -rn chatfilesys e2e/specs e2e/standalone/specs` 确认为空）。
+

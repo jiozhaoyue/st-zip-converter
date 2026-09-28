@@ -55,6 +55,59 @@ async function reportBlockingPopups(page, instanceId) {
 }
 
 /**
+ * **处置**一个**已知的第三方**模态弹窗：ChatFilesys 的「入库提醒」（`.chatfilesys-import-prompt`，**类名**）。
+ *
+ * WHY（2026-09-29 实测）：dev-st 上打开任何**尚未入库**的聊天时，ChatFilesys 会弹这条
+ * `<dialog open class="popup popup--animation-fast">`（内含 `.chatfilesys-import-prompt`，
+ * 按钮「纯库 / 双写 / 不入库 / 确定 / 取消」）并**拦截全页指针事件** ⇒ 矩阵在
+ * 第一次点 `#btn-convert` 时超时（`<dialog …> intercepts pointer events`）而**整段假红**。
+ * dev-luker 不发生，因为它的 `import_prompt.never = true`（已静音）——
+ * **同一份代码、两个宿主、一绿一红**，这正是「红灯来自别人」的教科书形态。
+ *
+ * 与宿主的 splash 弹窗（见 `goto()`）**同类**：都不是被测对象，却都会拦指针事件。
+ *
+ * 为什么装 **init script + MutationObserver** 而不是「goto 之后点一下」：
+ * 2026-09-29 实测**按需点击抓不到** —— 该弹窗是**宿主把聊天载进来之后**才出现的，
+ * 比 `goto()` 返回晚（第一次实现因此在 goto 里 `count() === 0` 直接空过，矩阵照样假红）。
+ * 观察者挂在页面里，**任何时候弹出都能收拾**，且零等待（不对每个页面白付超时）。
+ *
+ * 处置动作取「**不入库**」——语义是「这次就照常走聊天文件」（**不写库、不改任何数据**），
+ * 是三个选项里唯一**不产生副作用**的；**不勾**「这个聊天不再提醒 / 全部不再提醒」
+ * （那会**留下持久设置**，等于偷偷改实例状态）。
+ *
+ * 边界：仅当 `.chatfilesys-import-prompt` 存在时才动它；未装 ChatFilesys / 已静音 / 已在库时
+ * 是**零操作**。将来若有 spec 要断言这条弹窗，需在此加开关（现行 spec 无一断言它，已 grep 确认）。
+ *
+ * @param {object} ctx Playwright 持久化上下文
+ */
+async function installChatFilesysPromptGuard(ctx) {
+  await ctx.addInitScript(() => {
+    window.__szcDismissedCfPrompt = 0;
+    const dismiss = () => {
+      // ⚠️ 实测两点（2026-09-29，两次都踩过）：
+      //  ① `chatfilesys-import-prompt` 是**类名不是 id**（按 id 找恒为空 → 守卫静默空过）；
+      //  ② 它的按钮是宿主的 `.menu_button` **div**，不是 `<button>`（只查 button 得到空集）。
+      const box = document.querySelector('.chatfilesys-import-prompt');
+      if (!box) return;
+      const root = box.closest('dialog') || box;
+      const btn = Array.from(root.querySelectorAll('button, .menu_button'))
+        .find((b) => (b.textContent || '').trim() === '不入库');
+      if (!btn) return;                       // 找不到就**不猜按钮**，留给 reportBlockingPopups 告警
+      btn.click();
+      window.__szcDismissedCfPrompt += 1;
+    };
+    const start = () => {
+      dismiss();                              // 页面加载时就已存在的情况
+      new MutationObserver(dismiss).observe(document.documentElement, {
+        childList: true, subtree: true, attributes: true, attributeFilter: ['open'],
+      });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+  });
+}
+
+/**
  * 打开一个实例并挂上采集器。
  * @param {import('./instances.cjs').Instance} inst
  * @returns {Promise<{page: import('playwright').Page, ctx: object, rec: object, close: Function, goto: Function}>}
@@ -71,6 +124,9 @@ async function openInstance(inst) {
     viewport: { width: 1600, height: 950 },
   });
   ctx.setDefaultTimeout(30_000);
+  // 页内守卫：自动处置**已知的第三方**拦路弹窗（ChatFilesys 入库提醒）。
+  // 必须在导航前装（init script 对之后每次导航都生效）；见 installChatFilesysPromptGuard
+  await installChatFilesysPromptGuard(ctx);
 
   const page = ctx.pages()[0] || await ctx.newPage();
   const rec = {
@@ -143,6 +199,12 @@ async function openInstance(inst) {
       } catch {
         process.stdout.write(`  · ⚠ ${inst.id}: 宿主 splash（#loader / 「正在初始化…」）90 s 内未关闭`
           + ' —— 后续点击可能被它拦截（规范 §11.7 宿主冷启动窗口）\n');
+      }
+      // splash 之后看一眼页内守卫收拾了几个拦路弹窗（详见 installChatFilesysPromptGuard）
+      const dimmed = await page.evaluate(() => window.__szcDismissedCfPrompt || 0).catch(() => 0);
+      if (dimmed) {
+        process.stdout.write(`  · ℹ ${inst.id}: 已自动关闭 ChatFilesys「入库提醒」× ${dimmed}`
+          + '（点「不入库」；不写库、不勾「不再提醒」，实例状态零改动）\n');
       }
       await reportBlockingPopups(page, inst.id);
       return page;
