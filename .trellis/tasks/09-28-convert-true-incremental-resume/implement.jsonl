@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "长任务（宿主拉取/转换/写回）由 TaskManager 管理的既有条文——本任务要让「转换」这半句在断点续传上真正成立"}
+{"file": ".trellis/spec/guides/standalone-web-and-cloud-e2e.md", "reason": "§4.6 是「暂停→续传产物缺条目」缺陷的取证与 KNOWN-DEFECT 锁形原文；本任务要翻转它"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "「渲染路径必须有守护」「判别力证明」等本仓测试范式；每个新判据都要按此写"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "全局命名空间只许显式登记的只读接缝——本任务若加调试出口须遵守同一登记义务"}
+{"file": ".trellis/spec/guides/index.md", "reason": "规范索引；收口时若新增 spec 页面需在此登记"}

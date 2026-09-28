@@ -22,13 +22,13 @@
 | [Host Capabilities](./host-capabilities.md) | 宿主能力获取决策树、原生弹窗适配器契约（**含"宿主无 alert，信息提示用 `Popup.show.text`"**）、降级反例构造法、现存能力面表、**UI 控件合宪性（死控件取证）** | 就绪（2026-09-26 增补信息提示） |
 | [DOM Write Scope](./dom-write-scope.md) | **宿主 DOM 写入作用域**：锚点白名单（穷举）、`check:dom-scope` 守卫、运行期归因仪器与实测读数、仪器自身的坑、跨宿主安装落点 | 就绪（2026-09-26 新建） |
 | [Hook Guidelines](./hook-guidelines.md) | 宿主生命周期接入、备份/恢复端点、CSRF、全局命名空间（**仅 1 个已登记的只读探针**） | 就绪（2026-09-27 刷新） |
-| [Resume Checkpoint Invariant](./resume-checkpoint-invariant.md) | **断点续传的「已完成」判据**：不变量（清单里的条目必须已写进产物）· 🔴 当前违反的三处机理与实测读数 · **既有两处断言为何各锁一半**（锁机理 vs 锁不变量）· 两条修法与要同步改的断言 | 就绪（2026-09-28 新建；**缺陷未修**） |
+| [Resume Checkpoint Invariant](./resume-checkpoint-invariant.md) | **断点续传的「已完成」判据**：不变量（清单里的条目必须已写进产物）· **曾经的违反与其实测读数** · **既有两处断言为何各锁一半**（锁机理 vs 锁不变量）+ 通用判别法 · 修法 (a) 的四段实现与三处「计划被证据否决」 | ✅ 就绪（2026-09-28 **已修**；实现细节见 `state-management.md` §8） |
 | [Chat Store Seam](./chat-store-seam.md) | **纯库模式（聊天收进数据库、磁盘无 jsonl）的跨插件接缝**：`ChatFilesysApi` v1 契约、消费侧降级阶梯、绑定判据与易错点、增强包为何在源包层做、未做到项 | 就绪（2026-09-27 新建；**供给侧尚未实现**） |
 | [State Management](./state-management.md) | 内存 Blob 生命周期、TaskManager 断点续传、rAF 合帧 | 就绪 |
 | [Quality Guidelines](./quality-guidelines.md) | 验证矩阵、守卫命令、转义层契约、10 条禁止模式、纯逻辑可单测约定 | 就绪（2026-09-26 刷新） |
 | [Type Safety](./type-safety.md) | JSDoc 契约、运行时目标守卫、manifest 校验 | 就绪 |
 
-> 现行质量门槛：`npm test` 全绿（当前 **46 个测试文件 / 429 passed / 2 skipped**，零回归），
+> 现行质量门槛：`npm test` 全绿（当前 **64 个测试文件 / 610 passed / 2 skipped**，零回归），
 > 外加**五条**静态守卫 `npm run check:css-scope`、`npm run check:dom-injection`、
 > `npm run check:template-source`、`npm run check:control-consumer` 与 `npm run check:dom-scope`
 > （详见 quality-guidelines.md 与 dom-write-scope.md）。

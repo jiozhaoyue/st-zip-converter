@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-28-convert-true-incremental-resume/research/appendzip-probe.json", "reason": "appendZip 可行性实测读数：字节级保持、必须传 BlobReader、重名/坏包负例——核验实现是否符合该契约"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "核对「半成品保留待续传」与「共享 Worker + AbortSignal 陷阱」两条是否被本次改动守住"}
+{"file": ".trellis/spec/guides/standalone-web-and-cloud-e2e.md", "reason": "核对 §4.6 的 KNOWN-DEFECT 是否已按修法翻转，READ 与断言是否一致"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "逐条核对新增判据是否都带了判别力证明"}

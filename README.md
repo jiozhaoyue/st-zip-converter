@@ -203,7 +203,7 @@ npm start
 本项目的质量门槛是**可执行的**，不是"看代码觉得没问题"：
 
 ```bash
-npm test                 # 单测：60 个文件 / 581 项（纯逻辑层 100% 可测：无 DOM 依赖）
+npm test                 # 单测：64 个文件 / 610 项（纯逻辑层 100% 可测：无 DOM 依赖）
 npm run e2e:web          # 独立 Web / 云部署形态：337 项断言 / 17 个 spec（**不需要实例**）
 npm run e2e              # 实例侧：冒烟 + 功能矩阵（需要 Dev 实例在跑）
 npm run check:css-scope check:dom-injection check:template-source \
@@ -224,9 +224,11 @@ npm run check:css-scope check:dom-injection check:template-source \
 - **灯光可归因**：实例侧 E2E 把页面报错分成"整页背景读数"与"只属于本插件"两栏，**只按后者判定**
   （酒馆同页跑着几十个第三方扩展）。
 
-> 已知问题**如实登记**，不藏：当前有一处**暂停 → 续传后产物缺条目**的缺陷未修
-> （复现：`npm run e2e:web -- --only pause`，该用例带 `KNOWN-DEFECT` 标记），
-> 机理与两条修法见上面那份规范页。
+> 曾经有一处**暂停 → 续传后产物缺条目**的静默数据损失，**2026-09-28 已修**（改真增量续传：
+> 暂停收尾成合法 zip 落 OPFS，续传 `appendZip` 原样搬运再接着写）。
+> 判据是**两条同时成立**：**跳过 N > 0 且 源 == 产物** —— 缺任一条都不算真增量。
+> 复现与读数：`npm run e2e:web -- --only pause-resume`；
+> 机理、为什么两层测试曾同时漏掉它，见上面那份规范页。
 
 ---
 

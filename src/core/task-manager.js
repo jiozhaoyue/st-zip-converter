@@ -7,6 +7,17 @@
  * - 中止 = abort + 清理半成品，state=aborted
  * - 断点清单持久化由注入的 adapter 完成（浏览器 OPFS / 测试内存 Map），core 无 DOM/存储依赖
  *
+ * ⚠️ 关于「半成品保留待续传」这句（2026-09-28 逐字复核）：
+ * - **宿主拉取**：成立 —— 暂停时 close 可写流而不 abort，OPFS 半成品留在磁盘上；
+ * - **转换**：**2026-09-28 起成立** —— 此前半成品随 `worker.terminate()` 一起丢，
+ *   该句对转换路径曾是**假事实**（产物缺条目的根因）。现在暂停走**协作式收尾**
+ *   （worker 把已写部分 close 成合法 zip → 主线程落 OPFS），并由**专用通道**
+ *   `setPauseCheckpoint()` 写下真断点。
+ * - 为什么真断点走专用通道、而不是放宽 `onCheckpoint` 的 RUNNING 门：那道门是**防尾事件**的
+ *   （暂停后到达的在途进度回调会把真断点覆盖成陈旧台账），而真断点只能在暂停收尾**之后**
+ *   才存在 ⇒ 给暂停态一条显式、一次性的写入通道，两条保护同时成立。
+ *   详见 `.trellis/spec/frontend/state-management.md` §8。
+ *
  * state: running | paused | aborted | done | failed
  */
 
@@ -73,7 +84,7 @@ export class TaskManager {
    * @param {object} [options]
    * @param {boolean} [options.resumable=false] 是否支持断点续传
    * @param {number} [options.totalBytes=0] 预估总量（Content-Length 或 totalEntries）
-   * @returns {{ signal: AbortSignal, onCheckpoint: function(object): Promise<void> }}
+   * @returns {{ signal: AbortSignal, onCheckpoint: function(object): Promise<void>, setPauseCheckpoint: function(object): Promise<boolean> }}
    */
   start(id, label, { resumable = false, totalBytes = 0 } = {}) {
     if (this.tasks.has(id) && this.tasks.get(id).state === TASK_STATES.RUNNING) {
@@ -119,6 +130,33 @@ export class TaskManager {
             task._lastFlushAt = now;
             logger.warn('[task-manager] 断点节流落盘失败（不影响任务推进）:', err);
           }
+        }
+      },
+
+      /**
+       * 写入**暂停态专用**断点（真增量续传，2026-09-28）。
+       *
+       * 为什么不复用 `onCheckpoint`：它的 RUNNING 门是**防尾事件**的 —— 暂停之后仍可能有在途的
+       * 进度回调到达，若让它们写盘，就会把真正的断点覆盖成陈旧台账（既有用例
+       * 「onCheckpoint 在非 running 状态静默丢弃」锁的正是这条保护，**不得**为了本功能拆掉）。
+       * 而「真断点」只能**在暂停收尾之后**才存在（半成品 zip 是暂停那一刻才生成的）⇒
+       * 给它一条**显式**通道：只在 PAUSED 生效、一次性调用、不被节流窗口吞掉。
+       *
+       * 失败不改变暂停语义（后端只是可选增强层，`L1-MR-1`）：内存里的 checkpoint 仍可用于本次会话。
+       * @param {object} manifest 如 `{ partialOpfsName, target, totalEntries }`
+       * @returns {Promise<boolean>} 是否已写入
+       */
+      setPauseCheckpoint: async (manifest) => {
+        const task = this.tasks.get(id);
+        if (!task || task.state !== TASK_STATES.PAUSED) return false;
+        task.checkpoint = manifest;
+        try {
+          await this.adapter.save(id, manifest);
+          task._dirtyEntries = 0;
+          return true;
+        } catch (err) {
+          logger.warn('[task-manager] 暂停断点持久化失败（内存断点保留）:', err);
+          return false;
         }
       },
     };

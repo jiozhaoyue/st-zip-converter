@@ -2,6 +2,7 @@ import { NullZipWriter } from './null-writer.js';
 import { Report } from './report.js';
 import { detectFromReader, LAYOUTS } from './detect.js';
 import { zipIo } from './zip-io.js';
+import { logger } from './logger.js';
 import { categoryOfHubPath, isBackupChatOrSnapshot } from './inspect.js';
 import { isTavernBuiltinAsset } from './builtin-assets.js';
 import {
@@ -233,6 +234,56 @@ const L_SELECTION = Object.freeze({
 });
 
 /**
+ * 同源校验：半成品能否安全地当作**本次**转换的前缀。
+ *
+ * ⚠️ **必须在 `writer.appendFrom()` 之前调用**。理由（互锁）：`appendFrom` 会把半成品里的
+ * 条目名登记进 writer 的 `written` 名单，此后对同名条目的 `add` / `addLazy` 会**静默早返**
+ * （见 `zip-io.js` 的 `add` 注释）⇒ 若源已变而仍搬运，产物会**静默保留陈旧条目**且不报错。
+ *
+ * 判据（全部成立才可搬运；只读**中央目录**，不解压、不读数据流）：
+ *   ① 半成品的每条名字都能由某个源条目路由得到（**无孤儿**）—— 这条也顺带覆盖了「目标布局不同」：
+ *      布局变了名字空间就变，半成品的名字会整批成为孤儿；
+ *   ② 对应源条目的 `crc32` 与半成品记录的**全等**（源未变）。
+ *
+ * @returns {Promise<{ok: boolean, reason?: string, mapped?: Map<string, number>}>}
+ */
+async function verifyPartialSameSource({ io, sourcePath, partialEntries, target, layout }) {
+  if (!Array.isArray(partialEntries) || partialEntries.length === 0) {
+    return { ok: false, reason: '半成品清单为空' };
+  }
+  const want = new Map();
+  for (const e of partialEntries) {
+    if (e && typeof e.name === 'string') want.set(e.name, e.crc32 ?? null);
+  }
+  if (want.size === 0) return { ok: false, reason: '半成品清单不含可用条目名' };
+
+  const scanner = await io.openReader(sourcePath);
+  try {
+    const seen = new Map();
+    for await (const entry of scanner.entries()) {
+      if (entry.isDirectory || entry.crc32 == null) continue;
+      const outPath = targetEntryPath(routeSource(entry.fileName, layout).hubPath, target);
+      if (want.has(outPath)) seen.set(outPath, entry.crc32);
+      entry.skip();
+    }
+    if (seen.size !== want.size) {
+      return {
+        ok: false,
+        reason: `半成品有 ${want.size - seen.size} 条无法对应到当前源条目（源包已更换或目标布局不同）`,
+      };
+    }
+    for (const [name, crc] of seen) {
+      if (want.get(name) !== crc) {
+        return { ok: false, reason: `条目 ${name} 的内容与源不一致（源包已变更）` };
+      }
+    }
+    return { ok: true, mapped: seen };
+  } finally {
+    await scanner.close();
+  }
+}
+
+/**
  * 把 zip 源包转换为目标平台包。
  * @param {string} sourcePath 源 zip 路径
  * @param {string} targetPath 产物 zip 路径
@@ -241,9 +292,19 @@ const L_SELECTION = Object.freeze({
  * @param {boolean} [options.keepAll] 保留派生缓存与 TT 私有目录
  * @param {boolean} [options.dryRun] 只产出报告不写文件(数据条目跳过读取)
  * @param {AbortSignal} [options.signal] 中止信号（每条目边界检查；暂停/中止由 TaskManager 触发）
- * @param {Map<string,number>|Object<string,number>} [options.resumeCrcMap] 断点续传清单：
- *   源条目名 → 已写入目标时的 crc32；命中且值相等的条目跳过（计入 `report.totals.resumed`，
- *   命中名单在 `report.resumed`。**注**：旧注释写作 `resumedCount`，该字段从不存在 —— 2026-09-27 订正）
+ * @param {Map<string,number>|Object<string,number>} [options.resumeCrcMap] 断点续传**台账**：
+ *   源条目名 → 已写入目标时的 crc32。⚠️ **它不再是跳过的充分条件**（见下方 `appendFrom`）：
+ *   台账只作冗余校验（给了且 crc 不等 ⇒ 不跳过）。命中且目标包确有该条目的才跳过
+ *   （计入 `report.totals.resumed`，命中名单在 `report.resumed`。**注**：旧注释写作 `resumedCount`，
+ *   该字段从不存在 —— 2026-09-27 订正）
+ * @param {Blob|File|string} [options.appendFrom] **同源半成品**（真增量续传）。
+ *   提供时：先做同源校验（半成品 ⊆ 源、同名 crc 全等、目标布局一致），成立则把它的条目**原样搬运**
+ *   进目标包（零重压缩），随后按「目标包已有即跳过」续写。校验不成立 ⇒ `onDiscardPartial()` +
+ *   作废半成品 + **完整重做**（绝不产出残缺包）。
+ * @param {function(): void} [options.onDiscardPartial] 半成品被判不同源 / 不可用时的回调
+ * @param {boolean} [options.finalizeOnAbort] 中止时把 writer `close()`（产出**合法半成品**供跨会话续传）
+ *   而非 `abort()`。**仅对 `AbortError` 生效**——真失败仍走 `abort()`（不得把失败伪装成暂停）。
+ *   该模式下**跳过 `emitSynthesized`**：合成条目由续传那一轮在末尾统一产出。
  * @param {function(string, number): void} [options.onEntryDone] 每完成一个源条目回调
  *   (源条目名, crc32)——供 TaskManager 更新断点清单
  * @returns {Promise<Report>}
@@ -266,6 +327,9 @@ export async function convert(sourcePath, targetPath, {
   pruneBuiltinAssets = false,
   signal,
   resumeCrcMap,
+  appendFrom = null,
+  onDiscardPartial,
+  finalizeOnAbort = false,
   onEntryDone,
 } = {}) {
   if (!target || !Object.values(TARGETS).includes(target)) {
@@ -304,9 +368,65 @@ export async function convert(sourcePath, targetPath, {
   }
 
   const reader = await io.openReader(sourcePath);
-  const writer = dryRun ? new NullZipWriter() : await io.createWriter(targetPath, { level: compressionLevel });
+  // writer 可被**重建**：半成品搬运失败时可能已写入部分字节，必须换一个干净的（见下方 catch）。
+  let writer = dryRun ? new NullZipWriter() : await io.createWriter(targetPath, { level: compressionLevel });
   const totalEntries = reader.totalEntries ?? 0;
   let processedEntries = 0;
+
+  // 降级可观测（`L0-11` / `L1-MR-1`）：有台账、没半成品 ⇒ 本次完整重做。
+  // 必须留一行日志 —— 否则用户点了「继续」却整包重跑且毫无解释，就成了「静默降级」（同样是缺陷）。
+  if (resumedCrc && resumedCrc.size > 0 && !appendFrom) {
+    logger.warn('[convert] 收到断点台账但未提供同源半成品：本次完整重做、不跳过任何条目（避免产物缺条目）');
+  }
+
+  // 真增量续传：同源校验 → 原样搬运半成品 → 主循环按「半成品里已有即跳过」续写。
+  //
+  // ⚠️ 跳过门只认 **appendedNames**（来自半成品），**不得**改用「writer 是否已含该名字」：
+  //    后者把「本轮已写过」也算进来，而**两个不同的源条目可能映射到同一个产物路径**
+  //    （PT 目标下用户级 `extensions/<x>/**` 与第三方 `extensions/third-party/<x>/**`
+  //    就是同一条产物路径）⇒ 2026-09-28 实测由此误跳过了 2 个用户级扩展条目
+  //    （该场景本应落到后文「与第三方同名时保留第三方副本」的分支，却被本门提前 continue 掉）。
+  const appendedNames = new Set();
+  if (appendFrom && !dryRun) {
+    const partialEntries = [];
+    let readable = true;
+    try {
+      // 先只读半成品的中央目录拿清单。坏包/截断包在这一步就抛错，**此时尚未创建任何产物字节**。
+      const probe = await io.openReader(appendFrom);
+      try {
+        for await (const entry of probe.entries()) {
+          partialEntries.push({ name: entry.fileName, crc32: entry.crc32 ?? null });
+        }
+      } finally {
+        await probe.close();
+      }
+    } catch (err) {
+      readable = false;
+      logger.warn(`[convert] 半成品不可读（${err?.message ?? err}）⇒ 作废并完整重做`);
+      onDiscardPartial?.();
+    }
+
+    if (readable) {
+      const verdict = await verifyPartialSameSource({
+        io, sourcePath, partialEntries, target, layout: detection.layout,
+      });
+      if (!verdict.ok) {
+        logger.warn(`[convert] 半成品与当前源包不同源（${verdict.reason}）⇒ 作废并完整重做`);
+        onDiscardPartial?.();
+      } else {
+        try {
+          for (const e of await writer.appendFrom(appendFrom)) appendedNames.add(e.name);
+        } catch (err) {
+          // 走到这里说明中央目录能读但搬运过程失败（例如数据段被截断）：
+          // 目标 writer 可能已写入部分字节 ⇒ **换一个干净 writer**，否则残缺字节会混进产物。
+          logger.warn(`[convert] 半成品搬运失败（${err?.message ?? err}）⇒ 作废并完整重做`);
+          onDiscardPartial?.();
+          try { await writer.abort(); } catch { /* 丢弃旧 writer 失败无碍：后面不再引用它 */ }
+          writer = await io.createWriter(targetPath, { level: compressionLevel });
+        }
+      }
+    }
+  }
 
   const context = {
     manifest: null,
@@ -360,13 +480,24 @@ export async function convert(sourcePath, targetPath, {
         continue;
       }
 
-      // 断点续传：crc32 命中清单 → 已写入过目标，直接跳过（不重读内容）
-      if (resumedCrc && entry.crc32 != null) {
-        const doneCrc = resumedCrc.get(entry.fileName) ?? resumedCrc.get(routeSource(entry.fileName, detection.layout).hubPath);
-        if (doneCrc != null && doneCrc === entry.crc32) {
-          entry.skip();
-          report.resumed(routeSource(entry.fileName, detection.layout).hubPath);
-          continue;
+      // 断点续传：跳过的**充分条件**是「**半成品里**真的有这条」，台账（crc 清单）只作冗余校验。
+      //
+      // 为什么不能只看台账（2026-09-27/28 实测的静默数据损失）：目标包每次都是**新建空包**
+      // （见上方 createWriter），而旧实现按台账跳过 ⇒ 被跳过的条目**既不在旧产物（已丢）、
+      // 也不在新产物（被跳过）** ⇒ 用户拿到残缺包却看到「转换成功」（实测 1500 条聊天 → 1437 条）。
+      // 根子是台账记的是「已读到」而非「已写下」。现在以**半成品的字节事实**为准：
+      // 半成品里没有这条就照常写出 ⇒ 台账在而字节不在时，行为退化为「完整重做」而不是「静默残缺」。
+      if (entry.crc32 != null) {
+        const skipHub = routeSource(entry.fileName, detection.layout).hubPath;
+        const skipOut = targetEntryPath(skipHub, target);
+        if (appendedNames.has(skipOut)) {
+          const doneCrc = resumedCrc?.get(entry.fileName) ?? resumedCrc?.get(skipHub);
+          // 给了台账且 crc 不等 ⇒ 保守不跳过（宁重做，不冒险留下陈旧条目）
+          if (doneCrc == null || doneCrc === entry.crc32) {
+            entry.skip();
+            report.resumed(skipOut);
+            continue;
+          }
         }
       }
 
@@ -663,7 +794,23 @@ export async function convert(sourcePath, targetPath, {
     await writer.close();
     return report;
   } catch (error) {
-    await writer.abort();
+    // 中止（暂停）与真失败的收尾方式**必须不同**：
+    //  - 中止 + `finalizeOnAbort` ⇒ `close()` 把已写部分收成一个**合法 zip**（真增量续传的半成品）；
+    //    此处天然不会有合成条目：`checkAbort()` 在循环内抛出、直接跳到本 catch，
+    //    尾部的 `emitSynthesized` 根本没跑 —— 这正是要的（合成条目由续传那一轮末尾统一产出，
+    //    否则半成品里会留下一份「按半量数据合成」的 manifest，续传后又不重合成 ⇒ 元数据与内容不符）。
+    //  - 真失败 ⇒ 仍 `abort()`，**不得**收尾：否则「失败」会被伪装成一个「看着完整」的暂停产物。
+    const isAbort = error?.name === 'AbortError';
+    if (isAbort && finalizeOnAbort && !dryRun) {
+      try {
+        await writer.close();
+      } catch (closeErr) {
+        // 收尾失败不得改变中止语义：只是没有半成品，续传会完整重做（正确的降级）
+        logger.warn('[convert] 中止时的半成品收尾失败（续传将重做整包）:', closeErr);
+      }
+    } else {
+      await writer.abort();
+    }
     throw error;
   } finally {
     await reader.close();

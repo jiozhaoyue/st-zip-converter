@@ -64,6 +64,7 @@ import {
   setupDrawerToggles,
   hostLayoutCode,
   resolveTargetLayout,
+  opfsTmpHandle,
   opfsHandleToFile,
   opfsTmpCleanup,
   supportsOpfs,
@@ -139,6 +140,102 @@ export function taskKindOf(id) {
 // 否则「什么时候落盘」在两处会有两种答案。
 const CHECKPOINT_EVERY_ENTRIES = 64;
 const CHECKPOINT_EVERY_MS = 2000;
+
+/* ────────────────────── 半成品持久化（真增量续传） ────────────────────── */
+
+/** 半成品文件名（OPFS `fetch-tmp/` 下）：按 taskId 归属，暂停/中止时按归属清理。
+ *  ⚠️ **不再加 `convert-` 前缀**：taskId 本身已是 `convert-<ts>`（见 `TASK_PREFIX`），
+ *  再加一层会拼出 `convert-convert-<ts>.partial.zip`。 */
+export function partialNameFor(taskId) {
+  return `${taskId}.partial.zip`;
+}
+
+/**
+ * OPFS 配额预检：剩余空间放不下半成品（留 10% 余量）时返回 false。
+ *
+ * 拿不到 `estimate` 时**放行**：量不出来不等于没空间，因为量不出来就退化成「永不持久化」
+ * 是**静默的能力退化**，比偶尔写到一半失败更糟。
+ * @param {number} bytes
+ * @param {any} [nav]
+ * @returns {Promise<boolean>}
+ */
+export async function hasRoomForPartial(bytes, nav = (typeof navigator !== 'undefined' ? navigator : null)) {
+  try {
+    if (!nav?.storage?.estimate) return true;
+    const { quota = 0, usage = 0 } = await nav.storage.estimate();
+    if (!quota) return true;
+    return (quota - usage) >= bytes * 1.1;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 把中止时的**半成品**持久化到 OPFS，并写下「暂停态专用断点」（`setPauseCheckpoint`）。
+ *
+ * 这是真增量续传的**持久化段**：没有它，续传只能完整重做 —— 正确但慢。
+ * 因此**所有失败路径一律降级为「没有半成品」**并留一行**可观测**日志（`L0-11` / `L1-MR-1`）：
+ * 半成品只是加速手段，不是主路径依赖，绝不抛错、绝不阻塞暂停语义。
+ *
+ * ⚠️ 写入的**顺序**不可颠倒：先落 zip、再写断点 —— 反过来的话，断点会指向一个不存在的半成品，
+ * 续传时读不到就只能重做（功能不坏，但白写一次断点）。
+ *
+ * @param {object} p
+ * @param {Blob|null} p.partialBlob 中止时收尾出来的**合法 zip**
+ * @param {Array<{name:string,crc32:number|null}>|null} p.manifest 它的条目清单（断点的**真源**）
+ * @param {string} p.taskId
+ * @param {string} p.target 目标布局（诊断用；真正的续传判据是名字 + 内容能对上）
+ * @param {number} p.totalBytes
+ * @param {function} p.setPauseCheckpoint `TaskManager.start()` 返回的暂停态写入句柄
+ * @param {object} [p.deps] 仅测试注入（默认用真实 OPFS 助手与真实配额探测）
+ * @returns {Promise<{ok: boolean, name?: string, reason?: string}>}
+ */
+export async function persistPartial({
+  partialBlob, manifest, partialError = null, taskId, target, totalBytes, setPauseCheckpoint, deps = {},
+}) {
+  const {
+    opfsTmpHandle: getHandle = opfsTmpHandle,
+    supportsOpfs: hasOpfs = supportsOpfs,
+    quotaCheck = hasRoomForPartial,
+  } = deps;
+
+  if (!partialBlob) {
+    // ⚠️ 这一支**必须留痕**：它意味着「暂停收尾没拿到半成品」⇒ 续传会整包重做。
+    // 不记的话，用户与排查者都只能看到「跳过 0 项」而不知为何（静默降级同样是缺陷）。
+    // `partialError` 是收尾侧（worker）回报的**具体原因**，带上它才可诊断。
+    logger.warn(`[转换] 暂停收尾未产出半成品 ⇒ 续传将重做整包（产物仍会完整）`
+      + `${partialError ? `，原因: ${partialError}` : ''}`);
+    return { ok: false, reason: 'no-partial' };
+  }
+  if (!hasOpfs()) {
+    logger.warn('[转换] 环境不支持 OPFS，无法保留半成品 ⇒ 续传将重做整包（产物仍会完整）');
+    return { ok: false, reason: 'no-opfs' };
+  }
+  if (!(await quotaCheck(partialBlob.size))) {
+    logger.warn('[转换] 存储配额不足，跳过半成品持久化 ⇒ 续传将重做整包（产物仍会完整）');
+    return { ok: false, reason: 'quota' };
+  }
+
+  const name = partialNameFor(taskId);
+  try {
+    const handle = await getHandle(name, true);
+    if (!handle) {
+      logger.warn('[转换] 半成品文件句柄获取失败 ⇒ 续传将重做整包（产物仍会完整）');
+      return { ok: false, reason: 'handle' };
+    }
+    const writable = await handle.createWritable();
+    await writable.write(partialBlob);
+    await writable.close();
+  } catch (err) {
+    logger.warn(`[转换] 半成品落盘失败 ⇒ 续传将重做整包（产物仍会完整）: ${err?.message ?? err}`);
+    return { ok: false, reason: 'write-failed' };
+  }
+
+  const partialEntries = Array.isArray(manifest) ? manifest : [];
+  await setPauseCheckpoint({ partialOpfsName: name, target, partialEntries, totalEntries: totalBytes });
+  logger.info(`[转换] 已保留半成品 ${name}（${partialEntries.length} 条）—— 续传将原样搬运它，不重压缩、不丢条目`);
+  return { ok: true, name };
+}
 
 /**
  * 造一个断点清单节流器（转换路径专用）。
@@ -2150,19 +2247,60 @@ async function main(appRoot) {
     const totalBytes = currentFile.size || 0;
     // 与宿主拉取路径同形：start 在 try **之外**（start 自身可能因"同 id 已在运行"抛错，
     // 那时还没进入 try，不会污染 catch 的失败语义）
-    const { signal, onCheckpoint } = taskManager.start(taskId, '转换', { resumable: true, totalBytes });
+    const { signal, onCheckpoint, setPauseCheckpoint } = taskManager.start(taskId, '转换', { resumable: true, totalBytes });
     taskControls.showRunning(taskId, { totalBytes });
+
+    // ── 真增量续传：先取**同源半成品**。有半成品才有真正可跳过的字节；
+    // 没有 ⇒ 本次完整重做（这是**正确的降级**，绝不再是「跳过却没字节」的静默残缺）。
+    const partialOpfsName = resumeCheckpoint?.partialOpfsName || null;
+    let appendFrom = null;
+    if (partialOpfsName) {
+      try {
+        const handle = await opfsTmpHandle(partialOpfsName, false);
+        appendFrom = handle ? await opfsHandleToFile(handle) : null;
+      } catch (err) {
+        logger.warn(`[转换] 半成品读取失败（将完整重做整包）: ${err?.message ?? err}`);
+        appendFrom = null;
+      }
+      if (appendFrom) {
+        // 半成品归属本任务：中止/丢弃时由 taskControls 的钩子清理
+        opfsCleanupId = taskId;
+        opfsCleanupName = partialOpfsName;
+        if (resumeCheckpoint?.target && resumeCheckpoint.target !== target) {
+          // 布局不同**不必然**不可续传（判据是名字 + 内容能对上，见 transform 的同源校验）
+          logger.info(`[转换] 断点记录的目标布局为 ${resumeCheckpoint.target}、当前为 ${target} —— 由同源校验决定能否续写`);
+        }
+      } else {
+        logger.warn('[转换] 断点指向的半成品已不存在 ⇒ 本次完整重做整包（产物完整，只是不再增量）');
+      }
+    }
+
     // 断点清单**由调用方自行累积**：Worker abort 时返回值里的 doneEntries 会随 Promise 一起丢
-    // （`worker-client.js:136-143` 直接 reject），故不能依赖它。
-    // 续传时用断点里的清单**播种**，让已完成条目在 `transform` 层命中即跳过。
+    // （`worker-client.js` 直接 reject），故不能依赖它。
+    // 续传时优先用**半成品清单**播种（它是产物字节的真源，与「读到哪」的旧台账不同），
+    // 旧格式断点（只有 doneEntries）仍兼容读取 —— 但那种情况下没有半成品，一条都不会被跳过。
     const doneEntries = new Map(
-      resumeCheckpoint?.doneEntries ? Object.entries(resumeCheckpoint.doneEntries) : [],
+      Array.isArray(resumeCheckpoint?.partialEntries)
+        ? resumeCheckpoint.partialEntries
+          .filter((e) => e && typeof e.name === 'string')
+          .map((e) => [e.name, e.crc32])
+        : (resumeCheckpoint?.doneEntries ? Object.entries(resumeCheckpoint.doneEntries) : []),
     );
     const maybeCheckpoint = createCheckpointThrottle(onCheckpoint, doneEntries);
     const trackProgress = attachConversionProgress({ doneEntries, maybeCheckpoint });
     if (resumeCheckpoint) {
-      logger.info(`续传任务 ${taskId}: 沿用断点 ${doneEntries.size} 条已完成条目`);
+      logger.info(`续传任务 ${taskId}: 半成品 ${appendFrom ? '可用' : '不可用'} · 已知条目 ${doneEntries.size} 条`
+        + `${appendFrom ? '（命中即跳过，产物完整）' : '（将完整重做）'}`);
     }
+
+    /** 产物已交付 ⇒ 半成品使命完成（留着只会占配额）。暂停/中止时**不**调用 —— 那正是要保留它的时刻。 */
+    const releasePartial = () => {
+      if (opfsCleanupId === taskId) {
+        opfsTmpCleanup(opfsCleanupName);
+        opfsCleanupId = null;
+        opfsCleanupName = null;
+      }
+    };
 
     try {
       workbenchBusy = true;
@@ -2184,14 +2322,20 @@ async function main(appRoot) {
           gitMode: getGitMode(),
           keepDevFiles: getKeepDevFiles(),
           pruneBuiltinAssets,
-          signal,                 // 暂停/中止的执行面（Worker 路径经 terminate，见 L1-MR-8）
-          resumeCrcMap: doneEntries, // 命中即跳过（transform 已支持，计 resumedCount）
+          signal, // 暂停/中止的执行面（Worker 路径转发成 PAUSE 消息，见 worker-client 的协作式收尾）
+          // 台账只作**冗余校验**：跳过的充分条件是「半成品里真有这条」（transform 的跳过分支）
+          resumeCrcMap: doneEntries,
+          appendFrom,          // 同源半成品（null ⇒ 完整重做）
+          finalizeOnAbort: true, // 中止时把已写部分收成**合法半成品**，交 onPaused 持久化
         },
         onProgress: (cur, total, name, crc32) => {
           trackProgress(cur, total, name, crc32);
           const pct = total > 0 ? 5 + Math.round((cur / total) * 90) : 50;
           view.setProgress(pct, `正在转换写入 [${cur}/${total}]: ${name}`);
         },
+        onPaused: async ({ partialBlob, manifest, partialError }) => persistPartial({
+          partialBlob, manifest, partialError, taskId, target, totalBytes, setPauseCheckpoint,
+        }),
       });
 
       lastConvertedBlob = resultBlob;
@@ -2248,6 +2392,7 @@ async function main(appRoot) {
         lastConvertedBlob = null;
         // 分卷路径同样是一个**正常完成出口** —— 漏掉这两行会让控制条永远停在 running
         await taskManager.complete(taskId);
+        releasePartial(); // 产物已交付 ⇒ 半成品使命完成
         taskControls.hide();
         return;
       }
@@ -2283,6 +2428,7 @@ async function main(appRoot) {
       logger.success(`转换成功${resumedNote(report)}: ${outputFilename} (${formatBytes(resultBlob.size)}) —— 可在待导出区下载、选位置导出、存入工作区或写回宿主`);
 
       await taskManager.complete(taskId);
+      releasePartial(); // 产物已交付 ⇒ 半成品使命完成（留着只会占配额）
       taskControls.hide();
     } catch (err) {
       const rec = taskManager.get(taskId);

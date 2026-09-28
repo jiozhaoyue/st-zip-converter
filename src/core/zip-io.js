@@ -81,18 +81,50 @@ try {
   // 忽略重复注册
 }
 
+/**
+ * 归一为 Blob（Browser 的 Blob/File 原样返回；Node 路径读文件）。
+ * 读取器与写入器（`appendFrom`）共用同一套归一，避免两份实现漂移。
+ * @param {Blob|File|string} source
+ * @returns {Promise<Blob>}
+ */
+async function toBlob(source) {
+  if (typeof source !== 'string') return source;
+  const fs = await import('node:fs/promises');
+  const buffer = await fs.readFile(source);
+  return new Blob([buffer], { type: 'application/zip' });
+}
+
+/**
+ * 读一个 zip 的条目清单（**只读中央目录**：不解压、不读数据流，GB 级包也可忽略开销）。
+ *
+ * 真增量续传有三处要它，故必须**单一实现**：搬运前登记 `written`、同源校验、中止时的半成品读数。
+ * @param {Blob|File|string} source
+ * @returns {Promise<Array<{name:string, crc32:number|null, compressedSize:number|null}>>}
+ */
+export async function readZipEntryManifest(source) {
+  const reader = await zipIo.openReader(source);
+  const entries = [];
+  try {
+    for await (const entry of reader.entries()) {
+      entries.push({
+        name: entry.fileName,
+        crc32: entry.crc32 ?? null,
+        compressedSize: entry.compressedSize ?? null,
+      });
+    }
+  } finally {
+    await reader.close();
+  }
+  return entries;
+}
+
 export const zipIo = {
   /**
    * 打开 ZipReader 读取器
    * @param {Blob|File|string} source
    */
   async openReader(source) {
-    let blobSource = source;
-    if (typeof source === 'string') {
-      const fs = await import('node:fs/promises');
-      const buffer = await fs.readFile(source);
-      blobSource = new Blob([buffer], { type: 'application/zip' });
-    }
+    const blobSource = await toBlob(source);
 
     const blobReader = blobSource instanceof zip.BlobReader ? blobSource : new zip.BlobReader(blobSource);
     const reader = new zip.ZipReader(blobReader);
@@ -112,6 +144,8 @@ export const zipIo = {
           yield {
             fileName: entry.filename,
             uncompressedSize: entry.uncompressedSize,
+            // compressedSize 是「字节级检索」的读数（真增量续传须证明搬运段零重压缩）
+            compressedSize: entry.compressedSize ?? null,
             lastModified: entry.lastModDate ?? null,
             crc32: entry.crc32 ?? null,
             compressionMethod: entry.compressionMethod,
@@ -326,6 +360,38 @@ export const zipIo = {
             releaseGate(isFirst);
           }
         })());
+      },
+
+      /**
+       * 把**同源半成品** zip 的条目原样搬运进本 writer（真增量续传的搬运段）。
+       *
+       * 步骤与顺序都不可颠倒：
+       * ① 先读源的**中央目录**取清单 —— vendor 的 `appendZip` **不回传**条目名，清单只能自己取；
+       *    只读中央目录，不解压、不读数据流。**坏包/截断包在这一步就会抛错**，此时尚未写入任何字节。
+       * ② 调 vendor `appendZip`。⚠️ **必须传 `zip.BlobReader` 实例**：实测（2026-09-28）传裸
+       *    `Blob` / `Uint8Array` 会抛
+       *    `TypeError: Cannot read properties of undefined (reading 'getReader')`。
+       *    实测同时证明搬运是**字节级保持**的（`compressedSize` / `compressionMethod` / `crc32`
+       *    逐条相等 ⇒ 零重压缩；读数见任务 `09-28-convert-true-incremental-resume` 的 `research/`）。
+       * ③ **搬运后登记进 `written`**：否则后续 `add` / `addLazy` 对同名条目会走 `written.has`
+       *    静默早返（见 `add` 内注释）⇒ 「重写」变成空操作 ⇒ 源已变时会**静默保留陈旧条目**。
+       *    ⚠️ 正因如此，**同源校验必须发生在调用本方法之前**（`transform.js` 的预备遍历）。
+       *
+       * ⚠️ **回传的清单是「来自半成品」的唯一权威来源**，调用方的跳过门必须用它、**不得**改用
+       * 「writer 是否已含该名字」：后者把「本轮已写过」也算进来，而**两个不同的源条目可能映射到
+       * 同一个产物路径**（PT 目标下用户级 `extensions/<x>/**` 与第三方 `extensions/third-party/<x>/**`
+       * 就是同一条产物路径 —— 2026-09-28 实测由此误跳过了 2 个用户级扩展条目）。
+       *
+       * 失败时本 writer 不可再用（第 ② 步可能已写入部分字节）：调用方必须**整体作废并重做**。
+       *
+       * @param {Blob|File|string} source 同源半成品
+       * @returns {Promise<Array<{name:string, crc32:number|null, compressedSize:number|null}>>}
+       */
+      async appendFrom(source) {
+        const entries = await readZipEntryManifest(source);
+        await writer.appendZip(new zip.BlobReader(await toBlob(source)));
+        for (const e of entries) written.add(e.name);
+        return entries;
       },
 
       /**

@@ -10,13 +10,21 @@
  *
  * 暂停窗口取决于**条目数**（每条目都要过 crc + 写盘 + 进度往返），**不是字节数**：
  * 6 MB 的包在数百毫秒内就转完了，点暂停会点在已隐藏的按钮上（假红或假绿）。
- * 这里用 1500 × 3 KB ≈ 4.5 MB（矩阵 spec 的同类结论）。
+ *
+ * ⚠️ **条目数须随机器变快而上调**（2026-09-28 实测教训）：本机转完 1500 条只需约 4s，
+ * 而「等进度 ≥10% 再点暂停」占掉其中约 0.5s ⇒ 一旦机器空闲下来，点击就会落在
+ * **已结束的任务**上（`page.click('#tc-pause')` 元素不可见 ⇒ 30s 超时 ⇒ 假红）。
+ * 该竞态**与本仓库改动无关**（已用「还原后同形失败」证实），纯属夹具窗口太窄。
+ * 现用 3000 条把窗口拓宽一倍有余。
  *
  * ## 判据（强度递减）
  *
  * 1. **续传真的跳过了条目**：日志含「（沿用断点跳过 N 项）」且 N > 0
  *    —— 这是「断点续传」而不是「从头重跑」的唯一直接证据；
- * 2. 产物**没有因为跳过而少条目**（跳过的是已完成的，不是没做的）；
+ * 2. 产物**没有因为跳过而少条目**（跳过的是半成品里**真有的字节**，不是没做的）
+ *    —— 2026-09-28 起**真增量续传**：暂停时把已写部分收尾成合法 zip 落 OPFS，
+ *       续传用 `appendZip` 原样搬运再接着写；此前这一条**没人验**，
+ *       缺陷（1500 条 → 1437 条）藏了整整一轮（详见 R12 前的注释）；
  * 3. 控制条状态机走完 running → paused → （续传）→ 隐藏。
  */
 
@@ -27,12 +35,17 @@ const common = require('../lib/common.cjs');
 
 let FIXTURE_DIR = '';
 
-/** 暂停窗口夹具：1500 条目 × 3 KB（条目数主导耗时，见文件头注） */
+const FIXTURE_ENTRIES = 3000;
+const LAST_CHAT = `chats/Pause/many-${String(FIXTURE_ENTRIES - 1).padStart(4, '0')}.jsonl`;
+
+/** 暂停窗口夹具：3000 条目 × 3 KB（条目数主导耗时，见文件头注） */
 async function ensurePauseFixture() {
-  const out = path.join(FIXTURE_DIR, 'pause-many-entries.zip');
+  // ⚠️ 文件名里**必须带条目数**：夹具是按文件名缓存的（`existsSync` 即复用），
+  // 改了条目数却沿用旧名会**静默复用到旧夹具**（窗口宽度悄悄回退到旧值，看起来却"没改过"）。
+  const out = path.join(FIXTURE_DIR, `pause-many-${FIXTURE_ENTRIES}.zip`);
   if (fs.existsSync(out)) return out;
   const entries = [['characters/Pause Character.png', Buffer.from('89504e470d0a1a0a', 'hex')]];
-  for (let i = 0; i < 1500; i += 1) {
+  for (let i = 0; i < FIXTURE_ENTRIES; i += 1) {
     const head = Buffer.from(`${JSON.stringify({ name: 'You', is_user: true, mes: `m${i}` })}\n`, 'utf8');
     const filler = crypto.createHash('sha256').update(`pause:${i}`).digest(); // 确定性内容
     entries.push([`chats/Pause/many-${String(i).padStart(4, '0')}.jsonl`, Buffer.concat([head, filler])]);
@@ -121,40 +134,37 @@ module.exports = {
     const skipped = m ? Number(m[1]) : 0;
 
     /**
-     * 🔴 **已知缺陷（未修，2026-09-28 由本用例首次取证）**
+     * ✅ **曾经的已知缺陷，2026-09-28 已修**（保留这段史，因为「既有测试为何没抓到」这一步最有价值）
      *
-     * 现象：暂停后「继续」，产物**缺条目** —— 实测 1500 条聊天变成 1437 条（跳过 64 项，
+     * 旧现象：暂停后「继续」，产物**缺条目** —— 实测 1500 条聊天变成 1437 条（跳过 64 项，
      * 其中 63 条聊天从未写进产物），而 UI 与日志都报「转换成功」。
      *
-     * 机理（三处合起来构成必然的静默数据损失）：
-     *  1. `transform.js:354` 的 `onProgress` 在**投递给 writer 之前**上报 ⇒ 断点清单记录的是
-     *     「已读到」而不是「已写入」，**超前于**实际产物；
-     *  2. 暂停走 `worker.terminate()`，`worker-client.js:117` 明确「**半成品 BlobWriter 丢弃**」
-     *     ⇒ 已写入的那部分也一并没了；
-     *  3. 续传时 `resumeCrcMap` 命中即**跳过**（既不重读也不重写），而目标 zip 是**新建的空包**
+     * 旧机理（三处合起来构成必然的静默数据损失）：
+     *  1. `transform.js` 的 `onProgress` 在**投递给 writer 之前**上报 ⇒ 断点清单记的是「已读到」
+     *     而非「已写下」，**超前于**实际产物；
+     *  2. 暂停走 `worker.terminate()`，半成品 `BlobWriter` 被丢弃 ⇒ 已写入的那部分也一并没了；
+     *  3. 续传时 crc 命中即**跳过**（既不重读也不重写），而目标 zip 是**新建的空包**
      *     ⇒ 被跳过的条目**既不在旧产物（已丢）也不在新产物（被跳过）** ⇒ 永久缺失。
      *
-     * 为什么既有测试没抓到（这是本条最大的价值）：
-     *  - 单测 `test/convert-resume.test.js` 锁的是**机理**而非不变量 ——
-     *    `expect(names).not.toContain('settings.json')`（「跳过 ⇒ 产物里没有」）；
-     *  - 实例矩阵 M-7b 只断言「日志出现『沿用断点跳过 N 项』」，**没断言产物完整**；
-     *  - 于是「跳过语义生效」被验成绿，而**用户拿到的包少条目**无人测。
+     * 旧测试为何没抓到：单测锁的是**机理**（`not.toContain`「跳过 ⇒ 产物里没有」），
+     * 矩阵 M-7b 只断言「日志出现『沿用断点跳过 N 项』」—— **没有一条问过产物完不完整**。
+     * 于是「跳过语义生效」被验成绿，而用户拿到的包少条目无人测。
      *
-     * 修法（须与既有断言一起改，故**本次不动**，登记待裁决）：
-     *  - (a) 真正的增量续传：把暂停时的半成品产物跨会话保留，续传在其上继续写；
-     *  - (b) 最小正确修：转换路径不传 `resumeCrcMap`（暂停后重做，但产物完整）——
-     *        代价是 `test/convert-resume.test.js` 与矩阵 M-7b 的「跳过」断言需同步更新。
-     *
-     * 本用例当下**如实断言缺陷的形态**（而不是假装它不存在）：若将来修好，这条会转红，
-     * 从而**强制**把断言改成「产物与源包条目数一致」。
+     * 现修法（用户 2026-09-28 裁定取「真增量续传」）：
+     *  - 跳过门改成「**半成品里真有这条**」（`transform.js` 的 `appendedNames`），**不再**只看台账；
+     *  - 暂停改**协作式收尾**：worker 把已写部分 `close()` 成合法 zip 并回报，主线程落 OPFS；
+     *  - 续传用 zip.js `appendZip` 把半成品**原样搬运**（字节级、零重压缩）再继续写。
+     * ⇒ 下面的断言从「**如实断言缺陷形态**」翻转为「**断言产物完整**」——
+     *   这正是本条在修复后应当转绿的形态（旧断言在此已不可能通过）。
      */
-    t.ok('R12-KNOWN-DEFECT 缺的聊天数 ≳ 被跳过的条数（跳过即永久缺失；修好后本应**相等**）',
-      outChats <= srcChats - Math.max(0, skipped - 1),
-      `源=${srcChats} 产物=${outChats} 跳过=${skipped}（其中 1 条是非聊天，故聊天缺失≈${skipped - 1}）`);
-    t.ok('R13 【同一缺陷的另一面】产物体积/条目数因此小于源包 —— 用户拿到的是**残缺包**',
-      outChats < srcChats, `源=${srcChats} 产物=${outChats}`);
-    t.log('  · 🔴 已知缺陷：暂停→续传后产物缺条目（静默）。机理与修法见本 spec 头部注释与 '
-      + '`.trellis/spec/guides/standalone-web-and-cloud-e2e.md` 的 §4.5。');
+    t.ok('R12 【核心】续传产物**条目齐全**：聊天条数与源包**相等**（不再静默缺条目）',
+      srcChats > 0 && outChats === srcChats,
+      `源=${srcChats} 产物=${outChats} 跳过=${skipped}`);
+    const firstChat = 'chats/Pause/many-0000.jsonl';    t.ok('R13 【同一不变量的另一面】产物**逐条可查**：暂停窗口两侧的首尾聊天都在'
+      + '（计数相等之外，再落到具体条目上）',
+      product.names.includes(firstChat) && product.names.includes(LAST_CHAT),
+      `首=${product.names.includes(firstChat)} 尾=${product.names.includes(LAST_CHAT)}`);
+    t.log(`  · 续传跳过 ${skipped} 项却仍条目齐全 ⇒ **跳过的是半成品里真有的字节**（真增量续传生效）`);
 
     // ===== ③ Worker 生命周期回归（L1-MR-8；本仓历史事故 `034b7ab`）=====
     //

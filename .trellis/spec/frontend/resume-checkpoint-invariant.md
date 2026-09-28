@@ -1,7 +1,9 @@
-# 断点续传的「已完成」判据（不变量 · 已知违反 · 修法）
+# 断点续传的「已完成」判据（不变量 · 曾经的违反 · 修法与验收）
 
-> **状态：已知未修**（2026-09-28 取证）。本页只讲一条不变量、它当前如何被违反、
-> 以及修的时候必须同步改哪些断言。取证用例：`npm run e2e:web -- --only pause`。
+> **状态：✅ 已修（2026-09-28，取方案 (a) 真增量续传）**。本页保留全文 ——
+> §3「为什么既有测试没抓到」与那条**通用判别法**比结论更有价值。
+> 取证用例：`npm run e2e:web -- --only pause-resume`。
+> 实现细节见 `state-management.md` §8；E2E 侧见 `../guides/standalone-web-and-cloud-e2e.md` §4.6。
 
 ---
 
@@ -53,41 +55,57 @@
 > `not.toContain('settings.json')` 正是这种：它描述的是「跳过」这一实现动作，而不是「产物完整」这一要求。
 > 写断言时问一句：**「如果这个功能坏了，这条会红吗？」** —— 会，才是锁不变量。
 
-## 4 修法（两条，**都必须同步改上面两处断言**）
+## 4 实际采用的修法（方案 a · 与本节初稿的三处差异）
 
-### (a) 真正的增量续传 —— 把半成品带到续传会话
+### 4.1 采用的形态
 
-- 暂停时**不立即 terminate**：先给 Worker 发一条「暂停」消息，让它 `await writer.close()`
-  （把在飞条目写完），把**半成品归档**经 `postMessage` 交回主线程，然后主线程再 terminate；
-- 主线程把半成品落到 OPFS（`src/ui/host-bridge.js` 已有 `opfsTmpHandle` / `opfsTmpCleanup`），
-  并把**它的句柄写进断点清单**；
-- 续传时以此半成品**为基底**：先惰性复制它的条目（`src/core/zip-augment.js` 的 `lazy` 复制路径可直接复用），
-  再继续转换剩余条目 ⇒ 清单可以放心沿用「跳过」语义（因为被跳过的条目**确实在产物里**）。
-- 代价：新协议 + 新选项 + 半成品的生命周期（清理、失效检测：断点与实际半成品不匹配时必须**整包重做**）。
+**跳过门改成「半成品里真有它的字节」**（而不是继续沿用「台账说做过了」）——
+这一步比「把半成品带到续传会话」更根本：它让**只传台账的调用方**也只会**完整重做**，
+而不是**静默残缺**。四段实现（搬运 / 跳过门 / 同源校验 / 协作式暂停）与逐条陷阱见
+`state-management.md` §8.1–§8.4（那里是权威表述，本页不复制）。
 
-### (b) 最小正确修 —— 转换路径不再按清单跳过
+### 4.2 与初稿计划的三处差异（**计划被实测证据否决的地方**）
 
-- `handleExternalConvert` / 批量路径**不传** `resumeCrcMap`（或传空 Map）；
-- 结果：暂停后重做已完成的部分，但**产物完整**；`fetch-` 前缀的宿主**拉取**路径不受影响
-  （那条路径的"续传"是 Range 续传**源**，与产物无关，不受本缺陷影响）。
-- 代价：`test/convert-resume.test.js` 的 `not.toContain` 与矩阵 M-7b 的「跳过 N 项」断言**必须一起改**
-  （它们锁的是缺陷形态）；且失去"跳过"的省时（用户可见的行为变化：续传不再更快）。
-- **注意**：`transform.js` 的 crc 跳过能力本身没错（它服务"目标已含这些条目"的场景），
-  错的是**调用方**在没有承载物的情况下打开了它 —— 修在调用方，不要删 transform 的能力。
+| 初稿写的 | 实际采用的 | 为什么改 |
+| --- | --- | --- |
+| 「先惰性复制它的条目（复用 `zip-augment.js` 的 lazy 复制路径）」 | **用 vendor `ZipWriter#appendZip`** | 实测证明它能把条目**字节级原样搬运**（`compressedSize`/`method`/`crc32` 逐条相等 ⇒ **零重压缩**），比自建复制路径更省更稳；`zip-augment.js` 那条路要解压再压 |
+| 「把半成品**句柄**写进断点清单」 | 写**文件名**，续传时再由 `opfsTmpHandle(name,false)` 取句柄 | `FileSystemFileHandle` 不适合当断点清单的持久化载荷；文件名可序列化、可读、可清理 |
+| 「失效检测：断点与实际半成品不匹配时必须整包重做」 | **不变**，但判据锚在「**名字 + 内容能对上**」而不是「清单里记的 target 标签」 | 实测 ST 半成品续传到 L 目标**是合法的**（名字仍落在 L 的产物路径上、crc 也对得上）⇒ 锚在标签会**无谓作废**；真正错位的布局会整批成为「孤儿」，由名字判据天然拦下 |
+| 「暂停时**不立即 terminate**」 | 照做，且**必须有界**（30 s 兜底回落硬终止） | 少了兜底就会出现「既等不到半成品、又不终止」的挂死（`L1-MR-7`）—— 判别力证明的形态正是挂死 |
 
-## 5 修完怎么验收
+### 4.3 一处**计划里没想到**、由全量回归逼出来的陷阱
 
-1. `npm run e2e:web -- --only pause`：`R12/R13` 会**转红**（它们锁的是缺陷形态）⇒
-   改成断言「产物聊天条目数 == 源包聊天条目数」与「跳过 N 项」同时成立；
-2. 实例侧 M-7b 的「跳过 N 项」在 (b) 方案下会失败 ⇒ 同步更新为「产物完整」类断言；
-3. 加一条**判别力**检查：把「已写入多少」与「清单里有多少」在读出口各自暴露一个数字
-   （调试探针或日志），断言二者**方向正确**（清单 ≤ 已写入）。
+跳过门**不得**用「writer 是否已含该名字」：那个名单把「本轮已写过」也算进来，
+而**两个不同源条目可映射到同一产物路径**（PT 目标下用户级 `extensions/<x>/**` 与第三方
+`extensions/third-party/<x>/**`）⇒ 误跳过本该走「保留第三方副本」分支的条目（实测 2 条）。
+**只有全量测试暴露它**（单跑新用例文件全绿）。⇒ 门只认 `appendFrom` 回传的清单。
 
-## 6 相关位置（一次找齐）
+### 4.4 初稿列出的方案 (b) 为什么没被采用
 
-- 上报点：`src/core/transform.js:350-360`（`onProgress`）与 `:365-372`（crc 跳过）
-- 进度核：`index.js` 的 `attachConversionProgress` / `createCheckpointThrottle`
-- 暂停/中止：`src/ui/task-controls.js`（按钮）· `src/core/worker-client.js:117`（terminate 与丢弃）·
-  `src/core/task-manager.js`（`pause/abort/resume` 与断点落盘）
+方案 (b)（转换路径不传 `resumeCrcMap`）**代价明摆着**：失去「续传比从头快」这件事，
+而用户明确要的是「真增量续传」（2026-09-28 裁定）。但它作为**降级路径**被完整保留下来 ——
+半成品不可用（无 OPFS / 配额 / 收尾失败 / 不同源）时，行为**正是** (b)：完整重做、产物完整。
+
+## 5 修完怎么验收（**实测读数**，2026-09-28）
+
+- `npm run e2e:web -- --only pause-resume --rebuild` ⇒ **21 项 / 21 通过**：
+  R9/R10 跳过 **175** 项 > 0 · **R12 源=3000 产物=3000 跳过=175** · R13 首尾条目都在。
+  ⇒ 判据是**两条同时成立**：**「跳过 N > 0」且「源 == 产物」**。
+  **缺任一条都不算真增量**：前者缺 = 根本没跳过；后者缺 = 跳过了却没有字节（就是那个缺陷）。
+- 单测：`test/convert-resume.test.js` 的 `not.toContain` 已**翻转为不变量**（只给台账 ⇒ 跳过 0 条且产物完整）；
+  另加 `convert-append` / `zip-append` / `convert-pause-protocol` / `persist-partial` 四组共 25 项。
+- **判别力**：忠实复刻旧管线（门退回台账 + 不搬运半成品）⇒ **R12 转红「源=3000 产物=2826」**、
+  R13 转红。⚠️ **只注掉门不会转红**（半成品仍在被搬运）⇒ 两半是**联合必要**的。
+- 实例侧 M-7b 的「跳过 N 项」断言**未改**：它用的是宿主拉取路径（Range 续传**源**），
+  与产物无关、不受本缺陷影响 —— 优于初稿预期的「必须一起改」。
+
+## 6 相关位置（一次找齐，2026-09-28 核对）
+
+- 跳过门与同源校验：`src/core/transform.js`（`appendedNames` 门 + `verifyPartialSameSource` + `finalizeOnAbort`）
+- 搬运：`src/core/zip-io.js` 的 `appendFrom` / `readZipEntryManifest`
+- 协作式暂停：`src/core/worker-client.js`（`PAUSE`/`PAUSED` + 30 s 有界兜底）·
+  `src/core/converter-worker.js`（自持 `AbortController`）
+- 断点与暂停态通道：`src/core/task-manager.js`（`setPauseCheckpoint`）
+- 半成品持久化：`index.js` 的 `persistPartial` / `partialNameFor` / `hasRoomForPartial`
 - 证据：`e2e/standalone/specs/pause-resume.e2e.cjs`（R9/R10/R12/R13）·
-  `e2e/standalone/specs/chat-store…` 不相关；`.trellis/spec/guides/standalone-web-and-cloud-e2e.md` §4.6
+  `../guides/standalone-web-and-cloud-e2e.md` §4.6 · `state-management.md` §8

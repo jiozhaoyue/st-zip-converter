@@ -145,3 +145,60 @@ describe('TaskManager 状态机', () => {
     expect(await b.load('x')).toBeNull();
   });
 });
+
+describe('TaskManager 暂停态断点的专用通道（真增量续传，2026-09-28）', () => {
+  // 为什么需要**专用通道**而不是把 onCheckpoint 的 RUNNING 门打开：那道门是**防尾事件**的
+  // （暂停后仍可能有在途进度回调到达，写盘会把真断点覆盖成陈旧台账 —— 见上一个 describe 的用例）。
+  // 而「真断点」（半成品 zip 名 + 其清单）**只能在暂停收尾之后**才存在 ⇒ 给它一条
+  // 只在 PAUSED 生效、一次性的显式通道，两条保护同时成立。
+  it('暂停之后经 setPauseCheckpoint 能落盘真断点', async () => {
+    const adapter = memoryAdapter();
+    const tm = new TaskManager(adapter);
+    const { onCheckpoint, setPauseCheckpoint } = tm.start('c1', '转换', { resumable: true });
+    await onCheckpoint({ phase: 'running' }, { force: true });
+
+    expect(await tm.pause('c1')).toBe(true);
+    expect(tm.get('c1').state).toBe(TASK_STATES.PAUSED);
+
+    const manifest = { partialOpfsName: 'convert-c1.partial.zip', target: 'st', totalEntries: 42 };
+    expect(await setPauseCheckpoint(manifest)).toBe(true);
+    expect(await adapter.load('c1')).toEqual(manifest);
+    // 内存快照同步（pause() 落盘用的是内存里的 checkpoint）
+    expect(tm.get('c1').checkpoint).toEqual(manifest);
+  });
+
+  it('setPauseCheckpoint 只在 PAUSED 生效：running / aborted / done / failed 一律拒绝', async () => {
+    const adapter = memoryAdapter();
+    const tm = new TaskManager(adapter);
+
+    const running = tm.start('r1', '转换', { resumable: true });
+    expect(await running.setPauseCheckpoint({ partialOpfsName: 'x.zip' })).toBe(false);
+
+    const aborted = tm.start('a1', '转换', { resumable: true });
+    await tm.abort('a1');
+    expect(await aborted.setPauseCheckpoint({ partialOpfsName: 'x.zip' })).toBe(false);
+
+    const done = tm.start('d1', '转换', { resumable: true });
+    await tm.complete('d1');
+    expect(await done.setPauseCheckpoint({ partialOpfsName: 'x.zip' })).toBe(false);
+
+    const failed = tm.start('f1', '转换', { resumable: true });
+    await tm.fail('f1', true);
+    expect(await failed.setPauseCheckpoint({ partialOpfsName: 'x.zip' })).toBe(false);
+  });
+
+  it('两条保护同时成立：暂停后的**尾事件**仍被丢弃，而真断点能被续传读到', async () => {
+    const adapter = memoryAdapter();
+    const tm = new TaskManager(adapter);
+    const { onCheckpoint, setPauseCheckpoint } = tm.start('c9', '转换', { resumable: true });
+    await tm.pause('c9');
+
+    // ① 尾事件（通用通道）在暂停后必须被丢弃 —— 不得覆盖真断点
+    onCheckpoint({ n: 'stale-tail' }, { force: true });
+    // ② 专用通道写下的才是真断点
+    await setPauseCheckpoint({ partialOpfsName: 'real.partial.zip', target: 'st' });
+    // ③ 续传读到的必须是真断点
+    expect(await tm.resume('c9')).toEqual({ partialOpfsName: 'real.partial.zip', target: 'st' });
+  });
+});
+

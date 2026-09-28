@@ -114,6 +114,12 @@ IO **不再有** Node / 浏览器双适配器（旧的 `node-io`(yauzl/yazl) / `
 - catch 块里引用的变量必须在 `try` **之外**声明——声明在 `try` 内的 `opfsName` 会在错误路径
   触发 TDZ `ReferenceError`。
 
+> **转换任务同构使用这一层**（2026-09-28，见 §8）：半成品名 `<taskId>.partial.zip`，
+> 由 `index.js` 的 `persistPartial()` 落盘、`partialNameFor(taskId)` 生成（**不再加
+> `convert-` 前缀** —— taskId 本身已是 `convert-<ts>`，再加一层会拼成 `convert-convert-<ts>`）。
+> 两条路径共用同一个 `opfsCleanupId/Name` 归属登记位与 `opfsTmpCleanup`。
+> ⚠️ 上面那条「`try` 外声明」的教训在转换侧**又踩了一次**（`targetWriter`）——详见 §8.4。
+
 ### 共享 Worker + AbortSignal 陷阱（2026-09-07 实际踩过）
 `worker-client.js` 复用一个 `Worker` 实例。暂停/中止时调用 `worker.terminate()`——
 被 terminate 的 Worker 会**静默忽略**此后所有 `postMessage`。
@@ -172,6 +178,11 @@ Worker 分支走 `postMessage`，**函数过不了结构化克隆** ⇒ **真浏
 
 快照**只含已完成条目**。滞后 ≤63 条 ⇒ 续传时那 ≤63 条被**重做**（安全）；
 若**超前**（把未完成条目也算进去）⇒ 续传时被**错误跳过** ⇒ **产物缺条目**。
+
+> ⚠️ **2026-09-28 起，这条纪律的责任已从「约定」转移到「判据」**：跳过门现在要求
+> 「**半成品里真有该条目**」（见 §8.1），台账超前**已经不可能**造成跳过 ⇒
+> 「超前即缺陷」这一类风险被结构性消除。本节保留，是因为**台账本身仍然要正确**
+> （它是进度读数与冗余 crc 校验的来源），只是它不再单独决定「跳不跳」。
 
 ### 3. 落盘必须节流，且**首次一定落**（两条都是载荷属性）
 
@@ -233,3 +244,73 @@ Worker 分支走 `postMessage`，**函数过不了结构化克隆** ⇒ **真浏
 误用会让「选 2 个以上」时按钮被**禁用** —— 而批量恰恰只在多选时才有意义。
 `test/stash-list.test.js` 有专门用例锁定。**新增面向用户的能力时，先确认它有可达入口**，
 否则「修好了但用户碰不到」也是一种未完成。
+
+---
+
+## 8. 真增量续传：**跳过 ≠ 丢数据**（2026-09-28 定稿）
+
+### 8.1 那条不变量（本节其余内容都由它推出）
+
+> **「跳过一个条目」的充分条件 = 「半成品里真有它的字节」，而不是「断点台账说它做过了」。**
+
+为什么必须换成字节事实：目标 zip 每次都是**新建空包**（`transform.js` 的 `createWriter`），
+所以「台账命中即跳过」会让被跳过的条目**既不在旧产物（已丢）也不在新产物（被跳过）**
+⇒ 用户拿到**残缺包**却看到「转换成功」（2026-09-27/28 实测 1500 条聊天 → 1437 条）。
+根子是台账记的是「**已读到**」而非「**已写下**」（`onProgress` 在投递给 writer **之前**上报）。
+
+⇒ 判据换成字节事实后，**上一节 §2 的「超前/滞后」问题在结构上消失了**：
+台账滞后只是「重做几条」（安全），台账超前也**无法**造成跳过（字节不在就不跳）。
+**方向纪律不必再靠约定维持，由判据本身保证。**
+
+### 8.2 四段契约（改动面与陷阱，逐条带实测）
+
+| 段 | 落点 | 契约与陷阱 |
+| --- | --- | --- |
+| **搬运** | `zip-io.js` 的 `appendFrom(source)` | vendor `ZipWriter#appendZip` **原样搬运**（实测 `compressedSize`/`method`/`crc32` 逐条相等 ⇒ **零重压缩**）。⚠️ **必须传 `zip.BlobReader` 实例**——裸 `Blob`/`Uint8Array` 抛 `TypeError: … reading 'getReader'`，且该错误只有跑起来才看得见（minified 代码里读不出来）。⚠️ `appendZip` **不回传**条目名 ⇒ 须先只读中央目录自取清单 |
+| **跳过门** | `transform.js` 的跳过分支 | 判据 `appendedNames.has(outPath)`，`appendedNames` **只含「来自半成品」**的条目。⚠️ **不得**改用「writer 是否已含该名字」：writer 的名单把「本轮已写过」也算进来，而**两个不同源条目可映射到同一产物路径**（PT 目标下用户级 `extensions/<x>/**` 与第三方 `extensions/third-party/<x>/**`），实测由此**误跳过 2 条**本该走「保留第三方副本」分支的条目 |
+| **同源校验** | `transform.js` 的 `verifyPartialSameSource` | 半成品 ⊆ 源 **且** 同名 `crc32` 全等（只读中央目录）。**必须在 `appendFrom` 之前**——搬运会把名字登记进 `written`，此后同名 `add` **静默早返** ⇒ 源已变时会**静默保留陈旧条目**且不报错。不成立 ⇒ `onDiscardPartial()` + 完整重做 |
+| **暂停收尾** | `converter-worker.js` + `worker-client.js` | 暂停改**协作式**：`AbortSignal` 不可 `postMessage` ⇒ 主线程发 `PAUSE` 消息、**worker 自持 `AbortController`** → worker 把已写部分 `close()` 成**合法 zip** → 回报 `PAUSED`。主线程**有界等待 30 s**（`L1-MR-7`）：超时回落「终止 + 无半成品」⇒ 续传完整重做。`terminate()` 一律执行且 `workerInstance = null`（`L1-MR-8`） |
+
+`options.finalizeOnAbort` **只对 `AbortError` 生效**：真失败仍 `abort()` ——
+否则「失败」会被伪装成一个「看着完整」的暂停产物。中止路径**天然**不产出合成条目
+（`checkAbort()` 在循环内抛出，尾部 `emitSynthesized` 没跑）：这正是要的，
+合成条目由**续传那一轮**末尾统一产出，否则半成品里会留下一份「按半量数据合成」的 manifest。
+
+### 8.3 断点形态与专用写入通道
+
+暂停态断点是 `{ partialOpfsName, target, partialEntries, totalEntries }`：
+`partialEntries` 是**半成品清单**（产物的真源），续传时用它播种 `doneEntries`（进度读数 + 冗余 crc 校验）。
+
+⚠️ **必须走专用通道 `TaskManager.setPauseCheckpoint()`，不得打开 `onCheckpoint` 的 RUNNING 门**：
+那道门是**防尾事件**的（暂停后仍有在途进度回调到达，写盘会把真断点覆盖成陈旧台账，
+`test/task-manager.test.js` 有用例锁定）。而真断点只能在**暂停收尾之后**才存在 ⇒
+给它一条只在 `PAUSED` 生效、一次性的显式通道，**两条保护同时成立**。
+
+⚠️ **写入顺序**：先落 zip、再写断点。反过来则断点指向一个不存在的半成品（功能不坏，白写一次）。
+
+### 8.4 降级链（`L0-11` / `L1-MR-1`，每支都必须留日志）
+
+无 OPFS / 配额不足（`hasRoomForPartial`，留 10% 余量）/ 句柄取不到 / 落盘失败 /
+收尾未产出半成品 / 半成品读不出来 / 不同源 ⇒ 一律回到「**完整重做**」，
+文案统一为「…⇒ 续传将重做整包（产物仍会完整）」。
+
+⚠️ **降级路径的 `catch` 不得吞错**（实测最贵的一课）：首版 worker 收尾段写
+`catch { partialBlob = null }`，把 `ReferenceError: targetWriter is not defined`
+（`const` 声明在 `try` 内、`catch` 里引用 —— 与上方 §OPFS 半成品那节的 `opfsName` 同形）
+**吞掉**了 ⇒ 浏览器里表现为「暂停后跳过 0 项」，产物完整但**增量失效且根因不可见**。
+两条修法：① 变量移到 `try` **外**；② `PAUSED` 消息带 `partialError`，日志带上它。
+
+### 8.5 怎么验（两条必须**同时**成立）
+
+- **单测**：`test/convert-append.test.js`（10 项）/ `test/zip-append.test.js`（5 项）/
+  `test/convert-pause-protocol.test.js`（6 项）/ `test/persist-partial.test.js`（4 项）/
+  `test/convert-resume.test.js`（判据已翻转：只给台账 ⇒ **跳过 0 条**且产物完整）。
+- **E2E**：`specs/pause-resume.e2e.cjs` —— 判据是
+  **「跳过 N > 0」且「源 == 产物」**，**缺任一条都不算真增量**：
+  前者缺 = 根本没跳过（不是增量）；后者缺 = 跳过了却没有字节（就是那个缺陷）。
+- **判别力**：忠实复刻旧管线（门退回台账 + 不搬运半成品）⇒ R12 转红「源=3000 产物=2826」。
+  ⚠️ **只注掉门不会转红**（半成品仍在被搬运）⇒ **两半是联合必要的**。
+
+> `resumeCrcMap` 因此**降级为冗余校验**（给了且 crc 不等 ⇒ 保守不跳过）。它**不再是**
+> 跳过的充分条件 —— 任何「只传 `resumeCrcMap`」的新调用方，行为都是**完整重做**（正确），
+> 而不是**静默残缺**（旧行为）。这就是这条不变量的价值：缺陷类被**结构性**消灭，不靠约定维持。

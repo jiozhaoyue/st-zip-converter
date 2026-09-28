@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 常用命令
 
 ```bash
-npm test                          # Vitest 全量（当前 581 passed / 2 skipped / 60 文件）
+npm test                          # Vitest 全量（当前 610 passed / 2 skipped / 64 文件）
 npx vitest run test/xxx.test.js   # 单文件
 npx vitest run -t "用例名"         # 单条用例
 npm run dev                       # vite 开发服务器，独立模式手测（http://127.0.0.1:3040；**不是** 5173）
@@ -69,7 +69,10 @@ npm run gen-fixtures              # 重新生成测试固件 fixtures/
 3. **计划先行**：Trellis 任务 PRD 未回填不得提交代码；`implement.md` 复选框随执行实时勾选。
 4. **完成即推送**：测试绿后 `git push` 到 origin，不得只提交不推送。
 5. **子代理只准用自身能力 + 并行不阻塞**：只调用本 agent 平台自带的子代理功能（Copilot 即 `runSubagent`）；**禁止调用其他 agent**（`trellis channel spawn` 的 claude/codex worker、pebrel delegate、外部 CLI agent 等）。多个子代理必须**一次性并发派发**，主代理同一轮内并行推进自身工作，不串行、不空等、不轮询。
-6. **🔴 暂停 → 续传后产物缺条目（未修，2026-09-28 取证）**：`transform.js:354` 的 `onProgress` 在**投递给 writer 之前**上报 ⇒ 断点清单记的是「已读到」而非「已写入」；暂停走 `worker.terminate()` 且 `worker-client.js:117` 明确丢弃半成品；续传按 crc **跳过**而目标 zip 是**新建空包** ⇒ 被跳过的条目**旧产物没有（已丢）、新产物也没有（被跳过）**，用户拿到**残缺包**却看到"转换成功"（实测 1500 条聊天 → 1453/1437 条）。**既有测试为何没抓到**：单测 `test/convert-resume.test.js` 锁的是**机理**（`not.toContain`）、实例矩阵只断言「日志出现跳过 N 项」——没有一条问过**产物完不完整**。修法二选一（须同步改上述断言）：真正的增量续传（跨会话保留半成品）/ 转换路径不传 `resumeCrcMap`。取证用例：`npm run e2e:web -- --only pause`（R12/R13 带 `KNOWN-DEFECT` 标记）。
+6. **✅ 暂停 → 续传后产物缺条目（2026-09-28 **已修**）**：`transform.js` 的 `onProgress` 在**投递给 writer 之前**上报 ⇒ 断点清单记的是「已读到」而非「已写入」；暂停走 `worker.terminate()` 丢掉半成品；续传按 crc **跳过**而目标 zip 是**新建空包** ⇒ 被跳过的条目**旧产物没有（已丢）、新产物也没有（被跳过）**，用户拿到**残缺包**却看到"转换成功"（实测 1500 条聊天 → 1437 条）。
+   **既有测试为何没抓到**：单测 `test/convert-resume.test.js` 锁的是**机理**（`not.toContain`）、实例矩阵只断言「日志出现跳过 N 项」——没有一条问过**产物完不完整**。
+   **现修法（真增量续传）**：跳过门改为「**半成品里真有它的字节**」（`transform.js` 的 `appendedNames`）；暂停改**协作式收尾**（worker `close()` 成合法 zip → 主线程落 OPFS → `setPauseCheckpoint`）；续传用 zip.js `appendZip` **原样搬运**（字节级、零重压缩）再继续写。降级链（无 OPFS/配额/收尾失败/不同源）一律回到「完整重做」且**必须留日志**。
+   取证与全部读数：`.trellis/spec/frontend/state-management.md` §8、`.trellis/spec/guides/standalone-web-and-cloud-e2e.md` §4.6、E2E `npm run e2e:web -- --only pause-resume`（判据：**跳过 N > 0 且 源 == 产物**，缺一不算真增量）。
 7. **`#file-input` 只在「尚无源包」时采纳新文件**：同一页面里再喂一个包**不会**换源包（只入库）。E2E 里"量第二个包"必须**另开上下文**，否则量到的是第一个包（2026-09-28 实测把 66 MB 用例量成了 12 MB 包的耗时，读数"308 MB/s"一眼假）。
 8. **改 `base` 要改构建脚本，不是 vite.config**：`npm run build` 是 `vite build --base=./`，**CLI 标志覆盖**配置里的 `base` —— 只改 `vite.config.js` 对产物毫无影响（实测过一次"无效实验"）。
 9. **运行器的 `dist` 新鲜度判据只看 mtime**：**看不见「删了源码文件」** ⇒ 凡涉及删/换文件的实验必须 `npm run e2e:web -- --rebuild`。
