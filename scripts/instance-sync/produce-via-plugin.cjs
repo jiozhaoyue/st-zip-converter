@@ -54,17 +54,21 @@
  * node scripts/instance-sync/produce-via-plugin.cjs --source dev-luker --layout l --raw --out <dir>
  * ```
  *
- * ## ⚠️ 类目收窄：`--deselect`（`design.md` D1.2 写的是 `--categories`，落地时改了这个形状）
+ * ## selection 口径：**清初态 + 钉死全 10 键**（2026-09-29 修订，原「按需收窄」已废）
  *
- * 类目卡片（`.category-card`）是**计划渲染的产物**：`availableCategories` 由
- * `renderCategoryStats(plan)` 填充，而**宿主拉取路径的计划要在拉取之后**才渲染
- * （`index.js:1648`，那时 selection 早已作为 `endpointSelection` 发出去了）。
- * 空工作区下 `#category-checkboxes` 为空 ⇒ **一张卡片都没有** ⇒ 无从收窄。
+ * | 步 | 做法 | 为什么 |
+ * | --- | --- | --- |
+ * | **清初态** | 删 `workspace` store 的 `active_session`，然后**重载页面**（`clearWorkspaceState()`） | 本工具与 **E2E 共用同一持久化档案**；E2E 留下的夹具源包 + 收窄后的 selection 会被 `index.js:2504` 恢复，**静默改写产物的 selection 口径** |
+ * | **定口径** | 默认**不喂夹具**（避免拿夹具的类目可用性去改写 selection）；仅当 `--deselect` 非空才喂夹具 → 逐键设值 → 回读断言 | 空工作区下没有类目卡片 ⇒ 想取消勾选**只能**先喂夹具（这是 `--deselect` 的既有代价，故只在需要时才付）。⚠️ 喂夹具会用**夹具的** `count === 0` 把缺失类目置 false（`src/ui/category-filter.js:186-190`）——那是**夹具的**可用性，可能误伤宿主真实存在的类目 |
+ * | **取证** | 读插件**自报**的 `勾选类目:` 日志行（`index.js:1533`，`readSentSelection()`） | 「插件到底发了什么」的**直接观测**；与请求值不一致时以它为准 |
  *
- * 所以收窄必须先**喂一个探测夹具**把卡片渲染出来（`narrowSelection()`，手法同
- * `e2e/specs/library-inject.e2e.cjs`），再取消勾选，再**回读断言**。
- * 故开关命名为 `--deselect <keys>`（**取消**哪些类目）而不是 `--categories`（勾选哪些）——
- * 与「先喂夹具才有卡片」这一事实相符。
+ * 类目卡片（`.category-card`）是**计划渲染的产物**：空工作区下 `#category-checkboxes` 为空
+ * （`availableCategories` 由 `renderCategoryStats(plan)` 填充，而宿主拉取路径的计划要到**拉取之后**才渲染，
+ * `index.js:1648`）⇒ 必须先**喂一个探测夹具**把卡片渲染出来（手法同 `e2e/specs/library-inject.e2e.cjs`）。
+ * 喂夹具只影响计划 / 类目 UI，**不影响拉取的字节来源**（字节始终来自宿主）。
+ *
+ * 故开关仍是 `--deselect <keys>`（把哪些**标准**键置 false），但其语义已从「收窄」变为
+ * 「钉死时的一张排除表」——其余标准键一律**显式**置 true。
  *
  * ### 为什么真源 Real Luker **必须** `--deselect settings`
  *
@@ -160,7 +164,9 @@ const HELP = `插件驱动产包器（在源实例内由插件 UI 产包）
 可选：
   --raw                    原样宿主包（不转换）—— 与宿主原生备份做口径比对的出口
   --timeout <ms>           单次有界等待上限（默认 1800000）
-  --deselect <a,b>         拉取前**按类目收窄** selection（会先喂探测夹具以渲染类目卡片）。
+  --deselect <a,b>         钉死 selection 时把这些**标准类目键**置 false（其余标准键一律显式置 true；
+                           会先喂探测夹具以渲染类目卡片）。可选键：characters,chats,lorebooks,presets,
+                           settings,secrets,assets,extensions,globalExtensions,vectors。
                            真源 Real Luker 上 **必须** --deselect settings：勾着 settings
                            时 Luker 隐含打包 GB 级 backups/，浏览器路径实测停滞（见文件头）
   --include-backups        把 backups/ 纳入产物（默认关，U-4）
@@ -312,43 +318,154 @@ async function ensureProbeFixture() {
   return stPath;
 }
 
+/** 10 个标准类目键 —— 与 `L_SELECTION`（`src/core/transform.js:222-233`）同一套口径。
+ *  `backups` / `cache` / `appPrivate` 是插件的**特殊类目**，不在本表内：它们由 `includeBackups`
+ *  旋钮与模块默认各自决定，不参与「与 `build-packs` 对齐」这件事。 */
+const STANDARD_KEYS = Object.freeze([
+  'characters', 'chats', 'lorebooks', 'presets', 'settings',
+  'secrets', 'assets', 'extensions', 'globalExtensions', 'vectors',
+]);
+
 /**
- * 按类目**收窄** selection：喂夹具 → 等卡片 → 取消勾选 → **回读断言**。
+ * 清初态：删 `workspace` store 的 `active_session`（**只动 workspace，绝不动 files**）。
  *
- * ⚠️ 这是本工具在**真源**上可用的前提：`settings` 勾着 ⇒ Luker 隐含打包 `backups/`
- * ⇒ 浏览器拉取实测停滞。`--deselect settings` 是绕开它的开关。
- * 卡在 `--timeout` 之前就早退（不做那次注定失败的 GB 级拉取）。
+ * ## 为什么必须清（2026-09-29 实测根因）
+ *
+ * 本工具与 **E2E 共用同一个持久化档案**（`e2e/lib/instances.cjs` 的 `PROFILES.dev`）。
+ * E2E 跑完后会在 `workspace` store 留下 `active_session`（含**夹具源包**与**收窄后的 selection**），
+ * 而插件在页面加载时会把它恢复回来：
+ *
+ *   `index.js:2504` `setSelectionState(savedState.selection)`
+ *     → `src/ui/category-filter.js:429` 并入 `currentSelection`
+ *     → `index.js:1512` 宿主拉取发的正是 `getSelectionState()`
+ *
+ * ⇒ **遗留状态静默改写产物的 selection 口径**。实测值级证据：Dev Luker 档案里
+ * `active_session` 指向夹具 `c2fixture-pause-many-st.zip`，带
+ * `globalExtensions:false, vectors:false`（模块默认是 `true`/`true`），
+ * 且那个 `fileId` 在 `files` store 里**确实存在** ⇒ 恢复分支真的会走进去。
+ *
+ * 只删 `active_session` 键、**不 clear 整个 store、不碰 `files` store**：
+ * 后者是用户既有数据（规范 §11.2 的纪律原话：「只动 workspace store，不删 files store」）。
+ *
+ * @returns {Promise<{existed:boolean, deleted:boolean, reason?:string}>}
  */
-async function narrowSelection(page, keys) {
+async function clearWorkspaceState(page) {
+  return page.evaluate(async () => {
+    const DB_NAME = 'st_zip_converter_db';   // src/storage/db.js:10
+    const open = window.indexedDB.open(DB_NAME);
+    const db = await new Promise((resolve, reject) => {
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    try {
+      if (!db.objectStoreNames.contains('workspace')) {
+        return { existed: false, deleted: false, reason: 'no-workspace-store' };
+      }
+      const read = () => new Promise((resolve) => {
+        const tx = db.transaction('workspace', 'readonly');
+        const req = tx.objectStore('workspace').get('active_session');
+        req.onsuccess = () => resolve(Boolean(req.result));
+        req.onerror = () => resolve(null);
+      });
+      const existed = await read();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('workspace', 'readwrite');
+        tx.objectStore('workspace').delete('active_session');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      const stillThere = await read();
+      return { existed: existed === true, deleted: stillThere === false };
+    } finally {
+      db.close();
+    }
+  });
+}
+
+/**
+ * 钉死 selection。
+ *
+ * ## 两种模式（**默认不喂夹具** —— 这一条是实测改出来的）
+ *
+ * | 何时 | 做法 | 为什么 |
+ * | --- | --- | --- |
+ * | **无需收窄**（`--deselect` 空） | **不喂夹具**；selection = 「清初态」后的模块默认（除 `cache` / `appPrivate` 外全 true） | ⚠️ 喂夹具会**改写** `currentSelection`：`renderCategoryStats()` 对**探测计划里** `count === 0` 的类目一律置 false（`src/ui/category-filter.js:186-190`）——那是**夹具的**类目可用性，**不是宿主源的** ⇒ 可能误伤宿主真实存在的类目 |
+ * | **需要收窄**（`--deselect` 非空） | 喂夹具 → 等卡片 → 逐键设值 → 回读 | 卡片是计划渲染的产物，空工作区下没有卡片 ⇒ 想取消勾选就只能先喂夹具。这是 `--deselect` 的既有代价，**只在需要时才付** |
+ *
+ * ## 断言口径：**只断言「被要求置 false」的键**
+ *
+ * 实测（2026-09-29）：`globalExtensions` / `vectors` 在探测计划的计划里 `count === 0`
+ * ⇒ 插件**按设计**把它置 false 且 `checkbox.disabled = true`（同两处源码）⇒ **点不动、也回读不到 true**。
+ * 那是「该计划里没有这类目」的正常结果，**不是缺陷**，故不判失败；
+ * 但必须**显式登记**（返回值的 `unavailable`），不得静默当作"已对齐"。
+ * ⚠️ 分清来源：**夹具**的可用性 ≠ **宿主源**的可用性。真正的"插件到底发了什么"
+ * 由 `readSentSelection()` 读插件自报的 `勾选类目:` 日志行来定，不靠推断。
+ */
+async function pinSelection(page, deselectKeys) {
+  if (!deselectKeys.length) {
+    return {
+      mode: 'module-default-no-fixture',
+      ok: true,
+      note: '未要求收窄 ⇒ **不喂夹具**（喂夹具会按「夹具的」类目可用性把缺失类目置 false，可能误伤宿主真实存在的类目）；'
+        + 'selection 取「清初态」之后的模块默认值（`src/ui/category-filter.js:22-36`：除 cache / appPrivate 外全选）',
+    };
+  }
+
+  const want = {};
+  for (const k of STANDARD_KEYS) want[k] = !deselectKeys.includes(k);
+
   const fixture = await ensureProbeFixture();
   await page.setInputFiles('#file-input', fixture);
-  const cardsReady = await waitInPage(page, (want) => {
+  const cardsReady = await waitInPage(page, (wantKeys) => {
     const have = new Set(Array.from(document.querySelectorAll('#category-checkboxes .category-card'))
       .map((c) => c.dataset.category));
-    return want.every((k) => have.has(k));
-  }, keys, 120_000, `类目卡片渲染（需要 ${keys.join(',')}）`);
-  if (!cardsReady) return { ok: false, why: 'cards-not-rendered', wanted: keys };
+    return wantKeys.every((k) => have.has(k));
+  }, STANDARD_KEYS, 120_000, '10 张标准类目卡片渲染（喂夹具后）');
+  if (!cardsReady) {
+    return { mode: 'fixture-narrow', ok: false, why: 'cards-not-rendered', have: await readSelection(page), fixture: path.basename(fixture) };
+  }
 
-  const res = await page.evaluate((want) => {
-    const found = {};
-    for (const k of want) {
-      const card = document.querySelector(`.category-card[data-category="${k}"]`);
+  const applied = await page.evaluate((w) => {
+    const notSettable = [];
+    for (const [k, v] of Object.entries(w)) {
+      const card = document.querySelector(`#category-checkboxes .category-card[data-category="${k}"]`);
       const box = card ? card.querySelector('input[type="checkbox"]') : null;
-      found[k] = Boolean(box);
-      if (box && box.checked) box.click();   // 页内 click：绕开模态弹窗的指针拦截
+      if (!box) { notSettable.push({ key: k, why: 'no-checkbox' }); continue; }
+      if (box.disabled) { notSettable.push({ key: k, why: 'checkbox-disabled（该类目在本计划的 count = 0）' }); continue; }
+      if (box.checked !== v) {
+        box.click();                                   // 触发 change ⇒ 同步模块状态（category-filter.js:236）
+        if (box.checked !== v) {                       // 兜底：click 未生效时直接置值并补发 change
+          box.checked = v;
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
     }
-    return { found };
-  }, keys);
+    return { notSettable };
+  }, want);
   await page.waitForTimeout(300);
+
   const after = await readSelection(page);
-  const notDeselected = keys.filter((k) => after[k] !== false);
+  const notFalse = STANDARD_KEYS.filter((k) => want[k] === false && after[k] !== false);
   return {
-    ok: notDeselected.length === 0,
+    mode: 'fixture-narrow',
+    ok: notFalse.length === 0,                       // 只断言"要求置 false"的键
     fixture: path.basename(fixture),
-    found: res.found,
+    want,
     after,
-    notDeselected,
+    notSettable: applied.notSettable,
+    // 想要 true 却回读到 false 的键：**显式登记、不判失败**（多半是 count = 0 的不可用类目）
+    unavailable: STANDARD_KEYS.filter((k) => want[k] === true && after[k] === false),
+    notFalse,
   };
+}
+
+/** 读插件**自己上报的**实际发出的 selection（`index.js:1533` 的 `勾选类目:` 日志行）。
+ *  这是"插件到底发了什么"的**直接观测**，不依赖对模块状态的推断或回读。 */
+async function readSentSelection(page) {
+  const text = await readLog(page);
+  const m = /勾选类目[:：]\s*([^\n]*)/.exec(text);
+  if (!m) return null;
+  return m[1].split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 /** 一次把 8 个旋钮都设好，并**回读**（规范 §11.3：不抛错的交互都要回读） */
@@ -390,6 +507,17 @@ async function setKnobs(page, want) {
       split.value = '';
       split.dispatchEvent(new Event('input', { bubbles: true }));
       split.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    // `--raw` 时给文件名模板加前缀。为什么必须加：模板是 `{target}_{user}_{part}_{date}.zip`，
+    // 而 raw 模式下 `target` 就等于**宿主自身布局码**（`--raw` 要求 `--layout` == 自身布局码）
+    // ⇒ `--raw --layout l` 与 `--layout l` 产出**同一个文件名**，落同一 `--out` 时后者**静默覆盖**前者；
+    // 更坏的是把 raw 包误当转换产物做比对会得到**假 IDENTICAL**（两份都是原样包）。
+    const tpl = sel('#filename-template-input');
+    if (tpl && w.filenamePrefix && !tpl.value.startsWith(w.filenamePrefix)) {
+      tpl.value = w.filenamePrefix + tpl.value;
+      tpl.dispatchEvent(new Event('input', { bubbles: true }));
+      tpl.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     // —— 回读（判据以**当前 DOM** 为准，注释与历史陈述都不算）——
@@ -560,7 +688,9 @@ async function entryCountOf(filePath) {
   let queueAfter = null;
   let failure = null;
   let progressTimer = null;
-  let narrowing = null;
+  let narrowing = null;      // 钉死 selection 的读数（`pinSelection()` 的返回）
+  let initialState = null;   // 清初态的读数（`clearWorkspaceState()` 的返回）
+  let sentSelection = null;  // 插件**自报**的实际发出的类目（`readSentSelection()`）
 
   try {
     const page = ctx.pages()[0] || await ctx.newPage();
@@ -585,6 +715,20 @@ async function entryCountOf(filePath) {
 
     // ① 打开实例页面（有界等待）
     await page.goto(inst.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+
+    // ①b 清初态（此时插件已建库 ⇒ IndexedDB 可访问；见 `clearWorkspaceState` 的根因说明）
+    try {
+      initialState = await clearWorkspaceState(page);
+      console.log(`[produce] 清初态（workspace.active_session）：${JSON.stringify(initialState)}`);
+      if (initialState.existed) {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
+        console.log('  · 已重载页面 —— 让插件在**无遗留状态**的初态下初始化（否则下面钉死的 selection 会被覆盖）');
+      }
+    } catch (err) {
+      // 不静默跳过：遗留状态会静默改写 selection 口径，正是本步要拦的东西
+      throw new Error(`清初态失败（拒绝带着遗留状态继续）：${err.message}`);
+    }
+
     const splashGone = await waitInPage(page, () => {
       const ds = Array.from(document.querySelectorAll('dialog[open]'));
       return !ds.some((d) => d.querySelector('#loader') || /正在初始化/.test(d.textContent || ''));
@@ -621,6 +765,7 @@ async function entryCountOf(filePath) {
       includeBackups: args.includeBackups,
       pruneBuiltin: args.pruneBuiltin,
       keepDevFiles: args.keepDevFiles,
+      filenamePrefix: args.raw ? 'raw-' : '',
     });
     console.log('[produce] 旋钮回读：', JSON.stringify(knobs.readBack));
     if (knobs.log.length) console.log('[produce] 旋钮设置告警：', JSON.stringify(knobs.log));
@@ -634,16 +779,20 @@ async function entryCountOf(filePath) {
     if (rb.pruneBuiltin !== args.pruneBuiltin) knobMismatch.push(`pruneBuiltin ${rb.pruneBuiltin}≠${args.pruneBuiltin}`);
     if (rb.keepDevFiles !== args.keepDevFiles) knobMismatch.push(`keepDevFiles ${rb.keepDevFiles}≠${args.keepDevFiles}`);
     if (rb.splitInput !== '') knobMismatch.push(`splitInput ${JSON.stringify(rb.splitInput)}≠""`);
+    if (args.raw && !String(rb.filenameTemplate || '').startsWith('raw-')) {
+      knobMismatch.push(`filenameTemplate ${JSON.stringify(rb.filenameTemplate)} 未带 raw- 前缀（raw 与转换产物会同名）`);
+    }
     if (knobMismatch.length) throw new Error(`旋钮未生效（回读不符）：${knobMismatch.join('; ')}`);
 
-    // ③b 按类目**收窄** selection（可选，但真源 Real Luker 必须用 —— 见 --deselect 说明）
-    if (args.deselect.length) {
-      narrowing = await narrowSelection(page, args.deselect);
-      console.log(`[produce] 类目收窄：${JSON.stringify(narrowing)}`);
-      if (!narrowing.ok) throw new Error(`类目收窄失败（未生效的键：${JSON.stringify(narrowing.notDeselected || narrowing.why)}）`);
-      const selAfter = await readSelection(page);
-      knobs.categories = selAfter;
-      knobs.categoryCardCount = Object.keys(selAfter).length;
+    // ③b selection 口径：`pinSelection()` 无条件执行（**默认不喂夹具**；只有 `--deselect` 非空才喂）
+    narrowing = await pinSelection(page, args.deselect);
+    console.log(`[produce] selection：${JSON.stringify(narrowing)}`);
+    if (!narrowing.ok) {
+      throw new Error(`selection 钉死失败（未生效：${JSON.stringify(narrowing.notFalse || narrowing.why)}）`);
+    }
+    if (narrowing.after) {
+      knobs.categories = narrowing.after;
+      knobs.categoryCardCount = Object.keys(narrowing.after).length;
     }
 
     // ④ 等「从宿主拉取」可用（禁用态 click() 是静默空操作 —— 必须回读）
@@ -662,6 +811,23 @@ async function entryCountOf(filePath) {
     await page.evaluate(() => document.getElementById('btn-host-fetch').click());
     phases.fetchStart = stamp();
     console.log(`[produce] 已触发宿主拉取（t+${phases.fetchStart}s）…`);
+
+    // ⑤b **观测**插件自报的实际 selection（`index.js:1533` 的 `勾选类目:` 行）。
+    //     与 `pinSelection` 的**请求值**分开记录；二者不一致时**以本值为准**（它才是真正发出去的）。
+    {
+      const deadline = Date.now() + 20_000;
+      do {
+        sentSelection = await readSentSelection(page).catch(() => null);
+        if (sentSelection) break;
+        await page.waitForTimeout(500);
+      } while (Date.now() < deadline);
+      console.log(`[produce] 插件自报实际 selection：${JSON.stringify(sentSelection)}`);
+      if (narrowing && narrowing.want) {
+        const wantFalse = Object.entries(narrowing.want).filter(([, v]) => v === false).map(([k]) => k);
+        const leaked = sentSelection ? wantFalse.filter((k) => sentSelection.includes(k)) : [];
+        if (leaked.length) console.log(`  · ⚠ 要求排除但插件仍勾着：${JSON.stringify(leaked)}`);
+      }
+    }
 
     // 长跑心跳：插件把百分比与阶段文案写在 `#progress-percent` / `#status-label`。
     // 不心跳的话，真源包 1.6 GB 的拉取会有**好几分钟毫无输出**（首跑实测 t+23.7s → t+339.8s 全静默），
@@ -748,7 +914,21 @@ async function entryCountOf(filePath) {
       source: { id: inst.id, side: inst.side, host: inst.host, port: inst.port, url: inst.url, profile: path.basename(inst.profile) },
       r20: { ...r20, instancePluginDir: path.relative(REPO_ROOT, r20.pluginDir) },
       knobs: { requested: { layout: args.layout, compression: args.compression, gitMode: args.gitMode, extensionMode: args.extensionMode, includeBackups: args.includeBackups, pruneBuiltin: args.pruneBuiltin, keepDevFiles: args.keepDevFiles }, readBack: rb, warnings: knobs.log },
-      selection: { hasCategoryCards: knobs.categoryCardCount > 0, categories: knobs.categories, note: knobs.categoryCardCount === 0 ? '无类目卡片（未渲染计划）⇒ selection 取模块默认：除 cache / appPrivate 外全选（category-filter.js:22-36）' : '', deselected: args.deselect, narrowing },
+      // selection 口径：**清初态后的确定性** + **插件自报的实际值** —— 这两个才是证据
+      selection: {
+        mode: narrowing ? narrowing.mode : 'unknown',
+        hasCategoryCards: knobs.categoryCardCount > 0,
+        categories: knobs.categories,
+        deselected: args.deselect,
+        pinnedStandardKeys: [...STANDARD_KEYS],
+        // 插件**自报**的实际发出类目（`index.js:1533` 的 `勾选类目:` 行）
+        sentByPlugin: sentSelection,
+        note: (narrowing && narrowing.note)
+          || '经「喂夹具 + 逐键设值 + 回读」钉死；`pinning.unavailable` 里的键是该计划 `count = 0` 的类目，'
+            + '插件按设计置 false（不是缺陷）',
+        initialStateCleared: initialState,
+        pinning: narrowing,
+      },
       workbench,
       artifact,
       stashCleanup,

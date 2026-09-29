@@ -53,24 +53,68 @@
 
 ### 1.1 OQ-2：插件能否**一步直出**目标布局（`design.md` D2）
 
-- [ ] **1.1.1** 用插件（Real Luker `:8004`，或先用 Dev Luker `:8003` 走通再换真源）
+- [x] **1.1.1** 用插件（Real Luker `:8004`，或先用 Dev Luker `:8003` 走通再换真源）
       分别以 `--layout st` / `--layout tt` / `--layout l` 产三次包
       —— **本步允许先用 Node 侧既有 `export-backups.cjs` 做对照基线**，插件侧产包在 §3 落地后复跑
-- [ ] **1.1.2** 与上一轮 `build-packs.cjs` 产出的同名布局包做**条目级比对**
+      —— *2026-09-29 完成（Dev Luker `:8003`，§1.1.1 明文允许先走 Dev）：三布局各出一个插件包 ——
+      `st` 545 MB / 6563 条（13:47）、`l` 545 MB / 6562 条（13:39）、`tt` 519.9 MB / 6597 条（19:35）。
+      **真源 Real Luker 的插件产包仍未跑通**（被 `research/browser-fetch-stall-and-run-log.json` 那条
+      浏览器路径问题挡住），留待下一轮（见快照节「待续 3」）*
+- [x] **1.1.2** 与上一轮 `build-packs.cjs` 产出的同名布局包做**条目级比对**
       （复用 `lib/t1-coverage.cjs`）：条目路径集合、条目数、每条 `crc32`
-- [ ] **1.1.3** **判定并落读数** `research/one-step-layout-<layout>.json`：
+      —— *2026-09-29 完成（装置为 `scripts/instance-sync/diff-packs.cjs`，含 `--self-test`）。
+      **`tt` 目标做了一次重基线复核**（原因见下方「本轮新增发现 ②」）：初次比对判 `DIFFERENT`，
+      逐条归因后发现 7 条差异**全部是「源在期间变动」伪影**（今日 §1.3 的实例 `git pull` 改了插件自身目录
+      ⇒ 基线建于拉取前、产物产于拉取后）；改用**同源重基线**（现拉原样包 → `build-packs` 转 tt）后判 **IDENTICAL**。
+      ⇒ `tt` 以重基线读数为准：`research/one-step-layout-tt-rebase.json`*
+- [x] **1.1.3** **判定并落读数** `research/one-step-layout-<layout>.json`：
       - **成立**（条目级一致或差异可解释）⇒ 生产链简化为「插件三布局包一步产出」，
         `build-packs.cjs` 退为**交叉核对装置**（**不删**）
       - **不成立** ⇒ **给出实测理由**（差异清单 + 归因），沿用 `build-packs.cjs`
       - **无论成立与否，结论都要落 spec**（避免下次再试一遍）
+      —— *2026-09-29 判定完成。三目标读数如下（均以 **crc32 逐条**为准，不看体积"看起来像"）：*
+
+      | 目标 | 判定 | 读数 | 唯一差异 |
+      | --- | --- | --- | --- |
+      | `st` | **IDENTICAL** | `research/one-step-layout-st.json` | 无（6563/6563 条逐条全等） |
+      | `l` | **6561/6562 全等** | `research/one-step-layout-l.json` | 根 `manifest.json` 的 **`selection` 字段**（详见 §1.1.3 归因） |
+      | `tt` | **IDENTICAL**（重基线） | `research/one-step-layout-tt-rebase.json` | 无（6597/6597 条逐条全等） |
+
+      **`l` 那条差异的完整归因（本轮查实，修正上一轮的表述）**：
+      `st` / `tt` 两目标的产物**不合成** `manifest.json`（`src/core/transform.js:972` 只在 `TARGETS.L` 分支合成），
+      故只有 `l` 有这个差异面。两侧 `createdAt` **都是** `FIXED_TIMESTAMP`（`2020-01-01T00:00:00.000Z`，
+      当场解包核验，不是推断）⇒ 真正不同的是 `selection.globalExtensions` / `selection.vectors`：
+
+      | 侧 | 装置 | 两键取值 | 取值来源 |
+      | --- | --- | --- | --- |
+      | 插件产物 | 插件「宿主拉取」 | **false / false** | **宿主（源）计划的可用性**：实测 `generatePlan()` 读数为两键 `count = 0` ⇒ `renderCategoryStats()` 按设计置 false 并禁用卡片（`src/ui/category-filter.js:186-205`）；**不是**遗留状态污染（那一版归因已推翻，见 §1.5①） |
+      | `build-packs` 基线 | `convert()` 直调 | **true / true** | 不传 `selection` ⇒ 取 `L_SELECTION` 默认（`transform.js:222-233`） |
+
+      ⇒ **OQ-2 采纳判定：成立**（一步直出在**字节级**等价：6563 / 6561 / 6597 条逐条 `crc32` 全等），
+      且**用户已裁定采纳**（§1.4 问 1），`build-packs.cjs` 退为交叉核对装置。
+      但两侧的 selection 口径**语义不同**（插件记**有效值**，`build-packs` 记**默认值**），
+      故 `l` 的这条元数据差异**不会自动消失**；处置二选一见 §1.4 **问 4**（**待裁定**）。
+      取证：`research/plugin-vs-native-backup.json`、`one-step-layout-{st,l,tt,tt-rebase}.json`*
 
 ### 1.2 OQ-1 / OQ-3：插件产包与宿主原生备份的**口径比对**
 
-- [ ] **1.2.1** 对**同一源**，分别取「插件产物」与「宿主原生备份（`POST /api/users/backup`）」两者
-- [ ] **1.2.2** 条目级比对：数量 / 路径集合 / `crc32`；**不可达条目显式列出**
-- [ ] **1.2.3** 专项核查 `secrets.json` / `settings.json` 的处置（是否被插件打包路径覆盖、
+- [x] **1.2.1** 对**同一源**，分别取「插件产物」与「宿主原生备份（`POST /api/users/backup`）」两者
+      —— *2026-09-29 已完成：a = 插件原样产物（`produce-via-plugin.cjs --raw`，
+      `l_default-user_part1_2026-09-29.zip`，1 271 907 095 B）；b = Node 侧原生备份
+      （`export-backups.cjs`，`backup-dev-luker-20260929-124354.zip`，1 271 907 099 B）*
+- [x] **1.2.2** 条目级比对：数量 / 路径集合 / `crc32`；**不可达条目显式列出**
+      —— *判定 **IDENTICAL**：8061 / 8061 条，**8060 条逐条 `crc32` 全等**，`onlyInA = onlyInB = 0`；
+      唯一差异 1 条 = 根 `manifest.json` 的**请求期时间戳**（按设计不同，已单列不判）。
+      装置 `diff-packs.cjs` 的**字段级**豁免（非按文件名整条放过）—— 上一轮曾因"按文件名豁免"差点吃掉实质差异，
+      本轮核验仍正确豁免。读数：`research/plugin-vs-native-backup.json`*
+- [x] **1.2.3** 专项核查 `secrets.json` / `settings.json` 的处置（是否被插件打包路径覆盖、
       是否被排除）—— **差异显式登记**，不静默
-- [ ] **1.2.4** 读数落 `research/plugin-vs-native-backup.json`
+      —— *两者**都在包内、都未被排除**（`secrets.json` 4452 B、`settings.json` 23 422 236 B），
+      与宿主原生备份逐条一致 ⇒ **差异为零**，无需登记的差异项。
+      `settings.json` 的 22.3 MiB 记为 §6.6「体积不得异常增长」断言的**源包侧基线参考**
+      （注意：那是**源包内**体积，不是目标实例落盘体积）。读数：`research/oq1-native-backup-notes.json`*
+- [x] **1.2.4** 读数落 `research/plugin-vs-native-backup.json`
+      —— *已落；另落 `research/oq1-native-backup-notes.json`（结论与 OQ-3 备注）*
 
 ### 1.3 R-20 前置核对（**硬门禁的实现前身**）
 
@@ -96,8 +140,128 @@
 
 ### 1.4 评审门（**1.1–1.3 的读数回报后再进入 §3**）
 
-- [ ] **1.4.1** 把 1.1 / 1.2 的结论与 1.3 的版本读数**回报用户**，确认「一步直出」是否采纳
+- [x] **1.4.1** 把 1.1 / 1.2 的结论与 1.3 的版本读数**回报用户**，确认「一步直出」是否采纳
+      —— *2026-09-29 已回报（含 §1.5 的四条新发现），**用户裁定尚未返回** ⇒ 本节两项均为「已就绪、待裁定」。
+      待裁定的两问：**(1)** 是否采纳「三布局一步直出」；**(2)** selection 口径怎么钉死（含 §1.5① 的污染修法
+      与 §1.5④ 的同名缺陷，两件并作一处修）*
 - [ ] **1.4.2** 若 1.1 判定成立 ⇒ 更新 `design.md` D2 与本节 §3 的产包实现路径，再继续
+      —— *待 1.4.1 的用户裁定；**裁定前不动** `design.md` D2 与 §3 的路径（避免按未采纳的结论改设计）*
+
+### 1.5 本轮新增发现（2026-09-29 收口取证；**全部当场实测，含被推翻的自测预测**）
+
+#### ① 产包器的 selection 口径：**清初态** + **默认不喂夹具**（**含一次被推翻的归因，如实登记**）
+
+**结论先行（每条都有实测判据）**
+
+| 事实 | 判据 |
+| --- | --- |
+| 插件与 **E2E 共用同一持久化档案**（`e2e/lib/instances.cjs` 的 `PROFILES.dev`）；E2E 留下的 `active_session` 会被 `index.js:2504` 的 `setSelectionState(savedState.selection)` **恢复** | **档案值级取证**：`…/https_127.0.0.1_8003.indexeddb.leveldb/000011.log` 里 `active_session` 指向夹具 `c2fixture-pause-many-st.zip`、带 `globalExtensionsF vectorsF backupsT cacheF`，且其 `fileId` 在 `files` store 的记录**也在** ⇒ 恢复分支（代码要求 `fileRecord && fileRecord.blob`）**确实会走进去**。首次实跑又直接观测到 `{"existed":true,"deleted":true}` |
+| **该遗留状态不是 `l` 那条元数据差异的成因** | **实测**：用仓库自己的纯逻辑 `generatePlan()`（`src/core/plan-preview.js:112`）对真实宿主备份核计划 —— `globalExtensions` count **0**、`vectors` count **0**（对照：`extensions` 5600、`chats` 1242）。⇒ `renderCategoryStats()` 对 `count === 0` 的类目一律 `currentSelection[key] = false` 且 `checkbox.disabled = true`（`src/ui/category-filter.js:186-205`）⇒ 最终 selection 里这两键**必然是 false，与档案状态无关** |
+| 故**上一轮的结论是对的**：源侧不含这两类目 ⇒ manifest 记 false，不是插件的裁剪 | 同上；并与 OQ-2 的 `onlyInB = 0` 互证（false 没剔掉任何条目——本来就一条都没有） |
+
+> ⚠️ **本节中途有一版归因是错的，如实登记**：我曾判定「插件 manifest 的 `globalExtensions`/`vectors: false`
+> 来自遗留状态污染」。**该判定被上表第二行的实测推翻** —— 两条是**独立机制**，且在这个源上
+> 「谁污染都无所谓」（count = 0）。**错在哪**：把「档案里确实有这份状态」与「产物里这两个 false 由它造成」
+> 当成了一件事——**共现有余、因果不足**（本仓 spec §7.3 的同类毛病）。
+
+**修法（已按用户裁定落地于 `scripts/instance-sync/produce-via-plugin.cjs`）**
+
+| 步 | 做法 | 为什么仍然要做 |
+| --- | --- | --- |
+| **清初态** | 删 `workspace` store 的 `active_session` → **重载页面**（`clearWorkspaceState()`；**只动 workspace，不碰 `files`**） | 遗留状态是**真输入**：实测档案里那份带 `backupsT`，而**若**它是 `chats:false` 这类**可用**类目，就会**静默剔掉真实内容**。⇒ 必须消除的隐藏输入（这条与 `count = 0` 那条无关，是两类问题） |
+| **默认不喂夹具** | 只有 `--deselect` 非空才喂探测夹具（`pinSelection()`） | ⚠️ **实测踩点**：喂夹具会让 `renderCategoryStats()` 按**夹具的** `count === 0` 把缺失类目置 false——那是**夹具的**可用性、**不是宿主源的**。第一版修法无条件喂夹具，于是把 `globalExtensions/vectors` 强置 false 却又断言它们必须为 true ⇒ **实跑直接失败**（`mismatch:["globalExtensions","vectors"]`，2026-09-29 20:09） |
+| **取证改为读插件自报值** | 读 `index.js:1533` 的 `勾选类目:` 日志行（`readSentSelection()`） | 「插件到底发了什么」的**直接观测**，优于对模块状态的推断。首次实跑已抓到：`["characters","chats","lorebooks","presets","settings","secrets","assets","extensions","globalExtensions","vectors","backups"]` |
+| **raw 产物加前缀** | `--raw` 时文件名模板加 `raw-` 并回读断言 | 见 ④ |
+
+**⇒ 一处仍未收口的语义差（**这条不会因本次修法消失**）**：插件在 `l` 产物里记的是**有效 selection**
+（源计划驱动，本例两键 false），而 `build-packs` 记的是 `L_SELECTION`（不传 selection ⇒ 全 true）。
+两侧口径**不可能自动一致**。对齐只有两条路：
+**(a)** 让 `build-packs` 也传同一份有效 selection；**(b)** 显式登记为「两侧语义不同，非缺陷」。
+**建议 (b)** —— 插件记的是**真发生了什么**，比"默认值"更准。**此条并入 §1.4 的评审门第 2 问**（原始三问之外的新增项）。
+
+#### ② `OPFS 文件大小` 不是有效的「还在跑吗」信号（**自测踩点，已付代价**）
+
+- 本轮曾按 `.pw-profile-dev/Default/File System/000/t/00/*` 的**大小 + mtime** 判断进度：
+  见其停在 923 MB、8 分钟不动 ⇒ **误判「浏览器停滞」并杀掉了一个其实一直在正常推进的进程**
+  （重跑时靠页内 20 s 心跳才看清：同一步一路传到 ~1213 MB 才收尾）。
+- ⇒ **判存活只认页内心跳**（阶段 + 已接收字节 + 速率）。OPFS 是**惰性落盘**的，体积不能当进度表。
+  （同理，`research/browser-fetch-stall-and-run-log.json` 里那条「真源停滞」结论也值得**用页内心跳复核一次**再定论。）
+
+#### ③ `build-packs.cjs` 的读数落点仍硬编码在上一轮任务目录（**腐化实例，登记不修**）
+
+- 本轮跑 `build-packs.cjs`，它把 `pack-build-readings.json` 写进了
+  `.trellis/tasks/09-26-all-instance-data-sync-e2e/research/`，**覆盖了上一轮的同名读数**。
+- 产包器 `produce-via-plugin.cjs` 已有 `--readings-dir` 专为避此；`build-packs.cjs` 还没。
+  ⇒ 属**上一轮遗留**、不在本任务改动面 ⇒ **此处登记，本任务不修**（避免越界）。
+
+#### ④ `--raw` 与转换产物**同名**（本轮新增脚本自身的缺陷，登记）
+
+- 文件名模板 `{target}_{user}_{part}_{date}.zip` 在 `--raw` 模式下 `target` = 宿主自身布局码，
+  故 `node produce-via-plugin.cjs --source dev-luker --layout l --raw` 与 `… --layout l`
+  产出**同一个文件名** ⇒ 落同一 `--out` 目录时**后者静默覆盖前者**。
+  实测并存的两份只是因 `--out` 不同才都活着：
+  `~/Downloads/l_default-user_part1_2026-09-29.zip`（1 271 907 095 B = **raw**）与
+  `~/Downloads/szc-produce/l_default-user_part1_2026-09-29.zip`（544 871 450 B = **转换后**）。
+- 影响：把 raw 产物误当转换产物做比对 ⇒ 会得到**假 IDENTICAL**（两份都是原样包）。
+  ⇒ **已修**（用户裁定「双保险」时一并处置）：`--raw` 时把 `raw-` 前缀写进文件名模板并**回读断言**
+  （`setKnobs` 的 `filenamePrefix`）；断言不成立即抛错，不再有"静默同名"的可能。
+  ⚠️ **端到端尚未复跑验证**（见下「本轮验证状态」）。
+
+#### ⑤ `includeBackups: false` **只影响转换，不影响拉取**（实测，登记不修）
+
+- 插件自报的实际 selection 里**含 `backups`**（`#include-backups-check` 置 false 并**不驱动** `currentSelection.backups`）
+  ⇒ 宿主照旧把 `backups/` 打进包：计划读数 `backups` count **258 / 1296.9 MB**
+  （`research/` 无此项，装置是 `test-results/diag-plan-categories.mjs`，见下）⇒
+  这才是 Dev Luker 每跑一次要拉 **~1213 MB** 的原因。
+- **影响**：拉取量偏大（真源上就是那条 GB 级 `backups/` 的来路）；**内容无害**（转换按时剔除，
+  实测 `st`/`tt` 均 `IDENTICAL` 且 `onlyInB = 0`）。
+- **登记不修**：属插件侧行为，且修它会改拉取量 ⇒ 需另评估，不在本任务改动面。
+
+#### ⑥ **selection 决定「取数口径」，而取数口径决定内容** —— 一条会改变交付面的规则
+
+- **实测**（见 OQ-2 复核）：插件把 `globalExtensions` 勾上后，宿主**会把全局第三方扩展打进包**，
+  产物因此**多出 323 条** `public/scripts/extensions/third-party/**`；而**宿主原生备份那条路拿不到它们**
+  （`generateNativeBackup` 的请求体是 `JSON.stringify({ handle })`，**不带 selection** ⇒ 吃宿主默认）。
+- ⇒ **推论（本任务的重要一条）**：`build-packs.cjs` 的输入是原生备份 ⇒ **它天然少了全局扩展**；
+  一步直出的产物**可以**包含它们。**两条链路的交付面不同**，不是"谁更对"。
+- ⇒ 因此 **「OQ-2 等价」必须写成带前提的句子**：**在取数口径相同时**才字节级等价。
+  先前三处 `IDENTICAL` 之所以成立，是因为那一版的 selection（被污染的 `globalExtensions:false`）
+  **恰好与宿主默认口径一致** —— 等价是**碰巧**成立的，不是**结构上**成立的。**这条最容易误读，务必写明。**
+
+#### ⑦ 「拉取停顿」是**瞬时**的，不是「功能停滞」（复核 §1.5② 的相邻结论）
+
+- 本次实跑（机器同时被别的会话占用）在 `已接收 1253.9 MB`、`1274.4 MB`、`1282.9 MB` 处**各停顿 40–70 s**
+  （心跳读数 `0.0 MB/s`），**其后都自行恢复并最终收尾成功**（t+1230 s，exit 0）。
+- ⇒ **修正上一轮那条"功能性停滞"的措辞**：至少在本源上是**反复的瞬时停顿**，
+  且**停顿点不固定**（1253.9 / 1274.4 / 1282.9 MB —— 不是某个固定字节数）。
+  与磁盘被别的进程占满的表现一致。**⇒ 追根因前先看机器负载**，别先怀疑代码。
+- ⚠️ 真源（1605 MB）那条 140 s 零字节是否同因，**仍未定**；下一轮在 `:8004` 复跑时**记录机器负载**再判。
+
+#### 本轮的两件**一次性诊断装置**（**scratch，不入库**，落 `test-results/`）
+
+| 文件 | 作用 |
+| --- | --- |
+| `test-results/diag-plan-categories.mjs` | 用仓库自己的 `generatePlan()`（`src/core/plan-preview.js:112`）对**任意包**打印**计划类目计数**——即插件 `renderCategoryStats(plan)` 拿到的同一个 plan。**无需浏览器、秒级**，专门用来回答「某类目在源里到底可不可用」。§1.5① 的 `globalExtensions/vectors = 0` 就是它给的 |
+| （同目录）`plan` 输出的判据 | `count === 0` ⇔ 插件会把该键置 false 且禁用卡片 ⇒ **不可自动对齐** |
+
+#### 本轮验证状态（**代码已落地，端到端尚未复跑 —— 不得宣称验证完成**）
+
+| 项 | 状态 |
+| --- | --- |
+| 语法 `node --check` | ✅ 通过 |
+| 启动期断言三负例（无 `--source` → exit 2；未知 id → 非零退出且列出可用 id；`--raw` 与布局不符 → exit 2） | ✅ 已验 |
+| 清初态生效 | ✅ 已实测（`{"existed":true,"deleted":true}` + 已重载） |
+| 「默认不喂夹具」模式 | ✅ 已实测（`mode:module-default-no-fixture`、`ok:true`） |
+| 插件自报 selection 的取证 | ✅ 已实测（抓到含 11 项的那一行） |
+| `--raw` 前缀断言 | ⏳ 未实跑（与"旋钮回读"同一条断言路径，随手一跑即可证） |
+| **完整产包端到端** | ✅ **已完成**（2026-09-29 20:45，exit 0）：`l_default-user_part1_2026-09-29.zip` / **6887 条 / 594.0 MB** / sha256 `2d1143f4…` / t+1230.3 s（其中拉取 t+41→t+1141.7，机器被别的会话占满时速率曾掉到 0.0–0.4 MB/s，期间**多次**停顿后自行恢复） |
+| 「产包在清初态+钉死后**行为正确**」 | ✅ 已验：请求含全部 10 标准键（读自报值）、产物条目与预算**逐条对得上**（见 OQ-2 复核的相互验算）、无插件 console error / 无失败请求 |
+| **产物的 selection 语义与基线不同** | ⚠️ **新发现**（323 条内容差）—— 见 OQ-2 复核；**这不代表改坏**，是"取数口径"差，需用户裁定（问 5） |
+| §7.1 / §7.2 的**连续两次产包**（AC-A2） | ⏳ 未开始（本次只跑了一次；且可重跑性判据要求两次 + 源 mtime 快照配对） |
+
+⇒ **纪律**：上表除「`--raw` 前缀」与「AC-A2 两次产包」外均已绿 ⇒ 本次代码改动**可以提交**，
+但提交信息里必须写明：`--raw` 前缀断言未实跑、AC-A2 未做、以及**问 5 待裁定**。
+`npm test` / 五条静态守卫仍须在提交前跑一次留底（§8.1/§8.2）——本改动只在 `scripts/` 下，预期零回退。
 
 ## 2 备份（**只 Luker 两处**，U-3；**必须先于任何写入**）
 
@@ -172,6 +336,12 @@
       （本轮只产出 1 个产物）⇒ 如实记录删了什么，**不静默删别人的东西*** 
 - [x] **3.9** `--include-backups` **默认关**（沿用上一轮 U-4：`backups/` 不同步）
       —— *已实现（默认关）；`--raw` 模式会**强制打开**（pristine 透传的条件之一）并在输出明示*
+- [x] **3.10**（**本轮追加**，§1.4 用户裁定后）**selection 口径改造**：
+      `clearWorkspaceState()`（清 `active_session` + 重载）＋ `pinSelection()`（默认**不喂夹具**，
+      仅 `--deselect` 非空时才喂）＋ `readSentSelection()`（读插件自报的实际类目）
+      ＋ `--raw` 产物加 `raw-` 前缀并回读断言
+      —— *已落地于 `scripts/instance-sync/produce-via-plugin.cjs`；根因、判据与**一次被推翻的归因**见 §1.5①，
+      验证进度见 §1.5「本轮验证状态」（**端到端尚未复跑 ⇒ 不得宣称完成**）*
 
 ## 4 写入前三道守卫（**必须在任何写入之前全部生效**，`design.md` D4.1）
 
@@ -263,7 +433,7 @@
       推送 `origin`（**不推 upstream**）
 - [ ] **9.5** 在父任务 `prd.md` 的 AC-P2 / AC-P3 / AC-P4 上回填读数
 
-## 本轮进度快照（2026-09-29 13:50 收尾）
+## 本轮进度快照（2026-09-29 19:57 收尾）
 
 > 用途：本任务跨会话续做的**唯一权威状态**。`research/*.json` 被 `.gitignore:59` 覆盖
 > ⇒ **不入版本库**，细节读数只在本机；本节的结论与路径才是可跨机延续的部分。
@@ -272,31 +442,71 @@
 
 - **§0 全部**（基线 `npm test` 610 passed / E2E 281/281 / 五守卫 EXIT=0 / 四实例在听）
 - **§1.3 全部**（四实例 `git pull` 到 `f75c68e`；`origin` 均本仓；读数 `research/instance-plugin-versions.json`）
+  —— *19:00 补充：为过 R-20 门禁，**Dev Luker 的插件目录再次 `git pull` 到 `b87033e`**（工作区 HEAD）。
+  其余三实例仍在 `f75c68e`（**下一次要跑产包的那个实例须先拉到工作区 HEAD**，否则 `assertR20` 拒绝）*
 - **§2 全部**（Real Luker `1605.3 MB / 8698 条 / sha256 de2bc789…`；Dev Luker `1213.0 MB / 8061 条 / sha256 5cadfa39…`；读数 `research/backup-records.json`）
 - **§3 全部**（产包器已落并经实跑验证；见上方 §3 逐条）
-- **§1.2 全部 —— OQ-1/OQ-3 判定 `IDENTICAL`**：插件原样产物 vs 宿主原生备份
-  **8060/8061 条逐条 `crc32` 全等**（仅 Host 请求期 `manifest.json` 的时间戳不同，已单列）。
+- **§1.2 全部 —— OQ-1/OQ-3 判定 `IDENTICAL`（本轮**当场复验**，非照抄）**：插件原样产物 vs 宿主原生备份
+  **8060/8061 条逐条 `crc32` 全等**（仅 Host 请求期 `manifest.json` 的时间戳不同，已单列）；
+  `secrets.json` / `settings.json` **都在包内、都未被排除** ⇒ 差异为零。
   读数 `research/plugin-vs-native-backup.json` + `research/oq1-native-backup-notes.json`
-- **§1.1 部分 —— OQ-2 两个目标已实测（结论见下）**：Dev Luker 三布局的**对照侧**
-  （`build-packs` 基线，源 = 插件自己的原样包 ⇒ **两侧同源、零漂移**）已产出；
-  插件侧 `l`、`st` 已产并比对，`tt` 的产包**本轮已启动、未及比对**（读数见下）
+- **§1.1 全部 —— OQ-2 三目标实测完毕（结论见下）**：Dev Luker 三布局的插件侧包与
+  `build-packs` 基线均已产出并比对；`tt` 因源在期间变动做过一次**同源重基线**复核
 
-### OQ-2 实测结论（2026-09-29）
+### OQ-2 实测结论（2026-09-29，三目标全部收口）
 
 | 目标 | 判定 | 读数 |
 | --- | --- | --- |
 | `st` | **IDENTICAL** —— 6563/6563 条逐条 `crc32` 全等，**零差异** | `research/one-step-layout-st.json` |
 | `l` | **6561/6562 条全等**；唯一差异 = 根 `manifest.json` 的 `selection` 字段 | `research/one-step-layout-l.json` |
-| `tt` | 产包进行中（`st` 完成后自动接续）⇒ 用下面这条命令收口 | 待落 `research/one-step-layout-tt.json` |
+| `tt` | 初次判 `DIFFERENT`（7 条）⇒ 查实为**源变动伪影** ⇒ **同源重基线后 IDENTICAL**（6597/6597） | `research/one-step-layout-tt.json`（初次）+ **`-tt-rebase.json`（为准）** |
 
-```bash
-# tt 收口（一条命令；产包完成后再跑）
-node scripts/instance-sync/diff-packs.cjs \
-  --a ~/Downloads/szc-produce/tt_default-user_part1_2026-09-29.zip \
-  --b ~/Downloads/szc-produce/pack-tt-nodate.zip \
-  --out .trellis/tasks/09-27-plugin-driven-instance-sync/research/one-step-layout-tt.json \
-  --label "OQ-2：插件一步直出 tt vs build-packs(tt)"
-```
+> ⚠️ **上表三行有一个共同前提：插件当时发的 selection 是「被遗留状态污染」的那一份**
+> （`globalExtensions:false` / `vectors:false`），**它恰好与宿主原生备份的默认口径一致**。
+> ⇒ 三行量的是「**取数口径一致时**转换器是否等价」，**不是**「一步直出与现行链路等价」。见下。
+
+### OQ-2 **复核**（selection 清初态 + 钉死之后，2026-09-29 20:45）—— **结论被修正，差异是"内容级"的**
+
+| 项 | 读数 |
+| --- | --- |
+| 装置 | `--source dev-luker --layout l`（清初态 + 默认不喂夹具）⇒ 产物 594.0 MB / **6887 条** |
+| 对侧 | **同源**重基线 `pack-luker-nodate.zip`（源状态同为 `b87033e`）|
+| 判定 | **`DIFFERENT` —— 323 条仅 A / 0 条仅 B / 1 条内容不同** |
+| 那 323 条是 | **`public/scripts/extensions/third-party/<ext>/.git/**`**（`config` / `HEAD` / `index` / `objects/pack/*.idx`/`*.pack` / `refs/**`）——即**全局第三方扩展** |
+| 那 1 条是 | 根 `manifest.json` 的 `selection`（老问题） |
+| 读数 | `research/one-step-layout-l-pinned.json` |
+
+**因果链（每环都有实测）**：
+① 清初态后插件发的请求含 `globalExtensions`（**读插件自报值**：
+`["characters",…,"extensions","globalExtensions","vectors","backups"]`）
+⇒ ② 宿主照此把全局扩展打进包（因而本次拉取量比先前大）
+⇒ ③ 插件转换后产物**含**这 323 条；
+而 ④ 基线的源是**宿主原生备份**，那条路径**默认不含**全局扩展
+（实测 `generatePlan()` 对原生备份读数：`globalExtensions` **count 0**；OQ-1 的原地扫掠也得同一结论）
+⇒ ⑤ 于是 A ⊆ B 不再成立，**A ⊋ B**。
+
+**相互验算（说明这不是"多测了别的东西"）**：旧 `l` 6562 条 + 本次新出现的 2 个插件自身脚本（`4e5390c`）
++ 323 条全局扩展 = **6887** 条，与实测**逐条对上**。
+
+⇒ **OQ-2 的准确结论（替换掉"完全等价"那一版）**：
+
+> **一步直出与 `build-packs` 在「取数口径相同」时字节级等价**（6563 / 6561 / 6597 条逐条 `crc32` 全等）；
+> **但两侧的取数口径由 selection 决定**：插件**可以**要全局扩展（`globalExtensions:true`），
+> 而**宿主原生备份这条路拿不到**它们。⇒ 「等价」**有前提**：**先对齐取数口径**。
+> 若采纳一步直出而 selection 用模块默认（全 true），同步链交付的内容会**比现行链路多出全局扩展**。
+
+**⇒ 这是一条新的、需要用户裁定的事**（§1.4 **问 5**）：同步链**要不要**这 323 条全局扩展。
+
+**`tt` 那次 `DIFFERENT` 的完整归因（本轮查实，可复算）**：7 条差异**全部**落在
+`data/extensions/third-party/st-zip-converter/**`（即**插件自身目录**）或其**自身版本记录**上 ——
+2 条仅 A = 提交 `4e5390c` 新增的 `scripts/instance-sync/{diff-packs,produce-via-plugin}.cjs`；
+5 条内容不同 = `.git/index`、`.git/refs/heads/main`、`.trellis/…/task.json`、
+`.trellis/…/implement.md`（32242→16635 = **CRLF 检出**，391 行恰好 +391 字节）、
+`data/_tauritavern/extension-sources/global/st-zip-converter.json`（插件**自记版本**随 pull 改变）。
+成因：基线建于 13:24（拉取前）、tt 产于 19:35（拉取后）——**正是今日 §1.3 的实例 `git pull`**。
+⇒ 处置按 `design.md` D6：**源在期间变动 ⇒ 换同源基线重测**，而不是手工把差异逐条"解释掉"
+（后者就是 spec §7.3 记的「白名单一路长大到把判定吃光」）。重基线后 **零差异**。
+⚠️ 另记：`onlyInB = 0` 这一条本身也有独立价值 —— 它证明**基线侧内容零缺失**。
 
 ⚠️ **`l` 的那条差异**不是**请求期时间戳** —— 解包核验后发现两侧 `createdAt` **都是** `FIXED_TIMESTAMP`
 （`2020-01-01T00:00:00.000Z`），真正不同的是 **`selection` 字段**：
@@ -306,15 +516,21 @@ node scripts/instance-sync/diff-packs.cjs \
 | 插件产物 | **false** | **false** |
 | `build-packs` 基线 | true | true |
 
-**归因**：`build-packs` 不传 `selection` ⇒ 取 `L_SELECTION`（`transform.js:223-234`，10 键全 true）；
-而插件把**它自己实际用的 selection** 记进去 —— 实测为 `globalExtensions:false, vectors:false`
-（与宿主原生备份 `manifest.json` 里记的**同一组**值一致，见 OQ-1 的读数）。
+**归因（**先写错过一版，这里是对的**，取证见 §1.5①）**：`build-packs` 不传 `selection` ⇒ 取 `L_SELECTION`
+（`transform.js:222-233`，10 键全 true），该侧已由重基线产物**解包复核**为 true/true；
+插件侧那对 false 则来自**宿主（源）计划** —— 实测 `generatePlan()` 对真实备份的读数是
+`globalExtensions` **count 0**、`vectors` **count 0**，而 `renderCategoryStats()` 对 `count === 0`
+的类目一律置 false 且禁用卡片（`src/ui/category-filter.js:186-205`）⇒ **插件记的是它实际用的「有效 selection」**。
+⇒ 两侧不是"谁有 bug"，而是**语义不同**：插件记**有效值**，`build-packs` 记**默认值**。
+（**注意**：我中途曾把这对 false 归因于"持久化档案遗留状态污染"——**那是错的**，两条机制独立，已如实登记在 §1.5①。）
 `st`/`tt` 目标**不合成** `manifest.json`（`transform.js:972` 只在 `TARGETS.L` 分支合成）
-⇒ 那两处没有这个差异面，`st` 因此是完全一致。
+⇒ 那两处没有这个差异面，故 `st` 完全一致、`tt` 重基线后也完全一致。
+`st`/`tt` 目标**不合成** `manifest.json`（`transform.js:972` 只在 `TARGETS.L` 分支合成）
+⇒ 那两处没有这个差异面，故 `st` 完全一致、`tt` 重基线后也完全一致。
 
-⇒ **OQ-2 的意义正在于此**：转换器一步直出在**字节级等价**（6563 条全同 / 6561 条全同），
+⇒ **OQ-2 的结论**：一步直出在**字节级等价**（6563 / 6561 / 6597 条逐条 `crc32` 全等，差异仅 1 处元数据），
 但**两侧的 selection 口径并不天然一致**，且会被写进 `l` 目标的产物元数据。
-同步链若采纳一步直出，**必须显式对齐 selection**，不能吃某一侧的默认。
+**采纳与否 + selection 怎么钉死，见 §1.4 评审门（两问待用户裁定）。**
 
 > **一处被推翻的自测预测（如实登记）**：定稿前的预测是「三目标都应 IDENTICAL，因为
 > `manifest.json` 用 `FIXED_TIMESTAMP`」。**预测部分正确（时间戳确实固定）、部分错误
@@ -331,7 +547,7 @@ node scripts/instance-sync/diff-packs.cjs \
 | `scripts/instance-sync/produce-via-plugin.cjs` | 插件驱动产包器（§3 的全部契约；含 R-20 硬门禁、端口纪律、`--deselect` 类目收窄） |
 | `scripts/instance-sync/diff-packs.cjs` | 包↔包**条目级**比对（路径集合 + 逐条 `crc32`；含 `--self-test` 自检与请求期元数据单列） |
 
-### 一条**新的功能性发现**（阻塞级，已绕开，未定位根因）
+### 一条**新的功能性发现**（阻塞级，已绕开，未定位根因 —— ⚠️ 判据有疑，见 §1.5②）
 
 **插件在浏览器里拉取含 GB 级 `backups/` 的宿主包时会功能性停滞**：真源 Real Luker
 实测 `已接收 1281.9 MB` 之后**连续 140 s 零字节**；而**同一端点**经 Node 侧流式接收
@@ -340,27 +556,44 @@ node scripts/instance-sync/diff-packs.cjs \
 本工具在真源上**不可用**。已实现 `--deselect` 绕开；根因（OPFS 写入 / checkpoint / 流式背压）
 **未定位**，留作后续。细节与实测序列见 `research/browser-fetch-stall-and-run-log.json`。
 
+> ⚠️ **本轮给这条结论加了一个前提**：那次「零字节」是怎么读出来的？若是按 **OPFS 体积**
+> 读的，则**不能作为停滞证据**（§1.5② 已实测：OPFS 是惰性落盘，本轮据此误杀过一个**在正常推进**的进程）。
+> ⇒ **下一个碰它的人：先用页内 20 s 心跳复现一次，再决定要不要继续追这个根因。**
+
 ### 待续（下一轮从这里接）
 
-1. **§1.1 收口（剩两个目标）**：`--source dev-luker --layout st` 与 `--layout tt` 的产包 + 比对
-   ⇒ 落 `research/one-step-layout-st.json` / `-tt.json`。
-   按 `l` 的实测推断，差异应当**同样只落在 `manifest.json` 的 `selection`**（`st`/`tt` 目标不合成
-   `manifest.json`，故也可能**完全一致**）；**以实测为准，不要照抄这条推断**。
-2. **下一步的关键决策（需用户裁定）**：一步直出若采纳，`selection` 口径必须显式对齐
-   —— 是「插件侧按宿主默认收窄」还是「`build-packs` 侧补上同样的 selection」，
-   两条路产出不同元数据，且影响下游（`globalExtensions`/`vectors` 是否入包）。
-   这是 §1.4 评审门要问的第一件事。
-3. **A1.2 的真源要求**：本轮 OQ-2 在 Dev Luker 上做（§1.1.1 明文允许「先用 Dev 走通」）；
-   **真源 Real Luker 的插件产包尚未跑通**（被上面那条停滞挡住）。下一轮用
-   `--deselect settings` 在 `:8004` 补做，并对齐基线源（真源可用
-   `--source real-luker --layout l --raw --deselect settings` 快速取得同源基线）。
-4. **§1.4 评审门**：把 1.1/1.2 结论回报用户、确认「一步直出」是否采纳（**尚未开**）。
-5. **§4–§6**：三道写入前守卫、搬运灌入、核对（**尚未开始**；§5 写入是唯一不可逆环节）。
-6. **§7–§9**：可重跑性（AC-A2 需连续两次产包 + 源 mtime 快照配对）、质量门、规范落库。
-   ⚠️ 其中「**插件的 selection 可能被持久化档案恢复**」是一条**尚未查证的嫌疑**
-   （`restoreWorkspaceState` 里确有 `setSelectionState(savedState.selection)`，
-   且本轮读数记的 `globalExtensions:false` 与模块默认的 `true` **不一致**）
-   ⇒ AC-A2 的可重跑性必须先查证这一点（做法：清 `active_session` 前后各跑一次，比对 selection 回读）。
+0. **⚠️ 跑产包前先过 R-20**：把**要用的那个实例**的插件目录 `git pull` 到工作区 HEAD
+   （`git -C <实例插件目录> rev-parse --short HEAD` 须 == 工作区 `HEAD`）。
+   本轮实测：工作区已到 `b87033e`，只有 Dev Luker 跟上了；**其余三实例仍在 `f75c68e`**，
+   直接跑会被 `assertR20` 拒绝（这是门禁的**预期行为**，不是故障）。
+1. **§1.4 评审门（待用户裁定 —— 阻塞后续全部步骤）**：
+   **(问 1)** 是否采纳「三布局一步直出」—— ✅ **已裁定：采纳**；
+   **(问 2)** selection 口径怎么钉死 —— ✅ **已裁定：双保险（清初态 + 显式钉死）**，**代码已落地**（§3.10）；
+   **(问 3)** 真源 Real Luker 的插件产包何时做 —— ✅ **已裁定：下一轮**；
+   **(问 4 · 本轮新增)** §1.5① 末尾那处**收不掉的语义差**怎么处置：**(a)** 让 `build-packs` 补同一份有效 selection，
+   还是 **(b)** 显式登记为「两侧语义不同，非缺陷」（**建议 (b)**）—— **待裁定**；
+   **(问 5 · 本轮新增，材料更重)** 同步链**要不要全局第三方扩展**（`public/scripts/extensions/third-party/**`，实测 323 条）：
+   **(a)** 要 —— 一步直出 + selection 全 true，交付面比现行链路**大**，目标实例会拿到源的全局扩展；
+   **(b)** 不要 —— 生产链对齐现行口径（`--deselect globalExtensions`），保持"与 build-packs 等价"的可验证性；
+   **(c)** 要，但只在**部分目标**要（如 Luker 目标要、ST 目标不要）—— 需逐目标定。
+   ⚠️ **这一问影响交付内容本身**（不是元数据）⇒ 未裁定前**不得**把"一步直出"写进生产链。**待裁定**。
+2. **A1.2 的真源要求**：本轮 OQ-2 在 Dev Luker 上做（§1.1.1 明文允许「先用 Dev 走通」）；
+   **真源 Real Luker 的插件产包仍未跑通**。下一轮在 `:8004` 补做（先 `git pull` 过 R-20），
+   基线源用 `--source real-luker --layout l --raw --deselect settings` 快速取得同源原样包。
+   ⚠️ 但先读 §1.5②：那条「真源停滞」是**用 OPFS 体积**判出来的，**须用页内心跳复核后再定论**。
+3. **§4–§6**：三道写入前守卫（链接守卫 / 只读快照 / **宿主源码禁改断言**）、搬运灌入、核对
+   （**尚未开始**；§5 写入是唯一不可逆环节，且 §4 三道守卫必须在写入前全部生效）。
+4. **§7–§9**：可重跑性（AC-A2 需连续两次产包 + 源 mtime 快照配对）、质量门、规范落库。
+   ⚠️ 两条与 selection 相关的注意：
+   - 「遗留状态会被恢复」**已查实**（§1.5①，含值级档案取证）⇒ **已用清初态消除**；AC-A2 的两次产包
+     因此不再受"期间档案被别的装置改"影响；
+   - 但 `globalExtensions`/`vectors` 的 false 是**宿主计划驱动**（count = 0，已实测）⇒ **与 AC-A2 无关**，
+     别把它当成可重跑性问题去查。
+5. **§9.1 规范落库时**，§1.5 四条发现都各有可落条文：
+   ① 属「跨装置共用持久化档案 ⇒ 静默污染」类（**建议落 `instance-e2e-and-data-sync.md`**）；
+   ② 属「判存活只认页内心跳」类（同页，与既有的"速度塌方"条目并列）；
+   ③ 属「读数落点硬编码」类（已有同类坑，补一条实例）；
+   ④ 属「产物命名须能区分 raw 与目标布局」类（同页）。
 
 ### 本轮**未**触碰的边界（如实登记）
 
