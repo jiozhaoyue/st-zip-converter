@@ -277,15 +277,28 @@
 - **§1.2 全部 —— OQ-1/OQ-3 判定 `IDENTICAL`**：插件原样产物 vs 宿主原生备份
   **8060/8061 条逐条 `crc32` 全等**（仅 Host 请求期 `manifest.json` 的时间戳不同，已单列）。
   读数 `research/plugin-vs-native-backup.json` + `research/oq1-native-backup-notes.json`
-- **§1.1 部分 —— OQ-2 目标 `l` 已实测（结论见下）**：Dev Luker 三布局的**对照侧**
+- **§1.1 部分 —— OQ-2 两个目标已实测（结论见下）**：Dev Luker 三布局的**对照侧**
   （`build-packs` 基线，源 = 插件自己的原样包 ⇒ **两侧同源、零漂移**）已产出；
-  插件侧 `l` 已产并比对，`st` 在跑，`tt` 未开始
+  插件侧 `l`、`st` 已产并比对，`tt` 的产包**本轮已启动、未及比对**（读数见下）
 
-### OQ-2 实测结论（目标 `l`，2026-09-29）
+### OQ-2 实测结论（2026-09-29）
 
-**条目级：6561/6562 条逐条 `crc32` 全等；0 条仅 A、0 条仅 B。唯一差异是根 `manifest.json`。**
+| 目标 | 判定 | 读数 |
+| --- | --- | --- |
+| `st` | **IDENTICAL** —— 6563/6563 条逐条 `crc32` 全等，**零差异** | `research/one-step-layout-st.json` |
+| `l` | **6561/6562 条全等**；唯一差异 = 根 `manifest.json` 的 `selection` 字段 | `research/one-step-layout-l.json` |
+| `tt` | 产包进行中（`st` 完成后自动接续）⇒ 用下面这条命令收口 | 待落 `research/one-step-layout-tt.json` |
 
-⚠️ **这条差异**不是**请求期时间戳** —— 解包核验后发现两侧 `createdAt` **都是** `FIXED_TIMESTAMP`
+```bash
+# tt 收口（一条命令；产包完成后再跑）
+node scripts/instance-sync/diff-packs.cjs \
+  --a ~/Downloads/szc-produce/tt_default-user_part1_2026-09-29.zip \
+  --b ~/Downloads/szc-produce/pack-tt-nodate.zip \
+  --out .trellis/tasks/09-27-plugin-driven-instance-sync/research/one-step-layout-tt.json \
+  --label "OQ-2：插件一步直出 tt vs build-packs(tt)"
+```
+
+⚠️ **`l` 的那条差异**不是**请求期时间戳** —— 解包核验后发现两侧 `createdAt` **都是** `FIXED_TIMESTAMP`
 （`2020-01-01T00:00:00.000Z`），真正不同的是 **`selection` 字段**：
 
 | 侧 | `globalExtensions` | `vectors` |
@@ -296,17 +309,19 @@
 **归因**：`build-packs` 不传 `selection` ⇒ 取 `L_SELECTION`（`transform.js:223-234`，10 键全 true）；
 而插件把**它自己实际用的 selection** 记进去 —— 实测为 `globalExtensions:false, vectors:false`
 （与宿主原生备份 `manifest.json` 里记的**同一组**值一致，见 OQ-1 的读数）。
+`st`/`tt` 目标**不合成** `manifest.json`（`transform.js:972` 只在 `TARGETS.L` 分支合成）
+⇒ 那两处没有这个差异面，`st` 因此是完全一致。
 
-⇒ **这就是 OQ-2 的意义所在**：转换器本身一步直出是等价的（6561 条字节级全同），
-但**两侧的 selection 口径并不天然一致**，它会被写进产物元数据。
+⇒ **OQ-2 的意义正在于此**：转换器一步直出在**字节级等价**（6563 条全同 / 6561 条全同），
+但**两侧的 selection 口径并不天然一致**，且会被写进 `l` 目标的产物元数据。
 同步链若采纳一步直出，**必须显式对齐 selection**，不能吃某一侧的默认。
 
 > **一处被推翻的自测预测（如实登记）**：定稿前的预测是「三目标都应 IDENTICAL，因为
-> `manifest.json` 用 `FIXED_TIMESTAMP`」。**预测部分正确（时间戳确实是固定的）、部分错误
-> （差异另有其因）**。而且第一版比对器把 `manifest.json` **按文件名整条豁免**，
+> `manifest.json` 用 `FIXED_TIMESTAMP`」。**预测部分正确（时间戳确实固定）、部分错误
+> （`l` 的差异另有其因：`selection`）**。而且第一版比对器把 `manifest.json` **按文件名整条豁免**，
 > 差点把这条实质差异**吃掉**——正是本仓 spec §7.3 记的「白名单会一路长大到把判定吃光」。
 > 已修为**字段级判定**（仅当差异**只**落在 `createdAt` 这类请求期字段上才豁免，
-> 否则照实计入并报出**具体字段名**）；修后 `--self-test` 仍 IDENTICAL、OQ-1 仍正确豁免。
+> 否则照实计入并报出**具体字段名**）；修后 `--self-test` 仍 IDENTICAL、OQ-1 仍正确豁免请求期字段。
 
 
 ### 本轮新增的两件交品物（入库）
